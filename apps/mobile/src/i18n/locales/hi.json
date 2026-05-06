@@ -1,0 +1,18 @@
+{
+  "auth": {
+    "name": "नाम",
+    "phone": "मोबाइल नंबर",
+    "password": "पासवर्ड",
+    "login": "लॉगिन",
+    "register": "रजिस्टर",
+    "registerCta": "खाता नहीं है? रजिस्टर करें",
+    "loginCta": "पहले से खाता है? लॉगिन करें"
+  },
+  "common": {
+    "continue": "जारी रखें"
+  },
+  "profile": {
+    "language": "भाषा चयन",
+    "logout": "लॉगआउट"
+  }
+}
