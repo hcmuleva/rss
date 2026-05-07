@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -201,6 +201,7 @@ export const HomeScreen = (): React.JSX.Element => {
     return Array.from(map.values());
   }, [assignedCards]);
   const visibleCards = isUser ? [...defaultCards, ...dedupedAssignedCards] : [...defaultCards, ...dedupedAssignedCards];
+  const [viewMode, setViewMode] = React.useState<'cards' | 'table'>('cards');
 
   const onCardPress = (card: { titleEn: string; nodeId?: string | null; assignmentKey?: string }) => {
     const params = { nodeId: card.nodeId ?? undefined, assignmentKey: card.assignmentKey };
@@ -236,24 +237,57 @@ export const HomeScreen = (): React.JSX.Element => {
         <Ionicons name="sparkles-outline" size={18} color={Colors.primary} />
         <Text style={styles.introText}>Welcome back. Your assigned modules are ready for update.</Text>
       </View>
-      <FlatList
-        data={visibleCards}
-        renderItem={({ item }) => (
-          <FlatListCard
-            titleHi={item.titleHi}
-            titleEn={item.titleEn}
-            area={item.area}
-            level={item.level}
-            icon={item.icon}
-            onPress={() => onCardPress(item)}
-          />
-        )}
-        keyExtractor={(item) => item.id}
-        initialNumToRender={8}
-        maxToRenderPerBatch={8}
-        windowSize={7}
-        removeClippedSubviews
-      />
+      <View style={styles.viewToggleRow}>
+        <TouchableOpacity style={[styles.viewToggleBtn, viewMode === 'cards' && styles.viewToggleBtnActive]} onPress={() => setViewMode('cards')}>
+          <Text style={[styles.viewToggleText, viewMode === 'cards' && styles.viewToggleTextActive]}>Cards</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.viewToggleBtn, viewMode === 'table' && styles.viewToggleBtnActive]} onPress={() => setViewMode('table')}>
+          <Text style={[styles.viewToggleText, viewMode === 'table' && styles.viewToggleTextActive]}>Table</Text>
+        </TouchableOpacity>
+      </View>
+      {viewMode === 'cards' ? (
+        <FlatList
+          data={visibleCards}
+          renderItem={({ item }) => (
+            <FlatListCard
+              titleHi={item.titleHi}
+              titleEn={item.titleEn}
+              area={item.area}
+              level={item.level}
+              icon={item.icon}
+              onPress={() => onCardPress(item)}
+            />
+          )}
+          keyExtractor={(item) => item.id}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews
+        />
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View>
+            <View style={[styles.tableRow, styles.headerRow]}>
+              <Text style={[styles.cell, styles.wModule, styles.headerText]}>Module</Text>
+              <Text style={[styles.cell, styles.wArea, styles.headerText]}>Area</Text>
+              <Text style={[styles.cell, styles.wLevel, styles.headerText]}>Level</Text>
+              <Text style={[styles.cell, styles.wAction, styles.headerText]}>Action</Text>
+            </View>
+            {visibleCards.map((item) => (
+              <View key={item.id} style={styles.tableRow}>
+                <Text style={[styles.cell, styles.wModule]}>{item.titleEn}</Text>
+                <Text style={[styles.cell, styles.wArea]}>{item.area}</Text>
+                <Text style={[styles.cell, styles.wLevel]}>{item.level}</Text>
+                <View style={[styles.cell, styles.wAction]}>
+                  <TouchableOpacity style={styles.openBtn} onPress={() => onCardPress(item)}>
+                    <Text style={styles.openText}>Open</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+      )}
     </View>
   );
 };
@@ -280,5 +314,20 @@ const styles = StyleSheet.create({
     color: Colors.secondary,
     fontSize: 13,
     fontWeight: '600'
-  }
+  },
+  viewToggleRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  viewToggleBtn: { flex: 1, borderWidth: 1, borderColor: '#d9dde7', borderRadius: 10, backgroundColor: '#fff', paddingVertical: 8, alignItems: 'center' },
+  viewToggleBtnActive: { borderColor: '#c6d7ff', backgroundColor: '#edf3ff' },
+  viewToggleText: { color: Colors.textSecondary, fontWeight: '700' },
+  viewToggleTextActive: { color: Colors.secondary },
+  tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor: '#fff' },
+  headerRow: { backgroundColor: '#f5f7fb' },
+  headerText: { fontWeight: '700', color: Colors.secondary },
+  cell: { padding: 10, color: Colors.textPrimary, fontSize: 12 },
+  wModule: { width: 140 },
+  wArea: { width: 260 },
+  wLevel: { width: 90 },
+  wAction: { width: 100 },
+  openBtn: { backgroundColor: '#edf3ff', borderRadius: 6, paddingVertical: 6, paddingHorizontal: 10, alignSelf: 'flex-start' },
+  openText: { color: Colors.secondary, fontWeight: '700', fontSize: 12 }
 });

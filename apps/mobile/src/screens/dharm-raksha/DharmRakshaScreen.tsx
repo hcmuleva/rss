@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createDharmRakshaEntry, getDharmRakshaEntries } from '@/api/dharmRaksha.api';
 import { getUsers } from '@/api/users.api';
 import { DottedAddCard } from '@/components/DottedAddCard';
+import { FormDialog } from '@/components/FormDialog';
 import { MediaUploader } from '@/components/MediaUploader';
 import { ScreenTopBar } from '@/components/ScreenTopBar';
 import { Colors } from '@/constants/colors';
@@ -41,11 +42,14 @@ export const DharmRakshaScreen = (): React.JSX.Element => {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <ScreenTopBar title="Dharm Raksha Samiti" />
-      {!showForm ? (
-        <DottedAddCard label="Dharm Raksha Entry Form" onPress={() => setShowForm(true)} />
-      ) : (
-        <View style={styles.formCard}>
-          <Text style={styles.formTitle}>Create Dharm Raksha Entry</Text>
+      <DottedAddCard label="Dharm Raksha Entry Form" onPress={() => setShowForm(true)} />
+      <FormDialog
+        visible={showForm}
+        title="Create Dharm Raksha Entry"
+        submitLabel="Save Entry"
+        onClose={() => setShowForm(false)}
+        onSubmit={() => void createMutation.mutateAsync({ ...form, assignedUserIds: isAdminRole ? form.assignedUserIds : undefined })}
+      >
           <FieldLabel text="Node ID" />
           <TextInput style={styles.input} value={form.nodeId} onChangeText={(v) => setForm((p) => ({ ...p, nodeId: v }))} />
           <FieldLabel text="Category" />
@@ -79,9 +83,7 @@ export const DharmRakshaScreen = (): React.JSX.Element => {
             </>
           ) : null}
           <MediaUploader value={form.mediaUrls} onChange={(urls) => setForm((prev) => ({ ...prev, mediaUrls: urls }))} label="Samiti Media" />
-          <View style={styles.actionsRow}><TouchableOpacity style={[styles.actionButton, styles.cancelBtn]} onPress={() => setShowForm(false)}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[styles.actionButton, styles.saveBtn]} onPress={() => void createMutation.mutateAsync({ ...form, assignedUserIds: isAdminRole ? form.assignedUserIds : undefined })}><Text style={styles.saveText}>Save Entry</Text></TouchableOpacity></View>
-        </View>
-      )}
+      </FormDialog>
 
       <Text style={styles.sectionTitle}>Dharm Raksha Entries</Text>
       {rows.map((item) => (
@@ -98,8 +100,6 @@ export const DharmRakshaScreen = (): React.JSX.Element => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   content: { padding: 16 },
-  formCard: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#e6e6e9', padding: 12, marginBottom: 10 },
-  formTitle: { fontWeight: '800', color: Colors.secondary, marginBottom: 8 },
   label: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginBottom: 4 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, marginBottom: 8, backgroundColor: '#fff' },
   assignWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
@@ -107,12 +107,6 @@ const styles = StyleSheet.create({
   assignChipActive: { borderColor: '#b8cdfc', backgroundColor: '#edf3ff' },
   assignChipText: { fontSize: 12, color: Colors.textSecondary },
   assignChipTextActive: { color: Colors.secondary, fontWeight: '700' },
-  actionsRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  actionButton: { flex: 1, borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
-  cancelBtn: { backgroundColor: '#eef1f6' },
-  saveBtn: { backgroundColor: Colors.primary },
-  cancelText: { color: Colors.secondary, fontWeight: '700' },
-  saveText: { color: '#fff', fontWeight: '700' },
   sectionTitle: { marginTop: 14, marginBottom: 8, fontWeight: '700', fontSize: 16, color: Colors.secondary },
   rowCard: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e6e8ef', borderRadius: 10, padding: 10, marginBottom: 8 },
   rowTitle: { fontWeight: '700', color: Colors.secondary },

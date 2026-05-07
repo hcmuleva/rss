@@ -13,6 +13,7 @@ const createUserSchema = z.object({
   password: z.string().min(6),
   role: z.enum(['ADMIN', 'USER']),
   assignedNodeId: z.string().min(1),
+  photoUrl: z.string().url().optional(),
   isFullTime: z.boolean().optional()
 });
 
@@ -22,6 +23,7 @@ const updateUserSchema = z.object({
   password: z.string().min(6).optional(),
   role: z.enum(['ADMIN', 'USER']),
   assignedNodeId: z.string().min(1),
+  photoUrl: z.string().url().optional(),
   isFullTime: z.boolean().optional()
 });
 
@@ -37,9 +39,10 @@ usersRouter.get('/', authMiddleware, (_req, res) => {
       phone: string;
       role: 'SUPER_ADMIN' | 'ADMIN' | 'USER';
       assigned_node_id: string;
+      photo_url: string | null;
       is_active: boolean;
       is_full_time: boolean;
-    }>('SELECT id, name, phone, role, assigned_node_id, is_active, is_full_time FROM users ORDER BY id');
+    }>('SELECT id, name, phone, role, assigned_node_id, photo_url, is_active, is_full_time FROM users ORDER BY id');
     res.json(
       rows.map((row) => ({
         id: row.id,
@@ -47,6 +50,7 @@ usersRouter.get('/', authMiddleware, (_req, res) => {
         phone: row.phone,
         role: row.role,
         assignedNodeId: row.assigned_node_id,
+        photoUrl: row.photo_url ?? undefined,
         isActive: row.is_active,
         isFullTime: row.is_full_time
       }))
@@ -82,9 +86,9 @@ usersRouter.post('/', authMiddleware, (req: AuthRequest, res) => {
     const id = await nextId('u', 'users');
     const isFullTime = parsed.data.isFullTime ?? false;
     await db.query(
-      `INSERT INTO users (id, name, phone, password, role, assigned_node_id, is_active, is_full_time)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [id, parsed.data.name, parsed.data.phone, parsed.data.password, parsed.data.role, parsed.data.assignedNodeId, true, isFullTime]
+      `INSERT INTO users (id, name, phone, password, role, assigned_node_id, photo_url, is_active, is_full_time)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [id, parsed.data.name, parsed.data.phone, parsed.data.password, parsed.data.role, parsed.data.assignedNodeId, parsed.data.photoUrl ?? null, true, isFullTime]
     );
 
     res.status(201).json({
@@ -93,6 +97,7 @@ usersRouter.post('/', authMiddleware, (req: AuthRequest, res) => {
       phone: parsed.data.phone,
       role: parsed.data.role,
       assignedNodeId: parsed.data.assignedNodeId,
+      photoUrl: parsed.data.photoUrl,
       isActive: true,
       isFullTime
     });
@@ -120,11 +125,12 @@ usersRouter.patch('/:id/status', authMiddleware, (req: AuthRequest, res) => {
       phone: string;
       role: 'SUPER_ADMIN' | 'ADMIN' | 'USER';
       assigned_node_id: string;
+      photo_url: string | null;
       is_active: boolean;
       is_full_time: boolean;
     }>(
       `UPDATE users SET is_active = $1 WHERE id = $2
-       RETURNING id, name, phone, role, assigned_node_id, is_active, is_full_time`,
+       RETURNING id, name, phone, role, assigned_node_id, photo_url, is_active, is_full_time`,
       [parsed.data.isActive, req.params.id]
     );
     const user = updated.rows[0];
@@ -139,6 +145,7 @@ usersRouter.patch('/:id/status', authMiddleware, (req: AuthRequest, res) => {
       phone: user.phone,
       role: user.role,
       assignedNodeId: user.assigned_node_id,
+      photoUrl: user.photo_url ?? undefined,
       isActive: user.is_active,
       isFullTime: user.is_full_time
     });
@@ -186,6 +193,7 @@ usersRouter.patch('/:id', authMiddleware, (req: AuthRequest, res) => {
       phone: string;
       role: 'SUPER_ADMIN' | 'ADMIN' | 'USER';
       assigned_node_id: string;
+      photo_url: string | null;
       is_active: boolean;
       is_full_time: boolean;
     }>(
@@ -194,15 +202,17 @@ usersRouter.patch('/:id', authMiddleware, (req: AuthRequest, res) => {
            phone = $2,
            role = $3,
            assigned_node_id = $4,
-           is_full_time = COALESCE($5, is_full_time),
-           password = COALESCE($6, password)
-       WHERE id = $7
-       RETURNING id, name, phone, role, assigned_node_id, is_active, is_full_time`,
+           photo_url = COALESCE($5, photo_url),
+           is_full_time = COALESCE($6, is_full_time),
+           password = COALESCE($7, password)
+       WHERE id = $8
+       RETURNING id, name, phone, role, assigned_node_id, photo_url, is_active, is_full_time`,
       [
         parsed.data.name,
         parsed.data.phone,
         parsed.data.role,
         parsed.data.assignedNodeId,
+        parsed.data.photoUrl ?? null,
         parsed.data.isFullTime ?? null,
         parsed.data.password ?? null,
         req.params.id
@@ -216,6 +226,7 @@ usersRouter.patch('/:id', authMiddleware, (req: AuthRequest, res) => {
       phone: row.phone,
       role: row.role,
       assignedNodeId: row.assigned_node_id,
+      photoUrl: row.photo_url ?? undefined,
       isActive: row.is_active,
       isFullTime: row.is_full_time
     });

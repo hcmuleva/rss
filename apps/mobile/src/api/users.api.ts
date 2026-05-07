@@ -4,6 +4,7 @@ export interface AdminUserRow {
   id: string;
   name: string;
   phone: string;
+  photoUrl?: string;
   role: 'SUPER_ADMIN' | 'ADMIN' | 'USER';
   assignedNodeId: string;
   isActive: boolean;
@@ -21,6 +22,7 @@ export interface CreateUserPayload {
   password: string;
   role: 'ADMIN' | 'USER';
   assignedNodeId: string;
+  photoUrl?: string;
   isFullTime?: boolean;
 }
 
@@ -35,6 +37,7 @@ export interface UpdateUserPayload {
   password?: string;
   role: 'ADMIN' | 'USER';
   assignedNodeId: string;
+  photoUrl?: string;
   isFullTime?: boolean;
 }
 

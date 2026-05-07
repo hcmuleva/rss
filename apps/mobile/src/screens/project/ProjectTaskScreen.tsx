@@ -8,6 +8,7 @@ import { createProjectTask, getProjectTaskById, getProjectTasks, ProjectTaskRow,
 import { AvatarGroup } from '@/components/AvatarGroup';
 import { getUsers } from '@/api/users.api';
 import { DottedAddCard } from '@/components/DottedAddCard';
+import { FormDialog } from '@/components/FormDialog';
 import { MediaUploader } from '@/components/MediaUploader';
 import { RecordDetailsModal } from '@/components/RecordDetailsModal';
 import { ScreenTopBar } from '@/components/ScreenTopBar';
@@ -81,11 +82,14 @@ export const ProjectTaskScreen = (): React.JSX.Element => {
       <ScreenTopBar title="Project Tasks" />
       <Text style={styles.subtitle}>Manage project work items with status-driven tracking.</Text>
 
-      {!showCreateForm ? (
-        <DottedAddCard label="Project Task Form" onPress={() => { setEditingId(null); setShowCreateForm(true); }} />
-      ) : (
-        <View style={styles.formCard}>
-          <Text style={styles.formTitle}>{editingId ? 'Edit Project Task' : 'Create Project Task'}</Text>
+      <DottedAddCard label="Project Task Form" onPress={() => { setEditingId(null); setShowCreateForm(true); }} />
+      <FormDialog
+        visible={showCreateForm}
+        title={editingId ? 'Edit Project Task' : 'Create Project Task'}
+        submitLabel={editingId ? 'Update Task' : 'Create Task'}
+        onClose={() => { setEditingId(null); setShowCreateForm(false); }}
+        onSubmit={() => void submit()}
+      >
           <FieldLabel text="Project Category" />
           <TextInput style={styles.input} value={form.projectCategory} onChangeText={(v) => setForm((p) => ({ ...p, projectCategory: v }))} placeholder="Education" />
           <FieldLabel text="Task Name" />
@@ -123,9 +127,7 @@ export const ProjectTaskScreen = (): React.JSX.Element => {
           <MediaUploader value={form.mediaUrls} onChange={(urls) => setForm((prev) => ({ ...prev, mediaUrls: urls }))} label="Task Media" />
           <FieldLabel text="Status" />
           <View style={styles.pickerWrap}><Picker selectedValue={form.status} onValueChange={(v) => setForm((p) => ({ ...p, status: v }))}>{statuses.map((status) => <Picker.Item key={status} label={status} value={status} />)}</Picker></View>
-          <View style={styles.actionsRow}><TouchableOpacity style={[styles.actionButton, styles.cancelBtn]} onPress={() => { setEditingId(null); setShowCreateForm(false); }}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[styles.actionButton, styles.saveBtn]} onPress={() => void submit()}><Text style={styles.saveText}>{editingId ? 'Update Task' : 'Create Task'}</Text></TouchableOpacity></View>
-        </View>
-      )}
+      </FormDialog>
 
       <Text style={styles.sectionTitle}>Project Task Table</Text>
       <View style={styles.filterRow}><TextInput style={[styles.input, styles.filterInput]} placeholder="Search category/task/description" value={search} onChangeText={setSearch} /><View style={[styles.pickerWrap, styles.filterPicker]}><Picker selectedValue={statusFilter} onValueChange={setStatusFilter}><Picker.Item label="All Status" value="ALL" />{statuses.map((status) => <Picker.Item key={status} label={status} value={status} />)}</Picker></View></View>
@@ -206,17 +208,9 @@ const styles = StyleSheet.create({
   content: { padding: 16 },
   title: { fontSize: 22, fontWeight: '700', color: Colors.secondary },
   subtitle: { marginTop: 4, marginBottom: 12, color: Colors.textSecondary },
-  formCard: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#e6e6e9', padding: 12, marginBottom: 10 },
-  formTitle: { fontWeight: '800', color: Colors.secondary, marginBottom: 8 },
   label: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginBottom: 4 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, marginBottom: 8, backgroundColor: '#fff' },
   pickerWrap: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, overflow: 'hidden', marginBottom: 8, backgroundColor: '#fff' },
-  actionsRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  actionButton: { flex: 1, borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
-  cancelBtn: { backgroundColor: '#eef1f6' },
-  saveBtn: { backgroundColor: Colors.primary },
-  cancelText: { color: Colors.secondary, fontWeight: '700' },
-  saveText: { color: '#fff', fontWeight: '700' },
   sectionTitle: { marginTop: 14, marginBottom: 8, fontWeight: '700', fontSize: 16, color: Colors.secondary },
   filterRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   filterInput: { flex: 1, marginBottom: 0 },

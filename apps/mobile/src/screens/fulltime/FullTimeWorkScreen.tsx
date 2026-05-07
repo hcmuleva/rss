@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFullTimeTask, getFullTimeTasks, updateFullTimeTask } from '@/api/fulltime.api';
 import { getUsers } from '@/api/users.api';
 import { DottedAddCard } from '@/components/DottedAddCard';
+import { FormDialog } from '@/components/FormDialog';
 import { MediaUploader } from '@/components/MediaUploader';
 import { ScreenTopBar } from '@/components/ScreenTopBar';
 import { TableRowActions } from '@/components/TableRowActions';
@@ -69,11 +70,14 @@ export const FullTimeWorkScreen = (): React.JSX.Element => {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <ScreenTopBar title="FullTime Work" />
-      {!showForm ? (
-        <DottedAddCard label="FullTime Task Form" onPress={() => { setEditingId(null); setShowForm(true); }} />
-      ) : (
-        <View style={styles.formCard}>
-          <Text style={styles.formTitle}>{editingId ? 'Edit FullTime Task' : 'Create FullTime Task'}</Text>
+      <DottedAddCard label="FullTime Task Form" onPress={() => { setEditingId(null); setShowForm(true); }} />
+      <FormDialog
+        visible={showForm}
+        title={editingId ? 'Edit FullTime Task' : 'Create FullTime Task'}
+        submitLabel={editingId ? 'Update Task' : 'Save Task'}
+        onClose={() => setShowForm(false)}
+        onSubmit={() => void submit()}
+      >
           <FieldLabel text="Task Title" />
           <TextInput style={styles.input} value={form.title} onChangeText={(v) => setForm((p) => ({ ...p, title: v }))} />
           <FieldLabel text="Description" />
@@ -109,9 +113,7 @@ export const FullTimeWorkScreen = (): React.JSX.Element => {
             </>
           ) : null}
           <MediaUploader value={form.mediaUrls} onChange={(urls) => setForm((prev) => ({ ...prev, mediaUrls: urls }))} label="Task Media" />
-          <View style={styles.actionsRow}><TouchableOpacity style={[styles.actionButton, styles.cancelBtn]} onPress={() => setShowForm(false)}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[styles.actionButton, styles.saveBtn]} onPress={() => void submit()}><Text style={styles.saveText}>{editingId ? 'Update Task' : 'Save Task'}</Text></TouchableOpacity></View>
-        </View>
-      )}
+      </FormDialog>
 
       <Text style={styles.sectionTitle}>FullTime Tasks</Text>
       {tasks.map((item) => (
@@ -140,8 +142,6 @@ export const FullTimeWorkScreen = (): React.JSX.Element => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   content: { padding: 16 },
-  formCard: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#e6e6e9', padding: 12, marginBottom: 10 },
-  formTitle: { fontWeight: '800', color: Colors.secondary, marginBottom: 8 },
   label: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginBottom: 4 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, marginBottom: 8, backgroundColor: '#fff' },
   pickerWrap: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, overflow: 'hidden', marginBottom: 8, backgroundColor: '#fff' },
@@ -150,12 +150,6 @@ const styles = StyleSheet.create({
   assignChipActive: { borderColor: '#b8cdfc', backgroundColor: '#edf3ff' },
   assignChipText: { fontSize: 12, color: Colors.textSecondary },
   assignChipTextActive: { color: Colors.secondary, fontWeight: '700' },
-  actionsRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  actionButton: { flex: 1, borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
-  cancelBtn: { backgroundColor: '#eef1f6' },
-  saveBtn: { backgroundColor: Colors.primary },
-  cancelText: { color: Colors.secondary, fontWeight: '700' },
-  saveText: { color: '#fff', fontWeight: '700' },
   sectionTitle: { marginTop: 14, marginBottom: 8, fontWeight: '700', fontSize: 16, color: Colors.secondary },
   rowCard: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e6e8ef', borderRadius: 10, padding: 10, marginBottom: 8, flexDirection: 'row', gap: 8 },
   rowTitle: { fontWeight: '700', color: Colors.secondary },

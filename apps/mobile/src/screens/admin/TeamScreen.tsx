@@ -1,12 +1,14 @@
 import React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { useRoute } from '@react-navigation/native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { TreeView } from '@/components/TreeView';
 import { DottedAddCard } from '@/components/DottedAddCard';
+import { FormDialog } from '@/components/FormDialog';
 import { TreeSelect } from '@/components/TreeSelect';
+import { UserPhotoPicker } from '@/components/UserPhotoPicker';
 import { Colors } from '@/constants/colors';
 import { createHierarchyNode, getHierarchyNodes } from '@/api/hierarchy.api';
 import { createUser, getUsers, updateUser, updateUserStatus } from '@/api/users.api';
@@ -33,6 +35,13 @@ const levelToLabel = Object.fromEntries(LEVEL_META.map((item) => [item.key, item
 const CORE_LEVELS = new Set(['PRANT', 'SAMBHAG', 'VIBHAG', 'DISTRICT']);
 const AYAM_SUB_CATEGORIES = ['Pralekhan', 'Vanshavali', 'Nidhi', 'Sanskriti', 'MatraShakti', 'VidhiAayam'];
 const FieldLabel = ({ text }: { text: string }) => <Text style={styles.label}>{text}</Text>;
+const initials = (name: string) =>
+  name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('') || 'U';
 
 type Panel = 'locations' | 'admin' | 'super';
 type AdminTab = 'users' | 'assignments';
@@ -68,7 +77,7 @@ export const TeamScreen = (): React.JSX.Element => {
   const [editingUserId, setEditingUserId] = React.useState<string | null>(null);
 
   const [locationForm, setLocationForm] = React.useState(initialLocationForm);
-  const [userForm, setUserForm] = React.useState({ name: '', phone: '', password: '', role: 'USER' as 'ADMIN' | 'USER', assignedNodeId: '', isFullTime: false });
+  const [userForm, setUserForm] = React.useState({ name: '', phone: '', password: '', photoUrl: '', role: 'USER' as 'ADMIN' | 'USER', assignedNodeId: '', isFullTime: false });
   const [masterForm, setMasterForm] = React.useState({ listType: 'ConversionFrom' as 'ConversionFrom' | 'ConversionTo' | 'ProjectCategories' | 'MatraShaktiType' | 'VidhiAayamTeam', name_hi: '', name_en: '' });
   const [assignmentForm, setAssignmentForm] = React.useState({
     moduleType: 'Project' as 'Sensitive' | 'Activities' | 'Project' | 'Ayam' | 'DharmRaksha' | 'FullTime',
@@ -78,6 +87,11 @@ export const TeamScreen = (): React.JSX.Element => {
   });
   const [assignmentModuleFilter, setAssignmentModuleFilter] = React.useState<'ALL' | 'Sensitive' | 'Activities' | 'Project' | 'Ayam' | 'DharmRaksha' | 'FullTime'>('ALL');
   const [assignmentNodeFilter, setAssignmentNodeFilter] = React.useState<string | null>(null);
+  const [showUserFilters, setShowUserFilters] = React.useState(false);
+  const [showAssignmentFilters, setShowAssignmentFilters] = React.useState(false);
+  const [userRoleFilter, setUserRoleFilter] = React.useState<'ALL' | 'SUPER_ADMIN' | 'ADMIN' | 'USER'>('ALL');
+  const [userStatusFilter, setUserStatusFilter] = React.useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
+  const [userSearch, setUserSearch] = React.useState('');
 
   React.useEffect(() => {
     if (route.name === 'Admin') {
@@ -126,18 +140,18 @@ export const TeamScreen = (): React.JSX.Element => {
     mutationFn: createUser,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['admin-users'] });
-      setUserForm({ name: '', phone: '', password: '', role: 'USER', assignedNodeId: nodes[0]?.id ?? '', isFullTime: false });
+      setUserForm({ name: '', phone: '', password: '', photoUrl: '', role: 'USER', assignedNodeId: nodes[0]?.id ?? '', isFullTime: false });
       setEditingUserId(null);
       setShowUserForm(false);
     }
   });
 
   const updateUserMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: { name: string; phone: string; password?: string; role: 'ADMIN' | 'USER'; assignedNodeId: string; isFullTime?: boolean } }) =>
+    mutationFn: ({ id, payload }: { id: string; payload: { name: string; phone: string; password?: string; photoUrl?: string; role: 'ADMIN' | 'USER'; assignedNodeId: string; isFullTime?: boolean } }) =>
       updateUser(id, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['admin-users'] });
-      setUserForm({ name: '', phone: '', password: '', role: 'USER', assignedNodeId: nodes[0]?.id ?? '', isFullTime: false });
+      setUserForm({ name: '', phone: '', password: '', photoUrl: '', role: 'USER', assignedNodeId: nodes[0]?.id ?? '', isFullTime: false });
       setEditingUserId(null);
       setShowUserForm(false);
     }
@@ -251,6 +265,7 @@ export const TeamScreen = (): React.JSX.Element => {
       payload: {
         name: userForm.name,
         phone: userForm.phone,
+        photoUrl: userForm.photoUrl || undefined,
         role: roleValue,
         assignedNodeId: userForm.assignedNodeId,
         isFullTime: userForm.isFullTime,
@@ -314,6 +329,18 @@ export const TeamScreen = (): React.JSX.Element => {
     [assignmentModuleFilter, assignmentNodeFilter, assignments]
   );
 
+  const filteredUsers = React.useMemo(
+    () =>
+      users.filter((user) => {
+        const roleOk = userRoleFilter === 'ALL' || user.role === userRoleFilter;
+        const statusOk = userStatusFilter === 'ALL' || (userStatusFilter === 'ACTIVE' ? user.isActive : !user.isActive);
+        const q = userSearch.trim().toLowerCase();
+        const searchOk = !q || `${user.name} ${user.phone} ${user.assignedNodeId}`.toLowerCase().includes(q);
+        return roleOk && statusOk && searchOk;
+      }),
+    [userRoleFilter, userSearch, userStatusFilter, users]
+  );
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Admin Console</Text>
@@ -336,44 +363,45 @@ export const TeamScreen = (): React.JSX.Element => {
             <TreeView nodes={urbanTreeNodes.map((node) => ({ id: node.id, parentId: node.parentId, title: `${node.name_hi} / ${node.name_en}`, subtitle: `${(levelToLabel[node.level] ?? node.level) as string} • ${node.address}`, badge: (levelToCode[node.level] ?? node.level) as string, tag: node.branch }))} emptyText="No urban hierarchy nodes found." />
           </View>
 
-          {!showLocationForm ? (
-            <DottedAddCard label="Location Node Form" onPress={() => setShowLocationForm(true)} />
-          ) : (
-            <View style={styles.formCard}>
-              <Text style={styles.formTitle}>Create Location Node</Text>
-              <FieldLabel text="Name (Hindi)" />
-              <TextInput style={styles.input} value={locationForm.name_hi} onChangeText={(v) => setLocationForm((p) => ({ ...p, name_hi: v }))} />
-              <FieldLabel text="Name (English)" />
-              <TextInput style={styles.input} value={locationForm.name_en} onChangeText={(v) => setLocationForm((p) => ({ ...p, name_en: v }))} />
-              <FieldLabel text="Level" />
-              <View style={styles.pickerWrap}><Picker selectedValue={locationForm.level} onValueChange={(v) => setLocationForm((p) => ({ ...p, level: v }))}>{LEVEL_META.map((item) => <Picker.Item key={item.key} label={`${item.code} • ${item.label}`} value={item.key} />)}</Picker></View>
-              <FieldLabel text="Branch" />
-              <View style={styles.pickerWrap}><Picker selectedValue={locationForm.branch} onValueChange={(v) => setLocationForm((p) => ({ ...p, branch: v }))}><Picker.Item label="Rural" value="rural" /><Picker.Item label="Urban" value="urban" /></Picker></View>
-              <TreeSelect
-                label="Parent Node"
-                placeholder="Select parent node"
-                options={nodeSelectOptions}
-                value={locationForm.parentId}
-                onChange={(next) => setLocationForm((prev) => ({ ...prev, parentId: next }))}
-                rootLabel="No Parent (root)"
-              />
-              <FieldLabel text="Village / Mohalla" />
-              <TextInput style={styles.input} value={locationForm.villageOrMohalla} onChangeText={(v) => setLocationForm((p) => ({ ...p, villageOrMohalla: v }))} />
-              <FieldLabel text="Tehsil" />
-              <TextInput style={styles.input} value={locationForm.tehsil} onChangeText={(v) => setLocationForm((p) => ({ ...p, tehsil: v }))} />
-              <FieldLabel text="District" />
-              <TextInput style={styles.input} value={locationForm.district} onChangeText={(v) => setLocationForm((p) => ({ ...p, district: v }))} />
-              <FieldLabel text="State" />
-              <TextInput style={styles.input} value={locationForm.state} onChangeText={(v) => setLocationForm((p) => ({ ...p, state: v }))} />
-              <FieldLabel text="Country" />
-              <TextInput style={styles.input} value={locationForm.country} onChangeText={(v) => setLocationForm((p) => ({ ...p, country: v }))} />
-              <FieldLabel text="Pincode" />
-              <TextInput style={styles.input} value={locationForm.pincode} onChangeText={(v) => setLocationForm((p) => ({ ...p, pincode: v }))} keyboardType="numeric" />
-              <View style={styles.row}><View style={styles.halfInput}><FieldLabel text="Latitude" /><TextInput style={styles.input} value={locationForm.lat} onChangeText={(v) => setLocationForm((p) => ({ ...p, lat: v }))} keyboardType="numeric" /></View><View style={styles.halfInput}><FieldLabel text="Longitude" /><TextInput style={styles.input} value={locationForm.long} onChangeText={(v) => setLocationForm((p) => ({ ...p, long: v }))} keyboardType="numeric" /></View></View>
-              <View style={styles.row}><TouchableOpacity style={[styles.secondaryButton, styles.halfInput]} onPress={useParentCoordinates}><Text style={styles.secondaryButtonText}>Use Parent Coordinates</Text></TouchableOpacity></View>
-              <View style={styles.actionsRow}><TouchableOpacity style={[styles.actionButton, styles.cancelBtn]} onPress={() => setShowLocationForm(false)}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[styles.actionButton, styles.saveBtn]} onPress={() => void submitLocation()}><Text style={styles.saveText}>Create Location</Text></TouchableOpacity></View>
-            </View>
-          )}
+          <DottedAddCard label="Location Node Form" onPress={() => setShowLocationForm(true)} />
+          <FormDialog
+            visible={showLocationForm}
+            title="Create Location Node"
+            submitLabel="Create Location"
+            onClose={() => setShowLocationForm(false)}
+            onSubmit={() => void submitLocation()}
+          >
+            <FieldLabel text="Name (Hindi)" />
+            <TextInput style={styles.input} value={locationForm.name_hi} onChangeText={(v) => setLocationForm((p) => ({ ...p, name_hi: v }))} />
+            <FieldLabel text="Name (English)" />
+            <TextInput style={styles.input} value={locationForm.name_en} onChangeText={(v) => setLocationForm((p) => ({ ...p, name_en: v }))} />
+            <FieldLabel text="Level" />
+            <View style={styles.pickerWrap}><Picker selectedValue={locationForm.level} onValueChange={(v) => setLocationForm((p) => ({ ...p, level: v }))}>{LEVEL_META.map((item) => <Picker.Item key={item.key} label={`${item.code} • ${item.label}`} value={item.key} />)}</Picker></View>
+            <FieldLabel text="Branch" />
+            <View style={styles.pickerWrap}><Picker selectedValue={locationForm.branch} onValueChange={(v) => setLocationForm((p) => ({ ...p, branch: v }))}><Picker.Item label="Rural" value="rural" /><Picker.Item label="Urban" value="urban" /></Picker></View>
+            <TreeSelect
+              label="Parent Node"
+              placeholder="Select parent node"
+              options={nodeSelectOptions}
+              value={locationForm.parentId}
+              onChange={(next) => setLocationForm((prev) => ({ ...prev, parentId: next }))}
+              rootLabel="No Parent (root)"
+            />
+            <FieldLabel text="Village / Mohalla" />
+            <TextInput style={styles.input} value={locationForm.villageOrMohalla} onChangeText={(v) => setLocationForm((p) => ({ ...p, villageOrMohalla: v }))} />
+            <FieldLabel text="Tehsil" />
+            <TextInput style={styles.input} value={locationForm.tehsil} onChangeText={(v) => setLocationForm((p) => ({ ...p, tehsil: v }))} />
+            <FieldLabel text="District" />
+            <TextInput style={styles.input} value={locationForm.district} onChangeText={(v) => setLocationForm((p) => ({ ...p, district: v }))} />
+            <FieldLabel text="State" />
+            <TextInput style={styles.input} value={locationForm.state} onChangeText={(v) => setLocationForm((p) => ({ ...p, state: v }))} />
+            <FieldLabel text="Country" />
+            <TextInput style={styles.input} value={locationForm.country} onChangeText={(v) => setLocationForm((p) => ({ ...p, country: v }))} />
+            <FieldLabel text="Pincode" />
+            <TextInput style={styles.input} value={locationForm.pincode} onChangeText={(v) => setLocationForm((p) => ({ ...p, pincode: v }))} keyboardType="numeric" />
+            <View style={styles.row}><View style={styles.halfInput}><FieldLabel text="Latitude" /><TextInput style={styles.input} value={locationForm.lat} onChangeText={(v) => setLocationForm((p) => ({ ...p, lat: v }))} keyboardType="numeric" /></View><View style={styles.halfInput}><FieldLabel text="Longitude" /><TextInput style={styles.input} value={locationForm.long} onChangeText={(v) => setLocationForm((p) => ({ ...p, long: v }))} keyboardType="numeric" /></View></View>
+            <View style={styles.row}><TouchableOpacity style={[styles.secondaryButton, styles.halfInput]} onPress={useParentCoordinates}><Text style={styles.secondaryButtonText}>Use Parent Coordinates</Text></TouchableOpacity></View>
+          </FormDialog>
         </>
       ) : null}
 
@@ -390,206 +418,273 @@ export const TeamScreen = (): React.JSX.Element => {
 
           {adminTab === 'users' ? (
             <>
-              {!showUserForm ? (
-                <DottedAddCard
-                  label="Admin/User Form"
-                  onPress={() => {
-                    setEditingUserId(null);
-                    setUserForm({ name: '', phone: '', password: '', role: 'USER', assignedNodeId: nodes[0]?.id ?? '', isFullTime: false });
-                    setShowUserForm(true);
-                  }}
-                />
-              ) : (
-                <View style={styles.formCard}>
-                  <Text style={styles.formTitle}>{editingUserId ? 'Edit User' : 'Create User'}</Text>
-                  <FieldLabel text="Name" />
-                  <TextInput style={styles.input} value={userForm.name} onChangeText={(v) => setUserForm((p) => ({ ...p, name: v }))} />
-                  <FieldLabel text="Phone" />
-                  <TextInput style={styles.input} value={userForm.phone} onChangeText={(v) => setUserForm((p) => ({ ...p, phone: v }))} keyboardType="phone-pad" />
-                  <FieldLabel text={editingUserId ? 'Password (optional)' : 'Password'} />
-                  <TextInput style={styles.input} value={userForm.password} onChangeText={(v) => setUserForm((p) => ({ ...p, password: v }))} secureTextEntry />
-                  {role === 'SUPER_ADMIN' ? <><FieldLabel text="Role" /><View style={styles.pickerWrap}><Picker selectedValue={userForm.role} onValueChange={(v) => setUserForm((p) => ({ ...p, role: v }))}><Picker.Item label="Admin" value="ADMIN" /><Picker.Item label="User" value="USER" /></Picker></View></> : null}
-                  <FieldLabel text="Full-time User" />
-                  <View style={styles.pickerWrap}>
-                    <Picker selectedValue={userForm.isFullTime ? 'yes' : 'no'} onValueChange={(v) => setUserForm((p) => ({ ...p, isFullTime: v === 'yes' }))}>
-                      <Picker.Item label="No" value="no" />
-                      <Picker.Item label="Yes" value="yes" />
-                    </Picker>
-                  </View>
-                  <TreeSelect
-                    label="Assigned Node"
-                    placeholder="Select assigned node"
-                    options={nodeSelectOptions}
-                    value={userForm.assignedNodeId || null}
-                    onChange={(next) => setUserForm((prev) => ({ ...prev, assignedNodeId: next ?? '' }))}
-                  />
-                  <View style={styles.actionsRow}><TouchableOpacity style={[styles.actionButton, styles.cancelBtn]} onPress={() => {
-                    setShowUserForm(false);
-                    setEditingUserId(null);
-                    setUserForm({ name: '', phone: '', password: '', role: 'USER', assignedNodeId: nodes[0]?.id ?? '', isFullTime: false });
-                  }}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[styles.actionButton, styles.saveBtn]} onPress={() => void submitUser()}><Text style={styles.saveText}>{editingUserId ? 'Update User' : 'Create User'}</Text></TouchableOpacity></View>
+              <DottedAddCard
+                label="Admin/User Form"
+                onPress={() => {
+                  setEditingUserId(null);
+                  setUserForm({ name: '', phone: '', password: '', photoUrl: '', role: 'USER', assignedNodeId: nodes[0]?.id ?? '', isFullTime: false });
+                  setShowUserForm(true);
+                }}
+              />
+              <FormDialog
+                visible={showUserForm}
+                title={editingUserId ? 'Edit User' : 'Create User'}
+                submitLabel={editingUserId ? 'Update User' : 'Create User'}
+                onClose={() => {
+                  setShowUserForm(false);
+                  setEditingUserId(null);
+                  setUserForm({ name: '', phone: '', password: '', photoUrl: '', role: 'USER', assignedNodeId: nodes[0]?.id ?? '', isFullTime: false });
+                }}
+                onSubmit={() => void submitUser()}
+              >
+                <FieldLabel text="Name" />
+                <TextInput style={styles.input} value={userForm.name} onChangeText={(v) => setUserForm((p) => ({ ...p, name: v }))} />
+                <FieldLabel text="Phone" />
+                <TextInput style={styles.input} value={userForm.phone} onChangeText={(v) => setUserForm((p) => ({ ...p, phone: v }))} keyboardType="phone-pad" />
+                <UserPhotoPicker value={userForm.photoUrl || undefined} onChange={(url) => setUserForm((p) => ({ ...p, photoUrl: url ?? '' }))} />
+                <FieldLabel text={editingUserId ? 'Password (optional)' : 'Password'} />
+                <TextInput style={styles.input} value={userForm.password} onChangeText={(v) => setUserForm((p) => ({ ...p, password: v }))} secureTextEntry />
+                {role === 'SUPER_ADMIN' ? <><FieldLabel text="Role" /><View style={styles.pickerWrap}><Picker selectedValue={userForm.role} onValueChange={(v) => setUserForm((p) => ({ ...p, role: v }))}><Picker.Item label="Admin" value="ADMIN" /><Picker.Item label="User" value="USER" /></Picker></View></> : null}
+                <FieldLabel text="Full-time User" />
+                <View style={styles.pickerWrap}>
+                  <Picker selectedValue={userForm.isFullTime ? 'yes' : 'no'} onValueChange={(v) => setUserForm((p) => ({ ...p, isFullTime: v === 'yes' }))}>
+                    <Picker.Item label="No" value="no" />
+                    <Picker.Item label="Yes" value="yes" />
+                  </Picker>
                 </View>
-              )}
+                <TreeSelect
+                  label="Assigned Node"
+                  placeholder="Select assigned node"
+                  options={nodeSelectOptions}
+                  value={userForm.assignedNodeId || null}
+                  onChange={(next) => setUserForm((prev) => ({ ...prev, assignedNodeId: next ?? '' }))}
+                />
+              </FormDialog>
 
               <Text style={styles.sectionTitle}>Users Table</Text>
-              {users.map((user) => (
-                <View key={user.id} style={styles.userRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.userName}>{user.name} ({user.role})</Text>
-                    <Text style={styles.userSub}>{user.phone} • Node: {user.assignedNodeId} • {user.isFullTime ? 'Full-time' : 'Part-time'}</Text>
+              <TouchableOpacity style={styles.filterToggle} onPress={() => setShowUserFilters((prev) => !prev)}>
+                <Text style={styles.filterToggleText}>{showUserFilters ? 'Hide Filters' : 'Show Filters'}</Text>
+              </TouchableOpacity>
+              {showUserFilters ? (
+                <View style={styles.filterBar}>
+                  <TextInput
+                    style={[styles.input, styles.filterInput]}
+                    placeholder="Search name/phone/node"
+                    value={userSearch}
+                    onChangeText={setUserSearch}
+                  />
+                  <View style={styles.filterPill}>
+                    <Picker selectedValue={userRoleFilter} onValueChange={(v) => setUserRoleFilter(v)}>
+                      <Picker.Item label="All Roles" value="ALL" />
+                      <Picker.Item label="Super Admin" value="SUPER_ADMIN" />
+                      <Picker.Item label="Admin" value="ADMIN" />
+                      <Picker.Item label="User" value="USER" />
+                    </Picker>
                   </View>
-                  <View style={styles.rowActionsWrap}>
-                    <TableRowActions
-                      onEdit={() => {
-                        setUserForm({
-                          name: user.name,
-                          phone: user.phone,
-                          password: '',
-                          role: user.role === 'ADMIN' ? 'ADMIN' : 'USER',
-                          assignedNodeId: user.assignedNodeId,
-                          isFullTime: Boolean(user.isFullTime)
-                        });
-                        setEditingUserId(user.id);
-                        setShowUserForm(true);
-                      }}
-                      onDetails={() => Alert.alert('User Details', `Name: ${user.name}\nRole: ${user.role}\nPhone: ${user.phone}\nNode: ${user.assignedNodeId}`)}
-                    />
-                    <TouchableOpacity style={[styles.statusBtn, user.isActive ? styles.activeBtn : styles.inactiveBtn]} onPress={() => void updateUserStatusMutation.mutateAsync({ id: user.id, isActive: !user.isActive })}>
-                      <Text style={styles.statusBtnText}>{user.isActive ? 'Deactivate' : 'Activate'}</Text>
-                    </TouchableOpacity>
+                  <View style={styles.filterPill}>
+                    <Picker selectedValue={userStatusFilter} onValueChange={(v) => setUserStatusFilter(v)}>
+                      <Picker.Item label="All Status" value="ALL" />
+                      <Picker.Item label="Active" value="ACTIVE" />
+                      <Picker.Item label="Inactive" value="INACTIVE" />
+                    </Picker>
                   </View>
                 </View>
-              ))}
+              ) : null}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View>
+                  <View style={[styles.tableRow, styles.headerRow]}>
+                    <Text style={[styles.cell, styles.wPhoto, styles.headerText]}>Photo</Text>
+                    <Text style={[styles.cell, styles.wName, styles.headerText]}>Name</Text>
+                    <Text style={[styles.cell, styles.wRole, styles.headerText]}>Role</Text>
+                    <Text style={[styles.cell, styles.wPhone, styles.headerText]}>Phone</Text>
+                    <Text style={[styles.cell, styles.wNode, styles.headerText]}>Node</Text>
+                    <Text style={[styles.cell, styles.wType, styles.headerText]}>Type</Text>
+                    <Text style={[styles.cell, styles.wStatus, styles.headerText]}>Status</Text>
+                    <Text style={[styles.cell, styles.wActions, styles.headerText]}>Actions</Text>
+                  </View>
+                  {filteredUsers.map((user) => (
+                    <View key={user.id} style={styles.tableRow}>
+                      <View style={[styles.cell, styles.wPhoto]}>
+                        {user.photoUrl ? (
+                          <Image source={{ uri: user.photoUrl }} style={styles.userPhoto} />
+                        ) : (
+                          <View style={styles.userPhotoFallback}>
+                            <Text style={styles.userPhotoFallbackText}>{initials(user.name)}</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.cell, styles.wName]}>{user.name}</Text>
+                      <Text style={[styles.cell, styles.wRole]}>{user.role}</Text>
+                      <Text style={[styles.cell, styles.wPhone]}>{user.phone}</Text>
+                      <Text style={[styles.cell, styles.wNode]}>{user.assignedNodeId}</Text>
+                      <Text style={[styles.cell, styles.wType]}>{user.isFullTime ? 'Full-time' : 'Part-time'}</Text>
+                      <Text style={[styles.cell, styles.wStatus]}>{user.isActive ? 'Active' : 'Inactive'}</Text>
+                      <View style={[styles.cell, styles.wActions, styles.rowActionsWrap]}>
+                        <TableRowActions
+                          onEdit={() => {
+                            setUserForm({
+                              name: user.name,
+                              phone: user.phone,
+                              password: '',
+                              photoUrl: user.photoUrl ?? '',
+                              role: user.role === 'ADMIN' ? 'ADMIN' : 'USER',
+                              assignedNodeId: user.assignedNodeId,
+                              isFullTime: Boolean(user.isFullTime)
+                            });
+                            setEditingUserId(user.id);
+                            setShowUserForm(true);
+                          }}
+                          onDetails={() => Alert.alert('User Details', `Name: ${user.name}\nRole: ${user.role}\nPhone: ${user.phone}\nNode: ${user.assignedNodeId}`)}
+                        />
+                        <TouchableOpacity style={[styles.statusBtn, user.isActive ? styles.activeBtn : styles.inactiveBtn]} onPress={() => void updateUserStatusMutation.mutateAsync({ id: user.id, isActive: !user.isActive })}>
+                          <Text style={styles.statusBtnText}>{user.isActive ? 'Deactivate' : 'Activate'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
+              {!filteredUsers.length ? <Text style={styles.userSub}>No users found for selected filters.</Text> : null}
             </>
           ) : (
             <>
-              {!showAssignmentForm ? (
-                <DottedAddCard
-                  label="Module Assignment Form"
-                  onPress={() => {
-                    setShowAssignmentForm(true);
-                    setAssignmentForm((prev) => ({ ...prev, assignmentKey: '', nodeId: role === 'ADMIN' ? currentAssignedNodeId : null }));
-                  }}
-                />
-              ) : (
-                <View style={styles.formCard}>
-                  <Text style={styles.formTitle}>Assign Users to Module</Text>
-                  <FieldLabel text="Module" />
-                  <View style={styles.pickerWrap}>
-                    <Picker
-                      selectedValue={assignmentForm.moduleType}
-                      onValueChange={(value) => setAssignmentForm((prev) => ({ ...prev, moduleType: value, assignmentKey: '' }))}
-                    >
-                      <Picker.Item label="Project" value="Project" />
-                      <Picker.Item label="Ayam" value="Ayam" />
-                      <Picker.Item label="Sensitive" value="Sensitive" />
-                      <Picker.Item label="Activities" value="Activities" />
-                      <Picker.Item label="Dharm Raksha" value="DharmRaksha" />
-                      <Picker.Item label="FullTime Work" value="FullTime" />
-                    </Picker>
-                  </View>
-                  <FieldLabel text="Category / Key" />
-                  <View style={styles.pickerWrap}>
-                    <Picker
-                      selectedValue={assignmentForm.assignmentKey}
-                      onValueChange={(value) => setAssignmentForm((prev) => ({ ...prev, assignmentKey: value }))}
-                    >
-                      {assignmentKeyOptions.map((value) => (
-                        <Picker.Item key={value} label={value} value={value} />
-                      ))}
-                    </Picker>
-                  </View>
-                  <TreeSelect
-                    label={role === 'ADMIN' ? 'Location Node' : 'Location Node (optional)'}
-                    placeholder="Select node for location-specific assignment"
-                    options={nodeSelectOptions}
-                    value={assignmentForm.nodeId}
-                    onChange={(next) => setAssignmentForm((prev) => ({ ...prev, nodeId: next }))}
-                    rootLabel={role === 'SUPER_ADMIN' ? 'All locations' : undefined}
-                  />
-                  <FieldLabel text="Assign To Users" />
-                  <View style={styles.chipWrap}>
-                    {users
-                      .filter((item) => item.role === 'USER' && item.isActive)
-                      .map((user) => {
-                        const selected = assignmentForm.assignedUserIds.includes(user.id);
-                        return (
-                          <TouchableOpacity
-                            key={user.id}
-                            style={[styles.chip, selected && styles.chipActive]}
-                            onPress={() =>
-                              setAssignmentForm((prev) => ({
-                                ...prev,
-                                assignedUserIds: selected ? prev.assignedUserIds.filter((id) => id !== user.id) : [...prev.assignedUserIds, user.id]
-                              }))
-                            }
-                          >
-                            <Text style={[styles.chipText, selected && styles.chipTextActive]}>{user.name}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                  </View>
-                  <View style={styles.actionsRow}>
-                    <TouchableOpacity style={[styles.actionButton, styles.cancelBtn]} onPress={() => setShowAssignmentForm(false)}>
-                      <Text style={styles.cancelText}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionButton, styles.saveBtn]} onPress={() => void submitAssignment()}>
-                      <Text style={styles.saveText}>Save Assignment</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-
-              <Text style={styles.sectionTitle}>Module Assignments</Text>
-              <View style={styles.filterBar}>
-                <View style={styles.filterPill}>
-                  <Picker selectedValue={assignmentModuleFilter} onValueChange={(value) => setAssignmentModuleFilter(value)}>
-                    <Picker.Item label="All Modules" value="ALL" />
+              <DottedAddCard
+                label="Module Assignment Form"
+                onPress={() => {
+                  setShowAssignmentForm(true);
+                  setAssignmentForm((prev) => ({ ...prev, assignmentKey: '', nodeId: role === 'ADMIN' ? currentAssignedNodeId : null }));
+                }}
+              />
+              <FormDialog
+                visible={showAssignmentForm}
+                title="Assign Users to Module"
+                submitLabel="Save Assignment"
+                onClose={() => setShowAssignmentForm(false)}
+                onSubmit={() => void submitAssignment()}
+              >
+                <FieldLabel text="Module" />
+                <View style={styles.pickerWrap}>
+                  <Picker
+                    selectedValue={assignmentForm.moduleType}
+                    onValueChange={(value) => setAssignmentForm((prev) => ({ ...prev, moduleType: value, assignmentKey: '' }))}
+                  >
                     <Picker.Item label="Project" value="Project" />
                     <Picker.Item label="Ayam" value="Ayam" />
                     <Picker.Item label="Sensitive" value="Sensitive" />
                     <Picker.Item label="Activities" value="Activities" />
                     <Picker.Item label="Dharm Raksha" value="DharmRaksha" />
-                    <Picker.Item label="FullTime" value="FullTime" />
+                    <Picker.Item label="FullTime Work" value="FullTime" />
                   </Picker>
                 </View>
-                <View style={styles.filterPill}>
-                  <Picker selectedValue={assignmentNodeFilter ?? ''} onValueChange={(value) => setAssignmentNodeFilter(value || null)}>
-                    <Picker.Item label="All Nodes" value="" />
-                    {nodes.map((node) => (
-                      <Picker.Item key={node.id} label={`${(levelToCode[node.level] ?? node.level) as string} • ${node.name_en}`} value={node.id} />
+                <FieldLabel text="Category / Key" />
+                <View style={styles.pickerWrap}>
+                  <Picker
+                    selectedValue={assignmentForm.assignmentKey}
+                    onValueChange={(value) => setAssignmentForm((prev) => ({ ...prev, assignmentKey: value }))}
+                  >
+                    {assignmentKeyOptions.map((value) => (
+                      <Picker.Item key={value} label={value} value={value} />
                     ))}
                   </Picker>
                 </View>
-              </View>
-              {filteredAssignments.map((assignment) => (
-                <View key={assignment.id} style={styles.userRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.userName}>{assignment.moduleType} • {assignment.assignmentKey}</Text>
-                    <Text style={styles.userSub}>Node: {assignment.nodeId ?? 'All'} • Users: {assignment.assignedUserIds.length}</Text>
+                <TreeSelect
+                  label={role === 'ADMIN' ? 'Location Node' : 'Location Node (optional)'}
+                  placeholder="Select node for location-specific assignment"
+                  options={nodeSelectOptions}
+                  value={assignmentForm.nodeId}
+                  onChange={(next) => setAssignmentForm((prev) => ({ ...prev, nodeId: next }))}
+                  rootLabel={role === 'SUPER_ADMIN' ? 'All locations' : undefined}
+                />
+                <FieldLabel text="Assign To Users" />
+                <View style={styles.chipWrap}>
+                  {users
+                    .filter((item) => item.role === 'USER' && item.isActive)
+                    .map((user) => {
+                      const selected = assignmentForm.assignedUserIds.includes(user.id);
+                      return (
+                        <TouchableOpacity
+                          key={user.id}
+                          style={[styles.chip, selected && styles.chipActive]}
+                          onPress={() =>
+                            setAssignmentForm((prev) => ({
+                              ...prev,
+                              assignedUserIds: selected ? prev.assignedUserIds.filter((id) => id !== user.id) : [...prev.assignedUserIds, user.id]
+                            }))
+                          }
+                        >
+                          <Text style={[styles.chipText, selected && styles.chipTextActive]}>{user.name}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                </View>
+              </FormDialog>
+
+              <Text style={styles.sectionTitle}>Module Assignments</Text>
+              <TouchableOpacity style={styles.filterToggle} onPress={() => setShowAssignmentFilters((prev) => !prev)}>
+                <Text style={styles.filterToggleText}>{showAssignmentFilters ? 'Hide Filters' : 'Show Filters'}</Text>
+              </TouchableOpacity>
+              {showAssignmentFilters ? (
+                <View style={styles.filterBar}>
+                  <View style={styles.filterPill}>
+                    <Picker selectedValue={assignmentModuleFilter} onValueChange={(value) => setAssignmentModuleFilter(value)}>
+                      <Picker.Item label="All Modules" value="ALL" />
+                      <Picker.Item label="Project" value="Project" />
+                      <Picker.Item label="Ayam" value="Ayam" />
+                      <Picker.Item label="Sensitive" value="Sensitive" />
+                      <Picker.Item label="Activities" value="Activities" />
+                      <Picker.Item label="Dharm Raksha" value="DharmRaksha" />
+                      <Picker.Item label="FullTime" value="FullTime" />
+                    </Picker>
                   </View>
-                  <View style={styles.rowActionsWrap}>
-                    <TableRowActions
-                      onEdit={() => {
-                        setAssignmentForm({
-                          moduleType: assignment.moduleType,
-                          assignmentKey: assignment.assignmentKey,
-                          nodeId: assignment.nodeId ?? null,
-                          assignedUserIds: assignment.assignedUserIds
-                        });
-                        setShowAssignmentForm(true);
-                      }}
-                      onDetails={() => Alert.alert('Assignment Details', `Module: ${assignment.moduleType}\nKey: ${assignment.assignmentKey}\nNode: ${assignment.nodeId ?? 'All'}\nUsers: ${assignment.assignedUserIds.join(', ')}`)}
-                    />
-                    <TouchableOpacity
-                      style={[styles.statusBtn, styles.inactiveBtn]}
-                      onPress={() => void deleteAssignmentMutation.mutateAsync(assignment.id)}
-                    >
-                      <Text style={styles.statusBtnText}>Delete</Text>
-                    </TouchableOpacity>
+                  <View style={styles.filterPill}>
+                    <Picker selectedValue={assignmentNodeFilter ?? ''} onValueChange={(value) => setAssignmentNodeFilter(value || null)}>
+                      <Picker.Item label="All Nodes" value="" />
+                      {nodes.map((node) => (
+                        <Picker.Item key={node.id} label={`${(levelToCode[node.level] ?? node.level) as string} • ${node.name_en}`} value={node.id} />
+                      ))}
+                    </Picker>
                   </View>
                 </View>
-              ))}
+              ) : null}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View>
+                  <View style={[styles.tableRow, styles.headerRow]}>
+                    <Text style={[styles.cell, styles.wModule, styles.headerText]}>Module</Text>
+                    <Text style={[styles.cell, styles.wKey, styles.headerText]}>Key</Text>
+                    <Text style={[styles.cell, styles.wNode, styles.headerText]}>Node</Text>
+                    <Text style={[styles.cell, styles.wCount, styles.headerText]}>Users</Text>
+                    <Text style={[styles.cell, styles.wActions, styles.headerText]}>Actions</Text>
+                  </View>
+                  {filteredAssignments.map((assignment) => (
+                    <View key={assignment.id} style={styles.tableRow}>
+                      <Text style={[styles.cell, styles.wModule]}>{assignment.moduleType}</Text>
+                      <Text style={[styles.cell, styles.wKey]}>{assignment.assignmentKey}</Text>
+                      <Text style={[styles.cell, styles.wNode]}>{assignment.nodeId ?? 'All'}</Text>
+                      <Text style={[styles.cell, styles.wCount]}>{assignment.assignedUserIds.length}</Text>
+                      <View style={[styles.cell, styles.wActions, styles.rowActionsWrap]}>
+                        <TableRowActions
+                          onEdit={() => {
+                            setAssignmentForm({
+                              moduleType: assignment.moduleType,
+                              assignmentKey: assignment.assignmentKey,
+                              nodeId: assignment.nodeId ?? null,
+                              assignedUserIds: assignment.assignedUserIds
+                            });
+                            setShowAssignmentForm(true);
+                          }}
+                          onDetails={() => Alert.alert('Assignment Details', `Module: ${assignment.moduleType}\nKey: ${assignment.assignmentKey}\nNode: ${assignment.nodeId ?? 'All'}\nUsers: ${assignment.assignedUserIds.join(', ')}`)}
+                        />
+                        <TouchableOpacity
+                          style={[styles.statusBtn, styles.inactiveBtn]}
+                          onPress={() => void deleteAssignmentMutation.mutateAsync(assignment.id)}
+                        >
+                          <Text style={styles.statusBtnText}>Delete</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
               {!filteredAssignments.length ? <Text style={styles.userSub}>No assignments found for selected filters.</Text> : null}
             </>
           )}
@@ -598,46 +693,56 @@ export const TeamScreen = (): React.JSX.Element => {
 
       {panel === 'super' && role === 'SUPER_ADMIN' ? (
         <>
-          {!showMasterForm ? (
-            <DottedAddCard label="Master List Form" onPress={() => setShowMasterForm(true)} />
-          ) : (
-            <View style={styles.formCard}>
-              <Text style={styles.formTitle}>Create Master List Item</Text>
-              <FieldLabel text="List Type" />
-              <View style={styles.pickerWrap}><Picker selectedValue={masterForm.listType} onValueChange={(v) => setMasterForm((p) => ({ ...p, listType: v }))}><Picker.Item label="ConversionFrom" value="ConversionFrom" /><Picker.Item label="ConversionTo" value="ConversionTo" /><Picker.Item label="ProjectCategories" value="ProjectCategories" /><Picker.Item label="MatraShaktiType" value="MatraShaktiType" /><Picker.Item label="VidhiAayamTeam" value="VidhiAayamTeam" /></Picker></View>
-              <FieldLabel text="Name (Hindi)" />
-              <TextInput style={styles.input} value={masterForm.name_hi} onChangeText={(v) => setMasterForm((p) => ({ ...p, name_hi: v }))} />
-              <FieldLabel text="Name (English)" />
-              <TextInput style={styles.input} value={masterForm.name_en} onChangeText={(v) => setMasterForm((p) => ({ ...p, name_en: v }))} />
-              <View style={styles.actionsRow}><TouchableOpacity style={[styles.actionButton, styles.cancelBtn]} onPress={() => setShowMasterForm(false)}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[styles.actionButton, styles.saveBtn]} onPress={() => void submitMaster()}><Text style={styles.saveText}>Create Item</Text></TouchableOpacity></View>
-            </View>
-          )}
+          <DottedAddCard label="Master List Form" onPress={() => setShowMasterForm(true)} />
+          <FormDialog
+            visible={showMasterForm}
+            title="Create Master List Item"
+            submitLabel="Create Item"
+            onClose={() => setShowMasterForm(false)}
+            onSubmit={() => void submitMaster()}
+          >
+            <FieldLabel text="List Type" />
+            <View style={styles.pickerWrap}><Picker selectedValue={masterForm.listType} onValueChange={(v) => setMasterForm((p) => ({ ...p, listType: v }))}><Picker.Item label="ConversionFrom" value="ConversionFrom" /><Picker.Item label="ConversionTo" value="ConversionTo" /><Picker.Item label="ProjectCategories" value="ProjectCategories" /><Picker.Item label="MatraShaktiType" value="MatraShaktiType" /><Picker.Item label="VidhiAayamTeam" value="VidhiAayamTeam" /></Picker></View>
+            <FieldLabel text="Name (Hindi)" />
+            <TextInput style={styles.input} value={masterForm.name_hi} onChangeText={(v) => setMasterForm((p) => ({ ...p, name_hi: v }))} />
+            <FieldLabel text="Name (English)" />
+            <TextInput style={styles.input} value={masterForm.name_en} onChangeText={(v) => setMasterForm((p) => ({ ...p, name_en: v }))} />
+          </FormDialog>
 
           <Text style={styles.sectionTitle}>Master Lists</Text>
-          {masterLists.map((item) => (
-            <View key={item.id} style={styles.userRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.userName}>{item.name_hi} / {item.name_en}</Text>
-                <Text style={styles.userSub}>{item.listType}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View>
+              <View style={[styles.tableRow, styles.headerRow]}>
+                <Text style={[styles.cell, styles.wListType, styles.headerText]}>List Type</Text>
+                <Text style={[styles.cell, styles.wLang, styles.headerText]}>Hindi</Text>
+                <Text style={[styles.cell, styles.wLang, styles.headerText]}>English</Text>
+                <Text style={[styles.cell, styles.wActions, styles.headerText]}>Actions</Text>
               </View>
-              <View style={styles.rowActionsWrap}>
-                <TableRowActions
-                  onEdit={() => {
-                    setMasterForm({
-                      listType: item.listType,
-                      name_hi: item.name_hi,
-                      name_en: item.name_en
-                    });
-                    setShowMasterForm(true);
-                  }}
-                  onDetails={() => Alert.alert('Master List Details', `Type: ${item.listType}\nHindi: ${item.name_hi}\nEnglish: ${item.name_en}`)}
-                />
-                <TouchableOpacity style={[styles.statusBtn, styles.inactiveBtn]} onPress={() => void deleteMasterMutation.mutateAsync(item.id)}>
-                  <Text style={styles.statusBtnText}>Delete</Text>
-                </TouchableOpacity>
-              </View>
+              {masterLists.map((item) => (
+                <View key={item.id} style={styles.tableRow}>
+                  <Text style={[styles.cell, styles.wListType]}>{item.listType}</Text>
+                  <Text style={[styles.cell, styles.wLang]}>{item.name_hi}</Text>
+                  <Text style={[styles.cell, styles.wLang]}>{item.name_en}</Text>
+                  <View style={[styles.cell, styles.wActions, styles.rowActionsWrap]}>
+                    <TableRowActions
+                      onEdit={() => {
+                        setMasterForm({
+                          listType: item.listType,
+                          name_hi: item.name_hi,
+                          name_en: item.name_en
+                        });
+                        setShowMasterForm(true);
+                      }}
+                      onDetails={() => Alert.alert('Master List Details', `Type: ${item.listType}\nHindi: ${item.name_hi}\nEnglish: ${item.name_en}`)}
+                    />
+                    <TouchableOpacity style={[styles.statusBtn, styles.inactiveBtn]} onPress={() => void deleteMasterMutation.mutateAsync(item.id)}>
+                      <Text style={styles.statusBtnText}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
             </View>
-          ))}
+          </ScrollView>
         </>
       ) : null}
     </ScrollView>
@@ -672,10 +777,31 @@ const styles = StyleSheet.create({
   cancelText: { color: Colors.secondary, fontWeight: '700' },
   saveText: { color: '#fff', fontWeight: '700' },
   sectionTitle: { marginTop: 14, marginBottom: 8, fontWeight: '700', fontSize: 16, color: Colors.secondary },
+  filterToggle: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: '#eef3ff', marginBottom: 8 },
+  filterToggleText: { color: Colors.secondary, fontSize: 12, fontWeight: '700' },
   filterBar: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  filterInput: { flex: 1, marginBottom: 0 },
   filterPill: { flex: 1, borderWidth: 1, borderColor: '#dde2ee', borderRadius: 10, overflow: 'hidden', backgroundColor: '#fff' },
-  userRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#e8e8ee', borderRadius: 10, padding: 10, marginBottom: 8 },
-  userName: { color: Colors.textPrimary, fontWeight: '700' },
+  tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor: '#fff' },
+  headerRow: { backgroundColor: '#f5f7fb' },
+  headerText: { fontWeight: '700', color: Colors.secondary },
+  cell: { padding: 10, color: Colors.textPrimary, fontSize: 12 },
+  wPhoto: { width: 82 },
+  wName: { width: 150 },
+  wRole: { width: 110 },
+  wPhone: { width: 130 },
+  wNode: { width: 150 },
+  wType: { width: 110 },
+  wStatus: { width: 100 },
+  wActions: { width: 180 },
+  wModule: { width: 140 },
+  wKey: { width: 170 },
+  wCount: { width: 80 },
+  wListType: { width: 170 },
+  wLang: { width: 180 },
+  userPhoto: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: '#d9deea' },
+  userPhotoFallback: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: '#d9deea', backgroundColor: '#eef3ff', alignItems: 'center', justifyContent: 'center' },
+  userPhotoFallbackText: { color: Colors.secondary, fontWeight: '700', fontSize: 11 },
   userSub: { color: Colors.textSecondary, fontSize: 12, marginTop: 2 },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
   chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: '#d9deea', backgroundColor: '#fff' },

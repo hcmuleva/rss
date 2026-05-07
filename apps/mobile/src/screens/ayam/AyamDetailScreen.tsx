@@ -10,6 +10,7 @@ import { getMasterLists } from '@/api/masterLists.api';
 import { getUsers } from '@/api/users.api';
 import { DottedAddCard } from '@/components/DottedAddCard';
 import { DocumentUploader } from '@/components/DocumentUploader';
+import { FormDialog } from '@/components/FormDialog';
 import { MediaUploader } from '@/components/MediaUploader';
 import { RecordDetailsModal } from '@/components/RecordDetailsModal';
 import { ScreenTopBar } from '@/components/ScreenTopBar';
@@ -216,11 +217,14 @@ export const AyamDetailScreen = (): React.JSX.Element => {
       <ScreenTopBar title="Ayam Module" />
       <Text style={styles.subtitle}>Capture Ayam sub-category records and monitor progress.</Text>
 
-      {!showCreateForm ? (
-        <DottedAddCard label="Ayam Entry Form" onPress={() => { setEditingId(null); setShowCreateForm(true); }} />
-      ) : (
-        <View style={styles.formCard}>
-          <Text style={styles.formTitle}>{editingId ? 'Edit Ayam Entry' : 'Create Ayam Entry'}</Text>
+      <DottedAddCard label="Ayam Entry Form" onPress={() => { setEditingId(null); setShowCreateForm(true); }} />
+      <FormDialog
+        visible={showCreateForm}
+        title={editingId ? 'Edit Ayam Entry' : 'Create Ayam Entry'}
+        submitLabel={editingId ? 'Update Entry' : 'Save Entry'}
+        onClose={() => { setEditingId(null); setShowCreateForm(false); }}
+        onSubmit={() => void submit()}
+      >
           <FieldLabel text="Sub Category" />
           <View style={styles.pickerWrap}><Picker selectedValue={form.subCategory} onValueChange={(v) => setForm((p) => ({ ...p, subCategory: v }))}>{subCategories.map((c) => <Picker.Item key={c} label={c} value={c} />)}</Picker></View>
           <FieldLabel text="Node ID" />
@@ -263,9 +267,7 @@ export const AyamDetailScreen = (): React.JSX.Element => {
           {form.subCategory === 'Vidhi Aayam' ? (
             <DocumentUploader value={form.documentUrls} onChange={(urls) => setForm((prev) => ({ ...prev, documentUrls: urls }))} label="Document Upload (PDF/DOC)" />
           ) : null}
-          <View style={styles.actionsRow}><TouchableOpacity style={[styles.actionButton, styles.cancelBtn]} onPress={() => { setEditingId(null); setShowCreateForm(false); }}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[styles.actionButton, styles.saveBtn]} onPress={() => void submit()}><Text style={styles.saveText}>{editingId ? 'Update Entry' : 'Save Entry'}</Text></TouchableOpacity></View>
-        </View>
-      )}
+      </FormDialog>
 
       <Text style={styles.sectionTitle}>Ayam Table</Text>
       <View style={styles.filterRow}><TextInput style={[styles.input, styles.filterInput]} placeholder="Search subcategory/workedFor/whoWorked" value={search} onChangeText={setSearch} /><View style={[styles.pickerWrap, styles.filterPicker]}><Picker selectedValue={subCategoryFilter} onValueChange={setSubCategoryFilter}><Picker.Item label="All Subcategories" value="ALL" />{subCategories.map((c) => <Picker.Item key={c} label={c} value={c} />)}</Picker></View></View>
@@ -364,8 +366,13 @@ export const AyamDetailScreen = (): React.JSX.Element => {
               }}
             />
           ) : (
-            <View style={styles.formCard}>
-              <Text style={styles.formTitle}>{editingMemberId ? 'Edit Member' : 'Create Member'}</Text>
+            <FormDialog
+              visible={showMemberForm}
+              title={editingMemberId ? 'Edit Member' : 'Create Member'}
+              submitLabel={editingMemberId ? 'Update Member' : 'Save Member'}
+              onClose={() => setShowMemberForm(false)}
+              onSubmit={() => void submitMember()}
+            >
               <FieldLabel text="Node ID" />
               <TextInput style={styles.input} value={memberForm.nodeId} onChangeText={(v) => setMemberForm((p) => ({ ...p, nodeId: v }))} />
               <FieldLabel text="Member Type" />
@@ -434,15 +441,7 @@ export const AyamDetailScreen = (): React.JSX.Element => {
                   </View>
                 </>
               ) : null}
-              <View style={styles.actionsRow}>
-                <TouchableOpacity style={[styles.actionButton, styles.cancelBtn]} onPress={() => setShowMemberForm(false)}>
-                  <Text style={styles.cancelText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionButton, styles.saveBtn]} onPress={() => void submitMember()}>
-                  <Text style={styles.saveText}>{editingMemberId ? 'Update Member' : 'Save Member'}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+            </FormDialog>
           )}
           {filteredMembers.map((member: AyamMemberRow) => (
             <View key={member.id} style={styles.userMemberRow}>
@@ -525,17 +524,9 @@ const styles = StyleSheet.create({
   content: { padding: 16 },
   title: { fontSize: 22, fontWeight: '700', color: Colors.secondary },
   subtitle: { marginTop: 4, marginBottom: 12, color: Colors.textSecondary },
-  formCard: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#e6e6e9', padding: 12, marginBottom: 10 },
-  formTitle: { fontWeight: '800', color: Colors.secondary, marginBottom: 8 },
   label: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginBottom: 4 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, marginBottom: 8, backgroundColor: '#fff' },
   pickerWrap: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, overflow: 'hidden', marginBottom: 8, backgroundColor: '#fff' },
-  actionsRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  actionButton: { flex: 1, borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
-  cancelBtn: { backgroundColor: '#eef1f6' },
-  saveBtn: { backgroundColor: Colors.primary },
-  cancelText: { color: Colors.secondary, fontWeight: '700' },
-  saveText: { color: '#fff', fontWeight: '700' },
   sectionTitle: { marginTop: 14, marginBottom: 8, fontWeight: '700', fontSize: 16, color: Colors.secondary },
   filterRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   filterInput: { flex: 1, marginBottom: 0 },

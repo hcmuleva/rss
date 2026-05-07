@@ -8,6 +8,7 @@ import { ActivityRow, createActivity, getActivities, getActivityById, updateActi
 import { AvatarGroup } from '@/components/AvatarGroup';
 import { getUsers } from '@/api/users.api';
 import { DottedAddCard } from '@/components/DottedAddCard';
+import { FormDialog } from '@/components/FormDialog';
 import { MediaUploader } from '@/components/MediaUploader';
 import { RecordDetailsModal } from '@/components/RecordDetailsModal';
 import { ScreenTopBar } from '@/components/ScreenTopBar';
@@ -83,11 +84,14 @@ export const ActivityFormScreen = (): React.JSX.Element => {
       <ScreenTopBar title="Activities Module" />
       <Text style={styles.subtitle}>Create and track activity events with attendance details.</Text>
 
-      {!showCreateForm ? (
-        <DottedAddCard label="Activity Form" onPress={() => { setEditingId(null); setShowCreateForm(true); }} />
-      ) : (
-        <View style={styles.formCard}>
-          <Text style={styles.formTitle}>{editingId ? 'Edit Activity' : 'Create Activity'}</Text>
+      <DottedAddCard label="Activity Form" onPress={() => { setEditingId(null); setShowCreateForm(true); }} />
+      <FormDialog
+        visible={showCreateForm}
+        title={editingId ? 'Edit Activity' : 'Create Activity'}
+        submitLabel={editingId ? 'Update Activity' : 'Save Activity'}
+        onClose={() => { setEditingId(null); setShowCreateForm(false); }}
+        onSubmit={() => void submit()}
+      >
           <FieldLabel text="Node ID" />
           <TextInput style={styles.input} value={form.nodeId} onChangeText={(v) => setForm((p) => ({ ...p, nodeId: v }))} placeholder="e.g. h-l5b3-1" />
           <FieldLabel text="Category" />
@@ -128,10 +132,7 @@ export const ActivityFormScreen = (): React.JSX.Element => {
           <View style={styles.row}><View style={styles.halfWrap}><FieldLabel text="Male Old" /><TextInput style={styles.input} value={form.maleOld} keyboardType="numeric" onChangeText={(v) => setForm((p) => ({ ...p, maleOld: v }))} /></View><View style={styles.halfWrap}><FieldLabel text="Male Young" /><TextInput style={styles.input} value={form.maleYoung} keyboardType="numeric" onChangeText={(v) => setForm((p) => ({ ...p, maleYoung: v }))} /></View></View>
           <View style={styles.row}><View style={styles.halfWrap}><FieldLabel text="Male Kids" /><TextInput style={styles.input} value={form.maleKids} keyboardType="numeric" onChangeText={(v) => setForm((p) => ({ ...p, maleKids: v }))} /></View><View style={styles.halfWrap}><FieldLabel text="Female Old" /><TextInput style={styles.input} value={form.femaleOld} keyboardType="numeric" onChangeText={(v) => setForm((p) => ({ ...p, femaleOld: v }))} /></View></View>
           <View style={styles.row}><View style={styles.halfWrap}><FieldLabel text="Female Young" /><TextInput style={styles.input} value={form.femaleYoung} keyboardType="numeric" onChangeText={(v) => setForm((p) => ({ ...p, femaleYoung: v }))} /></View><View style={styles.halfWrap}><FieldLabel text="Female Kids" /><TextInput style={styles.input} value={form.femaleKids} keyboardType="numeric" onChangeText={(v) => setForm((p) => ({ ...p, femaleKids: v }))} /></View></View>
-
-          <View style={styles.actionsRow}><TouchableOpacity style={[styles.actionButton, styles.cancelBtn]} onPress={() => { setEditingId(null); setShowCreateForm(false); }}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[styles.actionButton, styles.saveBtn]} onPress={() => void submit()}><Text style={styles.saveText}>{editingId ? 'Update Activity' : 'Save Activity'}</Text></TouchableOpacity></View>
-        </View>
-      )}
+      </FormDialog>
 
       <Text style={styles.sectionTitle}>Activities Table</Text>
       <View style={styles.filterRow}><TextInput style={[styles.input, styles.filterInput]} placeholder="Search area/category/description" value={search} onChangeText={setSearch} /><View style={[styles.pickerWrap, styles.filterPicker]}><Picker selectedValue={categoryFilter} onValueChange={setCategoryFilter}><Picker.Item label="All Categories" value="ALL" />{categories.map((c) => <Picker.Item key={c} label={c} value={c} />)}</Picker></View></View>
@@ -218,20 +219,12 @@ const styles = StyleSheet.create({
   content: { padding: 16 },
   title: { fontSize: 22, fontWeight: '700', color: Colors.secondary },
   subtitle: { marginTop: 4, marginBottom: 12, color: Colors.textSecondary },
-  formCard: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#e6e6e9', padding: 12, marginBottom: 10 },
-  formTitle: { fontWeight: '800', color: Colors.secondary, marginBottom: 8 },
   label: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginBottom: 4 },
   groupTitle: { marginBottom: 6, marginTop: 2, fontWeight: '700', color: Colors.secondary },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, marginBottom: 8, backgroundColor: '#fff' },
   row: { flexDirection: 'row', gap: 8 },
   halfWrap: { flex: 1 },
   pickerWrap: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, overflow: 'hidden', marginBottom: 8, backgroundColor: '#fff' },
-  actionsRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  actionButton: { flex: 1, borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
-  cancelBtn: { backgroundColor: '#eef1f6' },
-  saveBtn: { backgroundColor: Colors.primary },
-  cancelText: { color: Colors.secondary, fontWeight: '700' },
-  saveText: { color: '#fff', fontWeight: '700' },
   sectionTitle: { marginTop: 14, marginBottom: 8, fontWeight: '700', fontSize: 16, color: Colors.secondary },
   filterRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   filterInput: { flex: 1, marginBottom: 0 },

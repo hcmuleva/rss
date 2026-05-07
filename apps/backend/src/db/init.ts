@@ -11,6 +11,7 @@ const createSchema = async () => {
       password TEXT NOT NULL,
       role TEXT NOT NULL,
       assigned_node_id TEXT NOT NULL,
+      photo_url TEXT NULL,
       is_active BOOLEAN NOT NULL DEFAULT TRUE,
       is_full_time BOOLEAN NOT NULL DEFAULT FALSE
     );
@@ -149,6 +150,7 @@ const createSchema = async () => {
     ALTER TABLE ayam_entries ADD COLUMN IF NOT EXISTS document_urls TEXT[] NOT NULL DEFAULT '{}';
     ALTER TABLE ayam_members ADD COLUMN IF NOT EXISTS address_details JSONB NULL;
     ALTER TABLE ayam_members ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_url TEXT NULL;
   `);
 };
 
