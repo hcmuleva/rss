@@ -4,7 +4,6 @@ import { Picker } from '@react-native-picker/picker';
 import { useRoute } from '@react-navigation/native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { TreeView } from '@/components/TreeView';
 import { DottedAddCard } from '@/components/DottedAddCard';
 import { FormDialog } from '@/components/FormDialog';
 import { TreeSelect } from '@/components/TreeSelect';
@@ -31,10 +30,21 @@ const LEVEL_META = [
 ] as const;
 
 const levelToCode = Object.fromEntries(LEVEL_META.map((item) => [item.key, item.code]));
-const levelToLabel = Object.fromEntries(LEVEL_META.map((item) => [item.key, item.label]));
-const CORE_LEVELS = new Set(['PRANT', 'SAMBHAG', 'VIBHAG', 'DISTRICT']);
+const levelOrder = Object.fromEntries(LEVEL_META.map((item, index) => [item.key, index]));
 const AYAM_SUB_CATEGORIES = ['Pralekhan', 'Vanshavali', 'Nidhi', 'Sanskriti', 'MatraShakti', 'VidhiAayam'];
 const FieldLabel = ({ text }: { text: string }) => <Text style={styles.label}>{text}</Text>;
+const levelColor: Record<string, string> = {
+  PRANT: '#5b8def',
+  SAMBHAG: '#5f85f7',
+  VIBHAG: '#4b9ce2',
+  DISTRICT: '#4bb7ae',
+  KHAND: '#55b467',
+  MANDAL: '#8db950',
+  GRAM: '#e3a33d',
+  NAGAR: '#9e77e6',
+  BASTI: '#d17ed3',
+  MOHALLA: '#d27676'
+};
 const initials = (name: string) =>
   name
     .split(' ')
@@ -75,6 +85,10 @@ export const TeamScreen = (): React.JSX.Element => {
   const [showMasterForm, setShowMasterForm] = React.useState(false);
   const [showAssignmentForm, setShowAssignmentForm] = React.useState(false);
   const [editingUserId, setEditingUserId] = React.useState<string | null>(null);
+  const [selectedLocationNodeId, setSelectedLocationNodeId] = React.useState<string | null>(null);
+  const [locationSearch, setLocationSearch] = React.useState('');
+  const [locationLevelFilter, setLocationLevelFilter] = React.useState<'ALL' | string>('ALL');
+  const [locationViewMode, setLocationViewMode] = React.useState<'descendants' | 'children'>('descendants');
 
   const [locationForm, setLocationForm] = React.useState(initialLocationForm);
   const [userForm, setUserForm] = React.useState({ name: '', phone: '', password: '', photoUrl: '', role: 'USER' as 'ADMIN' | 'USER', assignedNodeId: '', isFullTime: false });
@@ -103,6 +117,11 @@ export const TeamScreen = (): React.JSX.Element => {
 
   const { data: nodes = [] } = useQuery({ queryKey: ['hierarchy-nodes'], queryFn: getHierarchyNodes });
   const { data: users = [] } = useQuery({ queryKey: ['admin-users'], queryFn: getUsers, enabled: role !== 'USER' });
+  const { data: assignmentScopedUsers = [] } = useQuery({
+    queryKey: ['assignment-users', assignmentForm.nodeId ?? 'all'],
+    queryFn: () => getUsers(assignmentForm.nodeId ? { assignedNodeId: assignmentForm.nodeId } : undefined),
+    enabled: role !== 'USER'
+  });
   const { data: masterLists = [] } = useQuery({ queryKey: ['master-lists'], queryFn: getMasterLists, enabled: role !== 'USER' });
   const { data: assignments = [] } = useQuery({ queryKey: ['module-assignments'], queryFn: getAssignments, enabled: role !== 'USER' });
 
@@ -113,13 +132,26 @@ export const TeamScreen = (): React.JSX.Element => {
   }, [nodes, userForm.assignedNodeId]);
 
   React.useEffect(() => {
-    if (!assignmentForm.assignedUserIds.length) {
-      const firstUser = users.find((item) => item.role === 'USER' && item.isActive);
-      if (firstUser) {
-        setAssignmentForm((prev) => ({ ...prev, assignedUserIds: [firstUser.id] }));
-      }
+    if (!selectedLocationNodeId && nodes.length) {
+      const root = nodes.find((node) => !node.parentId) ?? nodes[0];
+      setSelectedLocationNodeId(root.id);
     }
-  }, [assignmentForm.assignedUserIds.length, users]);
+  }, [nodes, selectedLocationNodeId]);
+
+  React.useEffect(() => {
+    const candidateUserIds = assignmentScopedUsers.filter((item) => item.role === 'USER' && item.isActive).map((item) => item.id);
+    setAssignmentForm((prev) => {
+      const selectedFromCandidates = prev.assignedUserIds.filter((id) => candidateUserIds.includes(id));
+      if (selectedFromCandidates.length) {
+        return selectedFromCandidates.length === prev.assignedUserIds.length ? prev : { ...prev, assignedUserIds: selectedFromCandidates };
+      }
+      const firstUserId = candidateUserIds[0];
+      if (!firstUserId) {
+        return prev.assignedUserIds.length ? { ...prev, assignedUserIds: [] } : prev;
+      }
+      return { ...prev, assignedUserIds: [firstUserId] };
+    });
+  }, [assignmentScopedUsers]);
 
   React.useEffect(() => {
     if (role === 'ADMIN' && !assignmentForm.nodeId) {
@@ -140,6 +172,7 @@ export const TeamScreen = (): React.JSX.Element => {
     mutationFn: createUser,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      void queryClient.invalidateQueries({ queryKey: ['assignment-users'] });
       setUserForm({ name: '', phone: '', password: '', photoUrl: '', role: 'USER', assignedNodeId: nodes[0]?.id ?? '', isFullTime: false });
       setEditingUserId(null);
       setShowUserForm(false);
@@ -151,6 +184,7 @@ export const TeamScreen = (): React.JSX.Element => {
       updateUser(id, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      void queryClient.invalidateQueries({ queryKey: ['assignment-users'] });
       setUserForm({ name: '', phone: '', password: '', photoUrl: '', role: 'USER', assignedNodeId: nodes[0]?.id ?? '', isFullTime: false });
       setEditingUserId(null);
       setShowUserForm(false);
@@ -161,6 +195,7 @@ export const TeamScreen = (): React.JSX.Element => {
     mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) => updateUserStatus(id, isActive),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      void queryClient.invalidateQueries({ queryKey: ['assignment-users'] });
     }
   });
 
@@ -196,8 +231,52 @@ export const TeamScreen = (): React.JSX.Element => {
   });
 
   const selectedParent = nodes.find((node) => node.id === locationForm.parentId);
-  const ruralTreeNodes = nodes.filter((node) => node.branch === 'rural');
-  const urbanTreeNodes = nodes.filter((node) => node.branch === 'urban' || CORE_LEVELS.has(node.level));
+  const selectedLocationNode = nodes.find((node) => node.id === selectedLocationNodeId);
+  const locationBreadcrumb = React.useMemo(() => {
+    const list: typeof nodes = [];
+    let current = selectedLocationNode ?? null;
+    while (current) {
+      list.unshift(current);
+      current = current.parentId ? nodes.find((node) => node.id === current?.parentId) ?? null : null;
+    }
+    return list;
+  }, [nodes, selectedLocationNode]);
+  const locationRows = React.useMemo(() => {
+    if (!selectedLocationNode) {
+      return [];
+    }
+    if (locationViewMode === 'children') {
+      return nodes
+        .filter((node) => node.parentId === selectedLocationNode.id)
+        .map((node) => ({ ...node, _depth: 1 }));
+    }
+    const result: Array<(typeof nodes)[number] & { _depth: number }> = [];
+    const queue: Array<{ id: string; depth: number }> = [{ id: selectedLocationNode.id, depth: 0 }];
+    while (queue.length) {
+      const current = queue.shift();
+      if (!current) continue;
+      const children = nodes.filter((node) => node.parentId === current.id);
+      children.forEach((child) => {
+        result.push({ ...child, _depth: current.depth + 1 });
+        queue.push({ id: child.id, depth: current.depth + 1 });
+      });
+    }
+    return result;
+  }, [locationViewMode, nodes, selectedLocationNode]);
+  const filteredLocationRows = React.useMemo(() => {
+    const q = locationSearch.trim().toLowerCase();
+    return locationRows.filter((node) => {
+      const selectedLevelOrder = locationLevelFilter === 'ALL' ? null : levelOrder[locationLevelFilter];
+      const nodeLevelOrder = levelOrder[node.level];
+      const levelOk =
+        locationLevelFilter === 'ALL' ||
+        (selectedLevelOrder !== null && selectedLevelOrder !== undefined && nodeLevelOrder !== undefined
+          ? nodeLevelOrder >= selectedLevelOrder
+          : node.level === locationLevelFilter);
+      const searchOk = !q || `${node.name_hi} ${node.name_en} ${node.address}`.toLowerCase().includes(q);
+      return levelOk && searchOk;
+    });
+  }, [locationLevelFilter, locationRows, locationSearch]);
   const nodeSelectOptions = React.useMemo(
     () =>
       nodes.map((node) => ({
@@ -340,6 +419,10 @@ export const TeamScreen = (): React.JSX.Element => {
       }),
     [userRoleFilter, userSearch, userStatusFilter, users]
   );
+  const assignmentSelectableUsers = React.useMemo(
+    () => assignmentScopedUsers.filter((item) => item.role === 'USER' && item.isActive),
+    [assignmentScopedUsers]
+  );
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -354,16 +437,101 @@ export const TeamScreen = (): React.JSX.Element => {
 
       {panel === 'locations' ? (
         <>
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionCardTitle}>Rural Path Tree</Text>
-            <TreeView nodes={ruralTreeNodes.map((node) => ({ id: node.id, parentId: node.parentId, title: `${node.name_hi} / ${node.name_en}`, subtitle: `${(levelToLabel[node.level] ?? node.level) as string} • ${node.address}`, badge: (levelToCode[node.level] ?? node.level) as string, tag: node.branch }))} emptyText="No rural hierarchy nodes found." />
-          </View>
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionCardTitle}>Urban Path Tree</Text>
-            <TreeView nodes={urbanTreeNodes.map((node) => ({ id: node.id, parentId: node.parentId, title: `${node.name_hi} / ${node.name_en}`, subtitle: `${(levelToLabel[node.level] ?? node.level) as string} • ${node.address}`, badge: (levelToCode[node.level] ?? node.level) as string, tag: node.branch }))} emptyText="No urban hierarchy nodes found." />
-          </View>
-
           <DottedAddCard label="Location Node Form" onPress={() => setShowLocationForm(true)} />
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionCardTitle}>Hierarchy Browser</Text>
+            <Text style={styles.userSub}>Navigate by breadcrumb and child table for quick understanding.</Text>
+            <View style={styles.breadcrumbRow}>
+              {locationBreadcrumb.map((node, idx) => (
+                <TouchableOpacity key={node.id} onPress={() => setSelectedLocationNodeId(node.id)} style={styles.breadcrumbChip}>
+                  <Text style={styles.breadcrumbText}>{node.name_en}</Text>
+                  {idx < locationBreadcrumb.length - 1 ? <Text style={styles.breadcrumbSep}>›</Text> : null}
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.filterBar}>
+              <TextInput
+                style={[styles.input, styles.filterInput]}
+                placeholder="Search child location..."
+                value={locationSearch}
+                onChangeText={setLocationSearch}
+              />
+              <View style={styles.filterPill}>
+                <Picker selectedValue={locationLevelFilter} onValueChange={(value) => setLocationLevelFilter(value)}>
+                  <Picker.Item label="All Levels" value="ALL" />
+                  {LEVEL_META.map((item) => (
+                    <Picker.Item key={item.key} label={`${item.code} • ${item.label}`} value={item.key} />
+                  ))}
+                </Picker>
+              </View>
+            </View>
+            <View style={styles.locationActionsRow}>
+              <TouchableOpacity
+                style={[styles.statusBtn, locationViewMode === 'descendants' ? styles.activeBtn : styles.inactiveBtn]}
+                onPress={() => setLocationViewMode('descendants')}
+              >
+                <Text style={styles.statusBtnText}>All Descendants</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.statusBtn, locationViewMode === 'children' ? styles.activeBtn : styles.inactiveBtn]}
+                onPress={() => setLocationViewMode('children')}
+              >
+                <Text style={styles.statusBtnText}>Direct Children</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.statusBtn, styles.inactiveBtn]}
+                onPress={() => {
+                  if (selectedLocationNode?.parentId) {
+                    setSelectedLocationNodeId(selectedLocationNode.parentId);
+                  }
+                }}
+                disabled={!selectedLocationNode?.parentId}
+              >
+                <Text style={styles.statusBtnText}>Up One Level</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.statusBtn, styles.activeBtn]}
+                onPress={() => {
+                  setLocationForm((prev) => ({ ...prev, parentId: selectedLocationNode?.id ?? null }));
+                  setShowLocationForm(true);
+                }}
+              >
+                <Text style={styles.statusBtnText}>Create Child</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View>
+                <View style={[styles.tableRow, styles.headerRow]}>
+                  <Text style={[styles.cell, styles.wLocName, styles.headerText]}>Location</Text>
+                  <Text style={[styles.cell, styles.wLocLevel, styles.headerText]}>Level</Text>
+                  <Text style={[styles.cell, styles.wLocBranch, styles.headerText]}>Branch</Text>
+                  <Text style={[styles.cell, styles.wLocAddress, styles.headerText]}>Address</Text>
+                  <Text style={[styles.cell, styles.wLocAction, styles.headerText]}>Action</Text>
+                </View>
+                {filteredLocationRows.map((node) => (
+                  <View key={node.id} style={styles.tableRow}>
+                    <Text style={[styles.cell, styles.wLocName]}>
+                      {' '.repeat(Math.max((node._depth ?? 1) - 1, 0) * 2)}
+                      {node.name_hi} / {node.name_en}
+                    </Text>
+                    <View style={[styles.cell, styles.wLocLevel]}>
+                      <View style={[styles.levelBadge, { backgroundColor: levelColor[node.level] ?? '#94a3b8' }]}>
+                        <Text style={styles.levelBadgeText}>{(levelToCode[node.level] ?? node.level) as string}</Text>
+                      </View>
+                    </View>
+                    <Text style={[styles.cell, styles.wLocBranch]}>{node.branch}</Text>
+                    <Text style={[styles.cell, styles.wLocAddress]} numberOfLines={2}>{node.address}</Text>
+                    <View style={[styles.cell, styles.wLocAction]}>
+                      <TouchableOpacity style={styles.openBtn} onPress={() => setSelectedLocationNodeId(node.id)}>
+                        <Text style={styles.openBtnText}>Open</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+            {!filteredLocationRows.length ? <Text style={styles.userSub}>No child nodes under selected location.</Text> : null}
+          </View>
           <FormDialog
             visible={showLocationForm}
             title="Create Location Node"
@@ -498,6 +666,7 @@ export const TeamScreen = (): React.JSX.Element => {
                     <Text style={[styles.cell, styles.wRole, styles.headerText]}>Role</Text>
                     <Text style={[styles.cell, styles.wPhone, styles.headerText]}>Phone</Text>
                     <Text style={[styles.cell, styles.wNode, styles.headerText]}>Node</Text>
+                    <Text style={[styles.cell, styles.wNode, styles.headerText]}>NodName</Text>
                     <Text style={[styles.cell, styles.wType, styles.headerText]}>Type</Text>
                     <Text style={[styles.cell, styles.wStatus, styles.headerText]}>Status</Text>
                     <Text style={[styles.cell, styles.wActions, styles.headerText]}>Actions</Text>
@@ -517,6 +686,7 @@ export const TeamScreen = (): React.JSX.Element => {
                       <Text style={[styles.cell, styles.wRole]}>{user.role}</Text>
                       <Text style={[styles.cell, styles.wPhone]}>{user.phone}</Text>
                       <Text style={[styles.cell, styles.wNode]}>{user.assignedNodeId}</Text>
+                      <Text style={[styles.cell, styles.wNode]}>{nodes.find((n) => n.id === user.assignedNodeId)?.name_hi ?? 'N/A'}</Text>
                       <Text style={[styles.cell, styles.wType]}>{user.isFullTime ? 'Full-time' : 'Part-time'}</Text>
                       <Text style={[styles.cell, styles.wStatus]}>{user.isActive ? 'Active' : 'Inactive'}</Text>
                       <View style={[styles.cell, styles.wActions, styles.rowActionsWrap]}>
@@ -596,26 +766,38 @@ export const TeamScreen = (): React.JSX.Element => {
                   rootLabel={role === 'SUPER_ADMIN' ? 'All locations' : undefined}
                 />
                 <FieldLabel text="Assign To Users" />
-                <View style={styles.chipWrap}>
-                  {users
-                    .filter((item) => item.role === 'USER' && item.isActive)
-                    .map((user) => {
-                      const selected = assignmentForm.assignedUserIds.includes(user.id);
-                      return (
-                        <TouchableOpacity
-                          key={user.id}
-                          style={[styles.chip, selected && styles.chipActive]}
-                          onPress={() =>
-                            setAssignmentForm((prev) => ({
-                              ...prev,
-                              assignedUserIds: selected ? prev.assignedUserIds.filter((id) => id !== user.id) : [...prev.assignedUserIds, user.id]
-                            }))
-                          }
-                        >
-                          <Text style={[styles.chipText, selected && styles.chipTextActive]}>{user.name}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
+                <View style={styles.selectableUserList}>
+                  <View style={styles.selectableUserHeader}>
+                    <Text style={[styles.selectableUserHeaderText, styles.colUser]}>User</Text>
+                    <Text style={[styles.selectableUserHeaderText, styles.colPhone]}>Phone</Text>
+                    <Text style={[styles.selectableUserHeaderText, styles.colNode]}>Node</Text>
+                    <Text style={[styles.selectableUserHeaderText, styles.colMark]}>Select</Text>
+                  </View>
+                  {assignmentSelectableUsers.map((user) => {
+                    const selected = assignmentForm.assignedUserIds.includes(user.id);
+                    return (
+                      <TouchableOpacity
+                        key={user.id}
+                        style={[styles.selectableUserRow, selected && styles.selectableUserRowActive]}
+                        onPress={() =>
+                          setAssignmentForm((prev) => ({
+                            ...prev,
+                            assignedUserIds: selected ? prev.assignedUserIds.filter((id) => id !== user.id) : [...prev.assignedUserIds, user.id]
+                          }))
+                        }
+                      >
+                        <Text style={[styles.selectableUserText, styles.colUser]} numberOfLines={1}>{user.name}</Text>
+                        <Text style={[styles.selectableUserText, styles.colPhone]}>{user.phone}</Text>
+                        <Text style={[styles.selectableUserText, styles.colNode]} numberOfLines={1}>
+                          {(levelToCode[nodes.find((n) => n.id === user.assignedNodeId)?.level ?? ''] ?? 'NA') as string}
+                        </Text>
+                        <View style={[styles.selectMarker, selected && styles.selectMarkerActive]}>
+                          <Text style={[styles.selectMarkerText, selected && styles.selectMarkerTextActive]}>{selected ? '✓' : ''}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  {!assignmentSelectableUsers.length ? <Text style={styles.userSub}>No active users found for selected node.</Text> : null}
                 </View>
               </FormDialog>
 
@@ -761,6 +943,11 @@ const styles = StyleSheet.create({
   segmentTextActive: { color: Colors.secondary },
   sectionCard: { marginTop: 10, backgroundColor: '#f7f8fb', borderRadius: 14, borderWidth: 1, borderColor: '#ebeef4', padding: 10 },
   sectionCardTitle: { fontSize: 15, fontWeight: '800', color: Colors.secondary, marginBottom: 6 },
+  breadcrumbRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
+  breadcrumbChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#edf3ff', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8 },
+  breadcrumbText: { color: Colors.secondary, fontSize: 12, fontWeight: '700' },
+  breadcrumbSep: { marginLeft: 6, color: '#8ba0d0', fontWeight: '700' },
+  locationActionsRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   formCard: { borderRadius: 14, borderWidth: 1, borderColor: '#e7e9ef', backgroundColor: Colors.card, padding: 12, marginTop: 12 },
   formTitle: { fontWeight: '800', color: Colors.secondary, marginBottom: 8 },
   label: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginBottom: 4 },
@@ -799,6 +986,15 @@ const styles = StyleSheet.create({
   wCount: { width: 80 },
   wListType: { width: 170 },
   wLang: { width: 180 },
+  wLocName: { width: 220 },
+  wLocLevel: { width: 110 },
+  wLocBranch: { width: 90 },
+  wLocAddress: { width: 260 },
+  wLocAction: { width: 90 },
+  levelBadge: { alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  levelBadgeText: { color: '#fff', fontWeight: '700', fontSize: 11 },
+  openBtn: { backgroundColor: '#edf3ff', borderRadius: 6, paddingVertical: 6, paddingHorizontal: 10, alignSelf: 'flex-start' },
+  openBtnText: { color: Colors.secondary, fontWeight: '700', fontSize: 12 },
   userPhoto: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: '#d9deea' },
   userPhotoFallback: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: '#d9deea', backgroundColor: '#eef3ff', alignItems: 'center', justifyContent: 'center' },
   userPhotoFallbackText: { color: Colors.secondary, fontWeight: '700', fontSize: 11 },
@@ -808,6 +1004,20 @@ const styles = StyleSheet.create({
   chipActive: { borderColor: '#b8cdfc', backgroundColor: '#edf3ff' },
   chipText: { fontSize: 12, color: Colors.textSecondary },
   chipTextActive: { color: Colors.secondary, fontWeight: '700' },
+  selectableUserList: { borderWidth: 1, borderColor: '#dde2ee', borderRadius: 10, overflow: 'hidden', backgroundColor: '#fff', marginBottom: 10 },
+  selectableUserHeader: { flexDirection: 'row', backgroundColor: '#f5f7fb', borderBottomWidth: 1, borderBottomColor: '#e9edf5', paddingVertical: 8 },
+  selectableUserHeaderText: { fontSize: 11, fontWeight: '700', color: Colors.secondary, paddingHorizontal: 8 },
+  selectableUserRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#f0f2f7', paddingVertical: 10 },
+  selectableUserRowActive: { backgroundColor: '#edf3ff' },
+  selectableUserText: { fontSize: 12, color: Colors.textPrimary, paddingHorizontal: 8 },
+  colUser: { flex: 1.45 },
+  colPhone: { flex: 1.05 },
+  colNode: { flex: 0.65 },
+  colMark: { width: 52, textAlign: 'center' },
+  selectMarker: { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: '#c5cedf', alignItems: 'center', justifyContent: 'center', marginRight: 14, backgroundColor: '#fff' },
+  selectMarkerActive: { backgroundColor: Colors.secondary, borderColor: Colors.secondary },
+  selectMarkerText: { fontSize: 12, fontWeight: '700', color: 'transparent' },
+  selectMarkerTextActive: { color: '#fff' },
   rowActionsWrap: { gap: 6, alignItems: 'flex-end' },
   statusBtn: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 },
   activeBtn: { backgroundColor: '#ffe8e8' },

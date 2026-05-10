@@ -11,8 +11,26 @@ export interface AdminUserRow {
   isFullTime?: boolean;
 }
 
-export const getUsers = async () => {
-  const { data } = await axiosClient.get<AdminUserRow[]>('/users');
+export interface GetUsersParams {
+  assignedNodeId?: string;
+}
+
+type QueryContextLike = { queryKey?: unknown };
+
+const resolveGetUsersParams = (input?: GetUsersParams | QueryContextLike): GetUsersParams | undefined => {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+  if ('queryKey' in input) {
+    return undefined;
+  }
+  const params = input as GetUsersParams;
+  return typeof params.assignedNodeId === 'string' && params.assignedNodeId ? { assignedNodeId: params.assignedNodeId } : undefined;
+};
+
+export const getUsers = async (input?: GetUsersParams | QueryContextLike) => {
+  const params = resolveGetUsersParams(input);
+  const { data } = await axiosClient.get<AdminUserRow[]>('/users', { params });
   return data;
 };
 

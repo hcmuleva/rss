@@ -6,7 +6,12 @@ import { env } from '../config/env';
 import { db, nextId } from '../db';
 
 const loginSchema = z.object({
-  phone: z.string().regex(/^[6-9]\d{9}$/),
+  phone: z
+    .string()
+    .min(3)
+    .refine((value) => /^[6-9]\d{9}$/.test(value) || /^[a-zA-Z0-9_-]+$/.test(value), {
+      message: 'Provide valid mobile number or user id'
+    }),
   password: z.string().min(6)
 });
 
@@ -63,7 +68,7 @@ authRouter.post('/login', (req, res) => {
       is_full_time: boolean;
     }>(
       `SELECT id, role, assigned_node_id, is_full_time FROM users
-       WHERE phone = $1 AND password = $2 AND is_active = TRUE
+       WHERE (phone = $1 OR id = $1) AND password = $2 AND is_active = TRUE
        LIMIT 1`,
       [parsed.data.phone, parsed.data.password]
     );

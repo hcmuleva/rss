@@ -13,7 +13,12 @@ import { AuthStackParamList } from '@/navigation/types';
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
 const schema = z.object({
-  phone: z.string().regex(/^[6-9]\d{9}$/),
+  phone: z
+    .string()
+    .min(3)
+    .refine((value) => /^[6-9]\d{9}$/.test(value) || /^[a-zA-Z0-9_-]+$/.test(value), {
+      message: 'Enter a valid mobile number or user ID'
+    }),
   password: z.string().min(6)
 });
 
@@ -40,10 +45,11 @@ export const LoginScreen = ({ navigation }: Props): React.JSX.Element => {
         render={({ field: { onChange, value } }) => (
           <TextInput
             value={value}
-            keyboardType="phone-pad"
+            keyboardType="default"
+            autoCapitalize="none"
             onChangeText={onChange}
             style={styles.input}
-            placeholder={t('auth.phone')}
+            placeholder={`${t('auth.phone')} / User ID`}
             accessibilityLabel="phone input"
           />
         )}

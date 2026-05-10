@@ -31,8 +31,19 @@ const updateUserStatusSchema = z.object({
   isActive: z.boolean()
 });
 
-usersRouter.get('/', authMiddleware, (_req, res) => {
+const usersQuerySchema = z.object({
+  assignedNodeId: z.string().min(1).optional()
+});
+
+usersRouter.get('/', authMiddleware, (req, res) => {
+  const parsedQuery = usersQuerySchema.safeParse(req.query);
+  if (!parsedQuery.success) {
+    res.status(400).json({ message: 'Invalid query params', errors: parsedQuery.error.format() });
+    return;
+  }
+
   void (async () => {
+    const assignedNodeId = parsedQuery.data.assignedNodeId;
     const { rows } = await db.query<{
       id: string;
       name: string;
@@ -42,7 +53,13 @@ usersRouter.get('/', authMiddleware, (_req, res) => {
       photo_url: string | null;
       is_active: boolean;
       is_full_time: boolean;
-    }>('SELECT id, name, phone, role, assigned_node_id, photo_url, is_active, is_full_time FROM users ORDER BY id');
+    }>(
+      `SELECT id, name, phone, role, assigned_node_id, photo_url, is_active, is_full_time
+       FROM users
+       WHERE ($1::text IS NULL OR assigned_node_id = $1)
+       ORDER BY id`,
+      [assignedNodeId ?? null]
+    );
     res.json(
       rows.map((row) => ({
         id: row.id,

@@ -4,7 +4,7 @@
   "private": true,
   "main": "expo/AppEntry",
   "scripts": {
-    "start": "expo start --port 8810",
+    "start": "expo start --port 8820",
     "android": "expo run:android",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx"
