@@ -249,6 +249,8 @@ class KaryakariniModel {
     await pool.query(`ALTER TABLE karyakarini_tasks ADD COLUMN IF NOT EXISTS hierarchy_l4 VARCHAR(180)`);
     await pool.query(`ALTER TABLE karyakarini_tasks ADD COLUMN IF NOT EXISTS hierarchy_l5 VARCHAR(180)`);
     await pool.query(`ALTER TABLE karyakarini_tasks ADD COLUMN IF NOT EXISTS hierarchy_l5_sublevels JSONB DEFAULT '[]'::jsonb`);
+    await pool.query(`ALTER TABLE karyakarini_tasks ADD COLUMN IF NOT EXISTS task_categories JSONB DEFAULT '[]'::jsonb`);
+    await pool.query(`ALTER TABLE karyakarini_tasks ADD COLUMN IF NOT EXISTS task_subcategories JSONB DEFAULT '[]'::jsonb`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS karyakarini_task_attachments (
@@ -308,6 +310,8 @@ class KaryakariniModel {
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_tasks_assigned_user ON karyakarini_tasks(assigned_user_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_tasks_hierarchy_l1 ON karyakarini_tasks(hierarchy_l1)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_tasks_hierarchy_l5_sublevels ON karyakarini_tasks USING GIN (hierarchy_l5_sublevels)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_tasks_categories ON karyakarini_tasks USING GIN (task_categories)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_tasks_subcategories ON karyakarini_tasks USING GIN (task_subcategories)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_meeting_attendees_meeting ON karyakarini_meeting_attendees(meeting_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_meeting_invites_meeting ON karyakarini_meeting_invites(meeting_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_meeting_invites_user_status ON karyakarini_meeting_invites(invited_user_id, invitation_status, is_active)');
@@ -640,11 +644,18 @@ class KaryakariniModel {
     return result.rows;
   }
 
-  static async hasNodeAccess({ nodeId, userId, userRole, versionId }) {
+  static async hasNodeAccess({ nodeId, userId, userRole, versionId, includeSelf = true }) {
     if (userRole === 'superadmin') return true;
+    const targetNodeId = Number(nodeId);
+    if (!Number.isFinite(targetNodeId) || targetNodeId <= 0) return false;
     const assignableNodeIds = await this.getAssignableNodeIds(userId, versionId);
     if (!assignableNodeIds.length) return false;
-    return assignableNodeIds.includes(Number(nodeId));
+    if (!assignableNodeIds.includes(targetNodeId)) return false;
+    if (includeSelf) return true;
+
+    const scopeRoots = await this.getScopeRootNodes({ userId, versionId });
+    const scopeRootSet = new Set(scopeRoots.map((row) => Number(row.node_id)).filter((id) => Number.isFinite(id) && id > 0));
+    return !scopeRootSet.has(targetNodeId);
   }
 
   static async getNodeBreadcrumb(nodeId, versionId) {
@@ -905,6 +916,7 @@ class KaryakariniModel {
     gotra = 'Unknown',
     fatherOrHusbandName = 'Unknown',
     avatar = null,
+    userRole = 'user',
   }) {
     const mobile = this.sanitizeMobile(mobileNumber);
     const trimmedName = String(name || '').trim();
@@ -914,6 +926,7 @@ class KaryakariniModel {
     const email = mobile ? `${mobile}@emeelan.com` : null;
     const requestedPassword = String(password || '').trim();
     const registerPassword = requestedPassword || process.env.DEFAULT_NEW_USER_PASSWORD || 'welcome';
+    const normalizedUserRole = String(userRole || 'user').trim().toLowerCase() === 'admin' ? 'admin' : 'user';
     let createdLoginPassword = null;
 
     let existingUserRes = null;
@@ -978,6 +991,7 @@ class KaryakariniModel {
            village = COALESCE(NULLIF(village, ''), NULLIF($4, '')),
            phone = COALESCE(NULLIF(phone, ''), NULLIF($5, '')),
            profile_photo_url = COALESCE(profile_photo_url, NULLIF($6, '')),
+           role = COALESCE(NULLIF($8, ''), role),
            updated_at = NOW()
        WHERE id = $7`,
       [
@@ -988,6 +1002,7 @@ class KaryakariniModel {
         mobile || null,
         avatar || null,
         userId,
+        normalizedUserRole,
       ]
     );
 
@@ -1013,6 +1028,16 @@ class KaryakariniModel {
       versionId,
       createdBy,
     });
+
+    if (normalizedUserRole === 'admin' && Number(nodeId) > 0 && Number(versionId) > 0) {
+      await this.setAdminScope({
+        userId,
+        nodeId: Number(nodeId),
+        versionId: Number(versionId),
+        isActive: true,
+        createdBy: createdBy || null,
+      });
+    }
 
     return {
       status: createdMemberRes.status,
@@ -1064,6 +1089,7 @@ class KaryakariniModel {
     subcategory,
     categories,
     subcategories,
+    userRole,
   }) {
     const safeMemberId = Number(memberId);
     const safeVersionId = Number(versionId);
@@ -1099,6 +1125,12 @@ class KaryakariniModel {
     const nextTehsil = String(tehsil !== undefined ? tehsil : existing.address_tehsil || '').trim() || null;
     const nextVillage = String(village !== undefined ? village : existing.address_village || '').trim() || null;
     const nextPincode = String(pincode !== undefined ? pincode : existing.address_pincode || '').trim() || null;
+    const nextUserRole =
+      userRole !== undefined
+        ? String(userRole || '').trim().toLowerCase() === 'admin'
+          ? 'admin'
+          : 'user'
+        : null;
 
     const client = await pool.connect();
     try {
@@ -1156,6 +1188,7 @@ class KaryakariniModel {
                phone = COALESCE(NULLIF($3, ''), phone),
                village = COALESCE(NULLIF($4, ''), village),
                profile_photo_url = COALESCE(NULLIF($5, ''), profile_photo_url),
+               role = COALESCE(NULLIF($7, ''), role),
                updated_at = NOW()
            WHERE id = $6`,
           [
@@ -1165,8 +1198,26 @@ class KaryakariniModel {
             String(nextVillage || '').trim(),
             String(nextAvatar || '').trim(),
             safeUserId,
+            nextUserRole,
           ]
         );
+        if (nextUserRole === 'admin') {
+          await this.setAdminScope({
+            userId: safeUserId,
+            nodeId: Number(existing.node_id),
+            versionId: safeVersionId,
+            isActive: true,
+            createdBy: safeUserId,
+          });
+        } else if (nextUserRole === 'user') {
+          await this.setAdminScope({
+            userId: safeUserId,
+            nodeId: Number(existing.node_id),
+            versionId: safeVersionId,
+            isActive: false,
+            createdBy: safeUserId,
+          });
+        }
       }
 
       const updated = await client.query(
@@ -1198,6 +1249,7 @@ class KaryakariniModel {
            m.address_village AS address_village,
            m.address_pincode AS pincode,
            m.node_id,
+           COALESCE(to_jsonb(u) ->> 'role', 'user') AS user_role,
            COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name', m.name) AS first_name,
            COALESCE(to_jsonb(u) ->> 'father_name', to_jsonb(u) ->> 'last_name') AS father_name,
            COALESCE(to_jsonb(u) ->> 'phone', to_jsonb(u) ->> 'mobile_number', to_jsonb(u) ->> 'mobile', m.mobile) AS mobile_number,
@@ -1293,6 +1345,7 @@ class KaryakariniModel {
          m.address_village AS address_village,
          m.address_pincode AS pincode,
          m.node_id,
+         COALESCE(to_jsonb(u) ->> 'role', 'user') AS user_role,
          COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name') AS first_name,
          COALESCE(to_jsonb(u) ->> 'father_name', to_jsonb(u) ->> 'last_name') AS father_name,
          COALESCE(to_jsonb(u) ->> 'phone', to_jsonb(u) ->> 'mobile_number', to_jsonb(u) ->> 'mobile', m.mobile) AS mobile_number,
@@ -1467,7 +1520,18 @@ class KaryakariniModel {
 
   static async getNodeMembersDirect({ nodeId, versionId }) {
     const result = await pool.query(
-      `SELECT
+      `WITH RECURSIVE subtree AS (
+         SELECT id
+         FROM karyakarini_nodes
+         WHERE id = $1
+           AND version_id = $2
+         UNION ALL
+         SELECT c.id
+         FROM karyakarini_nodes c
+         JOIN subtree s ON c.parent_id = s.id
+         WHERE c.version_id = $2
+       )
+       SELECT
          m.id,
          m.user_id,
          m.pad,
@@ -1484,6 +1548,7 @@ class KaryakariniModel {
          m.address_village AS address_village,
          m.address_pincode AS pincode,
          m.node_id,
+         COALESCE(to_jsonb(u) ->> 'role', 'user') AS user_role,
          COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name') AS first_name,
          COALESCE(to_jsonb(u) ->> 'father_name', to_jsonb(u) ->> 'last_name') AS father_name,
          COALESCE(to_jsonb(u) ->> 'phone', to_jsonb(u) ->> 'mobile_number', to_jsonb(u) ->> 'mobile', m.mobile) AS mobile_number,
@@ -1492,10 +1557,10 @@ class KaryakariniModel {
          n.name AS node_name,
          n.level AS node_level
        FROM karyakarini_members m
+       JOIN subtree s ON s.id = m.node_id
        JOIN karyakarini_nodes n ON n.id = m.node_id
        LEFT JOIN users u ON u.id = m.user_id
-       WHERE m.node_id = $1
-         AND m.version_id = $2
+       WHERE m.version_id = $2
          AND m.is_active = true
        ORDER BY m.created_at DESC, m.id DESC`,
       [nodeId, versionId]
@@ -2681,6 +2746,8 @@ class KaryakariniModel {
     dueDate,
     status = 'open',
     assignedUserId,
+    categories = [],
+    subcategories = [],
     locationHierarchy = {},
     attachments = [],
     createdBy,
@@ -2689,6 +2756,8 @@ class KaryakariniModel {
     try {
       await client.query('BEGIN');
       const normalizedHierarchy = this.normalizeTaskHierarchy(locationHierarchy);
+      const normalizedCategories = this.normalizeMemberLabelList(categories);
+      const normalizedSubcategories = this.normalizeMemberLabelList(subcategories);
 
       const normalizedAssignedUserId = Number(assignedUserId);
       if (normalizedAssignedUserId > 0) {
@@ -2711,11 +2780,13 @@ class KaryakariniModel {
         `INSERT INTO karyakarini_tasks (
            node_id, version_id, title, description, task_date, due_date, status,
            hierarchy_l1, hierarchy_l2, hierarchy_l3, hierarchy_l4, hierarchy_l5, hierarchy_l5_sublevels,
+           task_categories, task_subcategories,
            assigned_user_id, created_by
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17)
          RETURNING id, node_id, version_id, title, description, task_date, due_date, status,
                    hierarchy_l1, hierarchy_l2, hierarchy_l3, hierarchy_l4, hierarchy_l5, hierarchy_l5_sublevels,
+                   task_categories, task_subcategories,
                    assigned_user_id, created_by, created_at, updated_at`,
         [
           nodeId,
@@ -2731,6 +2802,8 @@ class KaryakariniModel {
           normalizedHierarchy.l4,
           normalizedHierarchy.l5,
           JSON.stringify(normalizedHierarchy.l5Sublevels || []),
+          JSON.stringify(normalizedCategories),
+          JSON.stringify(normalizedSubcategories),
           normalizedAssignedUserId > 0 ? normalizedAssignedUserId : null,
           createdBy || null,
         ]
@@ -2850,6 +2923,8 @@ class KaryakariniModel {
          t.hierarchy_l4,
          t.hierarchy_l5,
          COALESCE(t.hierarchy_l5_sublevels, '[]'::jsonb) AS hierarchy_l5_sublevels,
+         COALESCE(t.task_categories, '[]'::jsonb) AS task_categories,
+         COALESCE(t.task_subcategories, '[]'::jsonb) AS task_subcategories,
          t.node_id,
          n.name AS node_name,
          n.level AS node_level,
@@ -2947,6 +3022,8 @@ class KaryakariniModel {
          t.hierarchy_l4,
          t.hierarchy_l5,
          COALESCE(t.hierarchy_l5_sublevels, '[]'::jsonb) AS hierarchy_l5_sublevels,
+         COALESCE(t.task_categories, '[]'::jsonb) AS task_categories,
+         COALESCE(t.task_subcategories, '[]'::jsonb) AS task_subcategories,
          t.node_id,
          n.name AS node_name,
          n.level AS node_level,
@@ -2992,7 +3069,7 @@ class KaryakariniModel {
     };
   }
 
-  static async updateTaskStatus({ taskId, userId, userRole, versionId, status }) {
+  static async updateTaskStatus({ taskId, userId, userRole, versionId, status, attachments = [] }) {
     const safeTaskId = Number(taskId);
     const safeUserId = Number(userId);
     const normalizedStatus = String(status || '').trim().toLowerCase();
@@ -3032,59 +3109,106 @@ class KaryakariniModel {
       }
     }
 
-    const updated = await pool.query(
-      `WITH updated_task AS (
-         UPDATE karyakarini_tasks
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const updatedTask = await client.query(
+        `UPDATE karyakarini_tasks
          SET status = $1,
              updated_at = NOW()
          WHERE id = $2
            AND version_id = $3
-         RETURNING *
-       ),
-       node_paths AS (
-         SELECT n.id, n.parent_id, n.name, n.level, n.version_id, n.name::text AS path
-         FROM karyakarini_nodes n
-         WHERE n.version_id = $3
-           AND n.parent_id IS NULL
-         UNION ALL
-         SELECT c.id, c.parent_id, c.name, c.level, c.version_id, np.path || ' > ' || c.name AS path
-         FROM karyakarini_nodes c
-         JOIN node_paths np ON c.parent_id = np.id
-         WHERE c.version_id = $3
-       )
-       SELECT
-         t.id,
-         t.title,
-         t.description,
-         t.task_date,
-         t.due_date,
-         t.status,
-         t.hierarchy_l1,
-         t.hierarchy_l2,
-         t.hierarchy_l3,
-         t.hierarchy_l4,
-         t.hierarchy_l5,
-         COALESCE(t.hierarchy_l5_sublevels, '[]'::jsonb) AS hierarchy_l5_sublevels,
-         t.node_id,
-         n.name AS node_name,
-         n.level AS node_level,
-         COALESCE(np.path, n.name) AS hierarchy_path,
-         t.assigned_user_id,
-         COALESCE(to_jsonb(au) ->> 'first_name', to_jsonb(au) ->> 'name') AS assigned_first_name,
-         COALESCE(to_jsonb(au) ->> 'father_name', to_jsonb(au) ->> 'last_name') AS assigned_father_name,
-         COALESCE(to_jsonb(cu) ->> 'first_name', to_jsonb(cu) ->> 'name', 'System') AS created_by_name,
-         t.created_by,
-         t.created_at,
-         t.updated_at
-       FROM updated_task t
-       JOIN karyakarini_nodes n ON n.id = t.node_id
-       LEFT JOIN node_paths np ON np.id = n.id
-       LEFT JOIN users au ON au.id = t.assigned_user_id
-       LEFT JOIN users cu ON cu.id = t.created_by
-       LIMIT 1`,
-      [normalizedStatus, safeTaskId, versionId]
-    );
-    return updated.rows[0] || null;
+         RETURNING *`,
+        [normalizedStatus, safeTaskId, versionId]
+      );
+      const taskRow = updatedTask.rows[0];
+      if (!taskRow) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+
+      for (const attachment of Array.isArray(attachments) ? attachments : []) {
+        const attachmentUrl = String(attachment?.url || attachment?.attachment_url || '').trim();
+        if (!attachmentUrl) continue;
+        await client.query(
+          `INSERT INTO karyakarini_task_attachments (
+             task_id, attachment_url, attachment_type, file_name, uploaded_by
+           )
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            safeTaskId,
+            attachmentUrl,
+            String(attachment?.type || attachment?.attachment_type || '').trim() || null,
+            String(attachment?.name || attachment?.file_name || '').trim() || null,
+            safeUserId > 0 ? safeUserId : null,
+          ]
+        );
+      }
+
+      const updated = await client.query(
+        `WITH node_paths AS (
+           SELECT n.id, n.parent_id, n.name, n.level, n.version_id, n.name::text AS path
+           FROM karyakarini_nodes n
+           WHERE n.version_id = $2
+             AND n.parent_id IS NULL
+           UNION ALL
+           SELECT c.id, c.parent_id, c.name, c.level, c.version_id, np.path || ' > ' || c.name AS path
+           FROM karyakarini_nodes c
+           JOIN node_paths np ON c.parent_id = np.id
+           WHERE c.version_id = $2
+         )
+         SELECT
+           t.id,
+           t.title,
+           t.description,
+           t.task_date,
+           t.due_date,
+           t.status,
+           t.hierarchy_l1,
+           t.hierarchy_l2,
+           t.hierarchy_l3,
+           t.hierarchy_l4,
+           t.hierarchy_l5,
+           COALESCE(t.hierarchy_l5_sublevels, '[]'::jsonb) AS hierarchy_l5_sublevels,
+           COALESCE(t.task_categories, '[]'::jsonb) AS task_categories,
+           COALESCE(t.task_subcategories, '[]'::jsonb) AS task_subcategories,
+           t.node_id,
+           n.name AS node_name,
+           n.level AS node_level,
+           COALESCE(np.path, n.name) AS hierarchy_path,
+           t.assigned_user_id,
+           COALESCE(to_jsonb(au) ->> 'first_name', to_jsonb(au) ->> 'name') AS assigned_first_name,
+           COALESCE(to_jsonb(au) ->> 'father_name', to_jsonb(au) ->> 'last_name') AS assigned_father_name,
+           COALESCE(to_jsonb(cu) ->> 'first_name', to_jsonb(cu) ->> 'name', 'System') AS created_by_name,
+           COALESCE(atc.attachment_count, 0)::int AS attachment_count,
+           t.created_by,
+           t.created_at,
+           t.updated_at
+         FROM karyakarini_tasks t
+         JOIN karyakarini_nodes n ON n.id = t.node_id
+         LEFT JOIN node_paths np ON np.id = n.id
+         LEFT JOIN users au ON au.id = t.assigned_user_id
+         LEFT JOIN users cu ON cu.id = t.created_by
+         LEFT JOIN LATERAL (
+           SELECT COUNT(*) AS attachment_count
+           FROM karyakarini_task_attachments ta
+           WHERE ta.task_id = t.id
+         ) atc ON true
+         WHERE t.id = $1
+           AND t.version_id = $2
+         LIMIT 1`,
+        [safeTaskId, versionId]
+      );
+
+      await client.query('COMMIT');
+      return updated.rows[0] || null;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   static async createNotification({

@@ -21,6 +21,7 @@ export type KaryakariniNode = {
 export type KaryakariniMember = {
   id: number;
   user_id?: number | null;
+  user_role?: string | null;
   first_name?: string | null;
   father_name?: string | null;
   mobile_number?: string | null;
@@ -201,6 +202,8 @@ export type KaryakariniTask = {
   hierarchy_l4?: string | null;
   hierarchy_l5?: string | null;
   hierarchy_l5_sublevels?: string[] | null;
+  task_categories?: string[] | null;
+  task_subcategories?: string[] | null;
   node_id: number;
   node_name?: string;
   node_level?: string;

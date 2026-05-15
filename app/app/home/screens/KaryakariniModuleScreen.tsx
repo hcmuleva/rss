@@ -160,6 +160,7 @@ type TaskCascadeOption = {
   label: string;
   nodeId: number;
   pathParts: string[];
+  hasChildren: boolean;
 };
 type TaskCascadeColumn = {
   depth: number;
@@ -246,6 +247,7 @@ export default function KaryakariniModuleScreen() {
     pad: '',
     category: '',
     subcategory: '',
+    userRole: 'user',
     state: '',
     district: '',
     tehsil: '',
@@ -260,6 +262,7 @@ export default function KaryakariniModuleScreen() {
   const [memberModalTab, setMemberModalTab] = useState<'create' | 'assign'>('create');
   const [padPickerVisible, setPadPickerVisible] = useState(false);
   const [padbharTransferVisible, setPadbharTransferVisible] = useState(false);
+  const [padbharTransferMode, setPadbharTransferMode] = useState<'create' | 'assign' | 'edit' | 'task'>('create');
   const [transferExpandedCategories, setTransferExpandedCategories] = useState<string[]>([]);
   const [transferDraftSubcategories, setTransferDraftSubcategories] = useState<string[]>([]);
   const [padOptions, setPadOptions] = useState<string[]>([]);
@@ -289,6 +292,7 @@ export default function KaryakariniModuleScreen() {
     pad: DEFAULT_PAD_OPTIONS[0],
     category: '',
     subcategory: '',
+    userRole: 'user',
     state: '',
     district: '',
     tehsil: '',
@@ -300,6 +304,7 @@ export default function KaryakariniModuleScreen() {
     pad: DEFAULT_PAD_OPTIONS[0],
     category: '',
     subcategory: '',
+    userRole: 'user',
   });
 
   const [showMeetingModal, setShowMeetingModal] = useState(false);
@@ -351,6 +356,8 @@ export default function KaryakariniModuleScreen() {
     hierarchyL4: '',
     hierarchyL5: '',
     hierarchyL5Sublevels: '',
+    category: '',
+    subcategory: '',
     nodeId: '',
     assignedUserId: '',
     attachmentInput: '',
@@ -383,6 +390,19 @@ export default function KaryakariniModuleScreen() {
     if (path) return path;
     return taskSelectedNode?.name || 'Select node';
   }, [taskSelectedNode]);
+  const scopeRootNodeIds = useMemo(() => {
+    const assignableSet = new Set(assignableNodes.map((entry) => Number(entry.id)).filter((id) => id > 0));
+    return new Set(
+      assignableNodes
+        .filter((entry) => !assignableSet.has(Number(entry.parent_id || 0)))
+        .map((entry) => Number(entry.id))
+        .filter((id) => id > 0)
+    );
+  }, [assignableNodes]);
+  const selectedTaskNodeIsScopeRoot = useMemo(
+    () => currentUserRole !== 'superadmin' && scopeRootNodeIds.has(Number(taskForm.nodeId || 0)),
+    [currentUserRole, scopeRootNodeIds, taskForm.nodeId]
+  );
   const taskCascadeColumns = useMemo<TaskCascadeColumn[]>(() => {
     const parsedNodes = assignableNodes
       .map((node) => {
@@ -397,7 +417,8 @@ export default function KaryakariniModuleScreen() {
           depth,
         };
       })
-      .filter((node) => node.nodeId > 0 && node.parts.length > 0);
+      .filter((node) => node.nodeId > 0 && node.parts.length > 0)
+      .sort((a, b) => a.parts.join(' > ').localeCompare(b.parts.join(' > ')));
 
     if (!parsedNodes.length) return [];
 
@@ -422,15 +443,20 @@ export default function KaryakariniModuleScreen() {
         const mappedNode = exact || node;
         const key = [...prefix, label].join(' > ');
         if (optionsMap.has(key)) return;
+        const hasChildren = parsedNodes.some(
+          (candidate) =>
+            candidate.depth > depth && candidate.parts.slice(0, depth).join(' > ') === [...prefix, label].join(' > ')
+        );
         optionsMap.set(key, {
           key,
           label,
           nodeId: mappedNode.nodeId,
           pathParts: mappedNode.parts.slice(0, depth),
+          hasChildren,
         });
       });
 
-      const options = Array.from(optionsMap.values()).sort((a, b) => a.label.localeCompare(b.label));
+      const options = [...optionsMap.values()].sort((a, b) => a.label.localeCompare(b.label));
       if (!options.length) break;
 
       const selectedOption =
@@ -465,14 +491,18 @@ export default function KaryakariniModuleScreen() {
         : taskRows,
     [taskHierarchyFilterL1, taskRows]
   );
-  const selectedSubcategories = useMemo(
+  const addFormSelectedSubcategories = useMemo(
     () => parseLabelList(memberModalTab === 'assign' ? assignForm.subcategory : memberForm.subcategory),
     [assignForm.subcategory, memberForm.subcategory, memberModalTab]
   );
-  const selectedCategories = useMemo(
+  const addFormSelectedCategories = useMemo(
     () => parseLabelList(memberModalTab === 'assign' ? assignForm.category : memberForm.category),
     [assignForm.category, memberForm.category, memberModalTab]
   );
+  const editSelectedSubcategories = useMemo(() => parseLabelList(editMemberForm.subcategory), [editMemberForm.subcategory]);
+  const editSelectedCategories = useMemo(() => parseLabelList(editMemberForm.category), [editMemberForm.category]);
+  const taskSelectedSubcategories = useMemo(() => parseLabelList(taskForm.subcategory), [taskForm.subcategory]);
+  const taskSelectedCategories = useMemo(() => parseLabelList(taskForm.category), [taskForm.category]);
 
   const roleLevelOptions = useMemo(() => {
     const availableLevels = new Set(
@@ -659,25 +689,9 @@ export default function KaryakariniModuleScreen() {
     async (_versionId: number, scopedNodes: KaryakariniAssignableNode[]) => {
       if (!scopedNodes.length) return [] as number[];
       if (currentUserRole === 'superadmin') return [] as number[];
-
-      const assignmentLevel = String((user as any)?.assignment_level || '').trim().toLowerCase();
-      const sortedScoped = [...scopedNodes].sort((a, b) => {
-        const depthA = String(a.hierarchy_path || '').split(/\s*>\s*/).filter(Boolean).length || 999;
-        const depthB = String(b.hierarchy_path || '').split(/\s*>\s*/).filter(Boolean).length || 999;
-        if (depthA !== depthB) return depthA - depthB;
-        const levelA = NODE_LEVEL_ORDER.indexOf(String(a.level || '').toLowerCase());
-        const levelB = NODE_LEVEL_ORDER.indexOf(String(b.level || '').toLowerCase());
-        return (levelA < 0 ? 999 : levelA) - (levelB < 0 ? 999 : levelB);
-      });
-
-      const preferredByLevel = assignmentLevel
-        ? sortedScoped.find((node) => String(node.level || '').trim().toLowerCase() === assignmentLevel)
-        : null;
-      const targetNode = preferredByLevel || sortedScoped[0] || null;
-      if (!targetNode?.id) return [] as number[];
-      return [Number(targetNode.id)];
+      return [] as number[];
     },
-    [currentUserRole, user]
+    [currentUserRole]
   );
 
   const loadScopes = useCallback(async (versionId: number) => {
@@ -927,28 +941,24 @@ export default function KaryakariniModuleScreen() {
 
       let rootNodes: KaryakariniNode[] = [];
       if (isScopedTree) {
-        const assignmentLevel = String((user as any)?.assignment_level || '').trim().toLowerCase();
-        const availableLevels = Array.from(
-          new Set(scopedNodes.map((node) => String(node.level || '').trim().toLowerCase()).filter(Boolean))
-        );
-        let rootLevel = assignmentLevel;
-        if (!rootLevel || !availableLevels.includes(rootLevel)) {
-          rootLevel =
-            availableLevels.sort((a, b) => {
-              const idxA = NODE_LEVEL_ORDER.indexOf(a);
-              const idxB = NODE_LEVEL_ORDER.indexOf(b);
-              return (idxA < 0 ? 999 : idxA) - (idxB < 0 ? 999 : idxB);
-            })[0] || '';
-        }
-        rootNodes = scopedNodes
-          .filter((node) => String(node.level || '').trim().toLowerCase() === rootLevel)
+        const scopedSet = new Set(scopedNodes.map((node) => Number(node.id)).filter((id) => id > 0));
+        const scopeRoots = scopedNodes.filter((node) => !scopedSet.has(Number(node.parent_id || 0)));
+        const scopeRootSet = new Set(scopeRoots.map((node) => Number(node.id)).filter((id) => id > 0));
+        const initialNodes = scopeRoots.length ? scopeRoots : scopedNodes;
+        const childCountByParent = new Map<number, number>();
+        scopedNodes.forEach((node) => {
+          const parentId = Number(node.parent_id || 0);
+          childCountByParent.set(parentId, Number(childCountByParent.get(parentId) || 0) + 1);
+        });
+        rootNodes = initialNodes
           .map((node) => ({
             id: Number(node.id),
             name: node.name,
             level: node.level,
             parent_id: node.parent_id ?? null,
             version_id: node.version_id,
-            can_assign_member: true,
+            child_count: Number(childCountByParent.get(Number(node.id)) || 0),
+            can_assign_member: !scopeRootSet.has(Number(node.id)),
           }))
           .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
       }
@@ -982,7 +992,7 @@ export default function KaryakariniModuleScreen() {
 
       setLevels(rebuilt);
     },
-    [currentUserRole, fetchNodes, user]
+    [currentUserRole, fetchNodes]
   );
 
   const loadVersionsAndTree = useCallback(
@@ -1208,6 +1218,7 @@ export default function KaryakariniModuleScreen() {
       pad: String(member.pad || '').trim(),
       category: categoryValues.join(', '),
       subcategory: subcategoryValues.join(', '),
+      userRole: String(member.user_role || 'user').trim().toLowerCase() === 'admin' ? 'admin' : 'user',
       state: String(member.state || '').trim(),
       district: String(member.district || '').trim(),
       tehsil: String(member.tehsil || '').trim(),
@@ -1243,6 +1254,7 @@ export default function KaryakariniModuleScreen() {
         subcategory: subcategories[0] || null,
         categories,
         subcategories,
+        userRole: editMemberForm.userRole === 'admin' ? 'admin' : 'user',
         state: editMemberForm.state.trim() || null,
         district: editMemberForm.district.trim() || null,
         tehsil: editMemberForm.tehsil.trim() || null,
@@ -1276,6 +1288,7 @@ export default function KaryakariniModuleScreen() {
       pad: padOptions[0] || DEFAULT_PAD_OPTIONS[0],
       category: CATEGORY_SUBCATEGORY_OPTIONS[0]?.category || '',
       subcategory: CATEGORY_SUBCATEGORY_OPTIONS[0]?.subcategories?.[0] || '',
+      userRole: 'user',
       state: '',
       district: '',
       tehsil: '',
@@ -1287,6 +1300,7 @@ export default function KaryakariniModuleScreen() {
       pad: padOptions[0] || DEFAULT_PAD_OPTIONS[0],
       category: CATEGORY_SUBCATEGORY_OPTIONS[0]?.category || '',
       subcategory: CATEGORY_SUBCATEGORY_OPTIONS[0]?.subcategories?.[0] || '',
+      userRole: 'user',
     });
     setPincodeLookupMessage(null);
     setLastAutoFilledPincode('');
@@ -1403,12 +1417,22 @@ export default function KaryakariniModuleScreen() {
     [lastAutoFilledPincode, lookupAddressByPincode, pincodeLookupLoading]
   );
 
-  const handleOpenPadbharTransfer = useCallback(() => {
-    const initial = parseLabelList(memberModalTab === 'assign' ? assignForm.subcategory : memberForm.subcategory);
+  const handleOpenPadbharTransfer = useCallback((mode?: 'create' | 'assign' | 'edit' | 'task') => {
+    const resolvedMode = mode || (memberModalTab === 'assign' ? 'assign' : 'create');
+    const initial = parseLabelList(
+      resolvedMode === 'assign'
+        ? assignForm.subcategory
+        : resolvedMode === 'edit'
+          ? editMemberForm.subcategory
+          : resolvedMode === 'task'
+            ? taskForm.subcategory
+            : memberForm.subcategory
+    );
+    setPadbharTransferMode(resolvedMode);
     setTransferDraftSubcategories(initial);
     setTransferExpandedCategories(CATEGORY_SUBCATEGORY_OPTIONS.map((entry) => entry.category));
     setPadbharTransferVisible(true);
-  }, [assignForm.subcategory, memberForm.subcategory, memberModalTab]);
+  }, [assignForm.subcategory, editMemberForm.subcategory, memberForm.subcategory, memberModalTab, taskForm.subcategory]);
 
   const toggleTransferCategory = useCallback((category: string) => {
     setTransferExpandedCategories((prev) =>
@@ -1432,8 +1456,20 @@ export default function KaryakariniModuleScreen() {
   const handleApplyPadbharTransfer = useCallback(() => {
     const nextSubcategories = [...new Set(transferDraftSubcategories.map((entry) => String(entry || '').trim()).filter(Boolean))];
     const nextCategories = deriveCategoriesFromSubcategories(nextSubcategories);
-    if (memberModalTab === 'assign') {
+    if (padbharTransferMode === 'assign') {
       setAssignForm((prev) => ({
+        ...prev,
+        category: nextCategories.join(', '),
+        subcategory: nextSubcategories.join(', '),
+      }));
+    } else if (padbharTransferMode === 'edit') {
+      setEditMemberForm((prev) => ({
+        ...prev,
+        category: nextCategories.join(', '),
+        subcategory: nextSubcategories.join(', '),
+      }));
+    } else if (padbharTransferMode === 'task') {
+      setTaskForm((prev) => ({
         ...prev,
         category: nextCategories.join(', '),
         subcategory: nextSubcategories.join(', '),
@@ -1446,7 +1482,7 @@ export default function KaryakariniModuleScreen() {
       }));
     }
     setPadbharTransferVisible(false);
-  }, [memberModalTab, transferDraftSubcategories]);
+  }, [padbharTransferMode, transferDraftSubcategories]);
 
   const handleSubmitNode = useCallback(async () => {
     if (!addTargetNode || !selectedVersionId) return;
@@ -1516,6 +1552,7 @@ export default function KaryakariniModuleScreen() {
           subcategory: assignSubcategories[0] || null,
           categories: assignCategories,
           subcategories: assignSubcategories,
+          userRole: assignForm.userRole === 'admin' ? 'admin' : 'user',
         });
       } else {
         if (!memberForm.mobileNumber.trim() || !memberForm.name.trim()) {
@@ -1544,6 +1581,7 @@ export default function KaryakariniModuleScreen() {
           subcategory: createSubcategories[0] || null,
           categories: createCategories,
           subcategories: createSubcategories,
+          userRole: memberForm.userRole === 'admin' ? 'admin' : 'user',
           state: memberForm.state.trim(),
           district: memberForm.district.trim(),
           tehsil: memberForm.tehsil.trim(),
@@ -1585,6 +1623,7 @@ export default function KaryakariniModuleScreen() {
     memberForm.pad,
     memberForm.category,
     memberForm.subcategory,
+    memberForm.userRole,
     memberForm.state,
     memberForm.district,
     memberForm.tehsil,
@@ -1593,6 +1632,7 @@ export default function KaryakariniModuleScreen() {
     assignForm.pad,
     assignForm.category,
     assignForm.subcategory,
+    assignForm.userRole,
     assignableNodes,
     memberModalTab,
     selectedUser,
@@ -1895,6 +1935,8 @@ export default function KaryakariniModuleScreen() {
       hierarchyL4: '',
       hierarchyL5: '',
       hierarchyL5Sublevels: '',
+      category: '',
+      subcategory: '',
       nodeId: defaultNodeId,
       assignedUserId: '',
       attachmentInput: '',
@@ -2083,8 +2125,14 @@ export default function KaryakariniModuleScreen() {
       Alert.alert('Required', 'Task title and node are required');
       return;
     }
-    if (!taskForm.hierarchyL1.trim()) {
-      Alert.alert('Required', 'L1 hierarchy mapping is required');
+    if (currentUserRole !== 'superadmin' && scopeRootNodeIds.has(nodeId)) {
+      Alert.alert('Restricted', 'You can create tasks only for child nodes below your assigned level');
+      return;
+    }
+    const taskCategories = parseLabelList(taskForm.category);
+    const taskSubcategories = parseLabelList(taskForm.subcategory);
+    if (!taskSubcategories.length) {
+      Alert.alert('Required', 'Task subcategory selection is required');
       return;
     }
 
@@ -2098,17 +2146,10 @@ export default function KaryakariniModuleScreen() {
         taskDate: taskForm.taskDate,
         dueDate: taskForm.dueDate.trim() || null,
         status: taskForm.status,
-        locationHierarchy: {
-          l1: taskForm.hierarchyL1.trim() || null,
-          l2: taskForm.hierarchyL2.trim() || null,
-          l3: taskForm.hierarchyL3.trim() || null,
-          l4: taskForm.hierarchyL4.trim() || null,
-          l5: taskForm.hierarchyL5.trim() || null,
-          l5Sublevels: taskForm.hierarchyL5Sublevels
-            .split(',')
-            .map((entry) => entry.trim())
-            .filter(Boolean),
-        },
+        category: taskCategories[0] || null,
+        subcategory: taskSubcategories[0] || null,
+        categories: taskCategories,
+        subcategories: taskSubcategories,
         assignedUserId: taskForm.assignedUserId ? Number(taskForm.assignedUserId) : null,
         attachments: taskForm.attachments,
       });
@@ -2120,7 +2161,7 @@ export default function KaryakariniModuleScreen() {
     } finally {
       setCreatingTask(false);
     }
-  }, [loadTasks, selectedVersionId, taskForm]);
+  }, [currentUserRole, loadTasks, scopeRootNodeIds, selectedVersionId, taskForm]);
 
   const handleAssignRole = useCallback(async () => {
     if (!selectedVersionId) return;
@@ -2523,18 +2564,32 @@ export default function KaryakariniModuleScreen() {
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, pad: value }))}
                 placeholder="Pad *"
               />
-              <TextInput
-                style={styles.input}
-                value={editMemberForm.category}
-                onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, category: value }))}
-                placeholder="Category * (comma separated)"
-              />
-              <TextInput
-                style={styles.input}
-                value={editMemberForm.subcategory}
-                onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, subcategory: value }))}
-                placeholder="Subcategory * (comma separated)"
-              />
+              <Text style={styles.sectionLabel}>User Role</Text>
+              <View style={styles.optionRow}>
+                {(['user', 'admin'] as const).map((role) => (
+                  <TouchableOpacity
+                    key={`edit-role-${role}`}
+                    style={[styles.optionChip, editMemberForm.userRole === role && styles.optionChipActive]}
+                    onPress={() => setEditMemberForm((prev) => ({ ...prev, userRole: role }))}
+                  >
+                    <Text style={[styles.optionChipText, editMemberForm.userRole === role && styles.optionChipTextActive]}>
+                      {role === 'admin' ? 'Admin' : 'User'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('edit')}>
+                <Text style={editSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
+                  {editSelectedSubcategories.length ? `${editSelectedSubcategories.length} subcategories selected` : 'Assign Padbhar *'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setEditMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
+                <Text style={styles.clearLink}>Clear category/subcategory</Text>
+              </TouchableOpacity>
+              {editSelectedCategories.length ? <Text style={styles.helper}>Categories: {editSelectedCategories.join(', ')}</Text> : null}
+              {editSelectedSubcategories.length ? (
+                <Text style={styles.helper}>Subcategories: {editSelectedSubcategories.join(', ')}</Text>
+              ) : null}
               <TextInput
                 style={styles.input}
                 value={editMemberForm.state}
@@ -2694,20 +2749,34 @@ export default function KaryakariniModuleScreen() {
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={[styles.input, styles.twoColField]} onPress={() => void handleOpenPadbharTransfer()}>
-                    <Text style={selectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                      {selectedSubcategories.length ? `${selectedSubcategories.length} subcategories selected` : 'Assign Padbhar *'}
+                    <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
+                      {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} subcategories selected` : 'Assign Padbhar *'}
                     </Text>
                   </TouchableOpacity>
+                </View>
+                <Text style={styles.sectionLabel}>User Role</Text>
+                <View style={styles.optionRow}>
+                  {(['user', 'admin'] as const).map((role) => (
+                    <TouchableOpacity
+                      key={`create-role-${role}`}
+                      style={[styles.optionChip, memberForm.userRole === role && styles.optionChipActive]}
+                      onPress={() => setMemberForm((prev) => ({ ...prev, userRole: role }))}
+                    >
+                      <Text style={[styles.optionChipText, memberForm.userRole === role && styles.optionChipTextActive]}>
+                        {role === 'admin' ? 'Admin' : 'User'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
                 {padOptionsError ? <Text style={styles.errorInline}>{padOptionsError}</Text> : null}
                 <TouchableOpacity onPress={() => setMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
                   <Text style={styles.clearLink}>Clear category/subcategory</Text>
                 </TouchableOpacity>
-                {selectedCategories.length ? (
-                  <Text style={styles.helper}>Categories: {selectedCategories.join(', ')}</Text>
+                {addFormSelectedCategories.length ? (
+                  <Text style={styles.helper}>Categories: {addFormSelectedCategories.join(', ')}</Text>
                 ) : null}
-                {selectedSubcategories.length ? (
-                  <Text style={styles.helper}>Subcategories: {selectedSubcategories.join(', ')}</Text>
+                {addFormSelectedSubcategories.length ? (
+                  <Text style={styles.helper}>Subcategories: {addFormSelectedSubcategories.join(', ')}</Text>
                 ) : null}
 
                 <Text style={styles.sectionLabel}>Address (Optional)</Text>
@@ -2811,20 +2880,34 @@ export default function KaryakariniModuleScreen() {
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={[styles.input, styles.twoColField]} onPress={() => void handleOpenPadbharTransfer()}>
-                    <Text style={selectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                      {selectedSubcategories.length ? `${selectedSubcategories.length} subcategories selected` : 'Assign Padbhar *'}
+                    <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
+                      {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} subcategories selected` : 'Assign Padbhar *'}
                     </Text>
                   </TouchableOpacity>
+                </View>
+                <Text style={styles.sectionLabel}>User Role</Text>
+                <View style={styles.optionRow}>
+                  {(['user', 'admin'] as const).map((role) => (
+                    <TouchableOpacity
+                      key={`assign-role-${role}`}
+                      style={[styles.optionChip, assignForm.userRole === role && styles.optionChipActive]}
+                      onPress={() => setAssignForm((prev) => ({ ...prev, userRole: role }))}
+                    >
+                      <Text style={[styles.optionChipText, assignForm.userRole === role && styles.optionChipTextActive]}>
+                        {role === 'admin' ? 'Admin' : 'User'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
                 {padOptionsError ? <Text style={styles.errorInline}>{padOptionsError}</Text> : null}
                 <TouchableOpacity onPress={() => setAssignForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
                   <Text style={styles.clearLink}>Clear category/subcategory</Text>
                 </TouchableOpacity>
-                {selectedCategories.length ? (
-                  <Text style={styles.helper}>Categories: {selectedCategories.join(', ')}</Text>
+                {addFormSelectedCategories.length ? (
+                  <Text style={styles.helper}>Categories: {addFormSelectedCategories.join(', ')}</Text>
                 ) : null}
-                {selectedSubcategories.length ? (
-                  <Text style={styles.helper}>Subcategories: {selectedSubcategories.join(', ')}</Text>
+                {addFormSelectedSubcategories.length ? (
+                  <Text style={styles.helper}>Subcategories: {addFormSelectedSubcategories.join(', ')}</Text>
                 ) : null}
               </>
             )}
@@ -3292,173 +3375,161 @@ export default function KaryakariniModuleScreen() {
 
       <Modal visible={showTaskModal} transparent animationType="slide" onRequestClose={() => setShowTaskModal(false)}>
         <View style={styles.modalBackdrop}>
-          <ScrollView style={styles.modalCard} contentContainerStyle={styles.modalCardContent}>
-            <Text style={styles.modalTitle}>Create Task</Text>
-            <TextInput
-              style={styles.input}
-              value={taskForm.title}
-              onChangeText={(value) => setTaskForm((prev) => ({ ...prev, title: value }))}
-              placeholder="Task title *"
-            />
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              multiline
-              value={taskForm.description}
-              onChangeText={(value) => setTaskForm((prev) => ({ ...prev, description: value }))}
-              placeholder="Description"
-            />
-            <TextInput
-              style={styles.input}
-              value={taskForm.taskDate}
-              onChangeText={(value) => setTaskForm((prev) => ({ ...prev, taskDate: value }))}
-              placeholder="Task date (YYYY-MM-DD)"
-            />
-            <TextInput
-              style={styles.input}
-              value={taskForm.dueDate}
-              onChangeText={(value) => setTaskForm((prev) => ({ ...prev, dueDate: value }))}
-              placeholder="Due date (optional)"
-            />
-            <Text style={styles.sectionLabel}>Hierarchy mapping</Text>
-            <TextInput
-              style={styles.input}
-              value={taskForm.hierarchyL1}
-              onChangeText={(value) => setTaskForm((prev) => ({ ...prev, hierarchyL1: value }))}
-              placeholder="L1 *"
-            />
-            <TextInput
-              style={styles.input}
-              value={taskForm.hierarchyL2}
-              onChangeText={(value) => setTaskForm((prev) => ({ ...prev, hierarchyL2: value }))}
-              placeholder="L2"
-            />
-            <TextInput
-              style={styles.input}
-              value={taskForm.hierarchyL3}
-              onChangeText={(value) => setTaskForm((prev) => ({ ...prev, hierarchyL3: value }))}
-              placeholder="L3"
-            />
-            <TextInput
-              style={styles.input}
-              value={taskForm.hierarchyL4}
-              onChangeText={(value) => setTaskForm((prev) => ({ ...prev, hierarchyL4: value }))}
-              placeholder="L4"
-            />
-            <TextInput
-              style={styles.input}
-              value={taskForm.hierarchyL5}
-              onChangeText={(value) => setTaskForm((prev) => ({ ...prev, hierarchyL5: value }))}
-              placeholder="L5"
-            />
-            <TextInput
-              style={styles.input}
-              value={taskForm.hierarchyL5Sublevels}
-              onChangeText={(value) => setTaskForm((prev) => ({ ...prev, hierarchyL5Sublevels: value }))}
-              placeholder="L5 sublevels (comma separated)"
-            />
-            <Text style={styles.sectionLabel}>Node</Text>
-            <Text style={styles.modalSub}>{taskSelectedPathLabel}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.taskCascaderRow}>
-                {taskCascadeColumns.map((column) => (
-                  <View key={`task-cascade-${column.depth}`} style={styles.taskCascaderColumn}>
-                    <Text style={styles.taskCascaderTitle}>{column.title}</Text>
-                    <ScrollView style={styles.taskCascaderList} nestedScrollEnabled>
-                      {column.options.map((option) => {
-                        const selected = String(column.selectedNodeId || '') === String(option.nodeId);
-                        return (
-                          <TouchableOpacity
-                            key={`task-cascade-option-${column.depth}-${option.key}`}
-                            style={[styles.taskCascaderItem, selected && styles.taskCascaderItemSelected]}
-                            onPress={() => void handleTaskCascadeSelect(option.nodeId)}
-                          >
-                            <Text style={[styles.taskCascaderItemText, selected && styles.taskCascaderItemTextSelected]} numberOfLines={1}>
-                              {option.label}
-                            </Text>
-                            <Text style={[styles.taskCascaderArrow, selected && styles.taskCascaderArrowSelected]}>›</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                      {column.options.length === 0 ? <Text style={styles.modalSub}>No nodes</Text> : null}
-                    </ScrollView>
+          <View style={[styles.modalCard, styles.memberModalCard]}>
+            <View style={styles.memberModalStickyTabs}>
+              <Text style={styles.modalTitle}>Create Task</Text>
+            </View>
+
+            <ScrollView style={styles.memberModalScroll} contentContainerStyle={styles.memberModalScrollContent}>
+              <TextInput
+                style={styles.input}
+                value={taskForm.title}
+                onChangeText={(value) => setTaskForm((prev) => ({ ...prev, title: value }))}
+                placeholder="Task title *"
+              />
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                multiline
+                value={taskForm.description}
+                onChangeText={(value) => setTaskForm((prev) => ({ ...prev, description: value }))}
+                placeholder="Description"
+              />
+              <View style={styles.twoColRow}>
+                <TextInput
+                  style={[styles.input, styles.twoColField]}
+                  value={taskForm.taskDate}
+                  onChangeText={(value) => setTaskForm((prev) => ({ ...prev, taskDate: value }))}
+                  placeholder="Task date (YYYY-MM-DD)"
+                />
+                <TextInput
+                  style={[styles.input, styles.twoColField]}
+                  value={taskForm.dueDate}
+                  onChangeText={(value) => setTaskForm((prev) => ({ ...prev, dueDate: value }))}
+                  placeholder="Due date (optional)"
+                />
+              </View>
+
+              <Text style={styles.sectionLabel}>Task Categories</Text>
+              <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('task')}>
+                <Text style={taskSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
+                  {taskSelectedSubcategories.length ? `${taskSelectedSubcategories.length} subcategories selected` : 'Select task subcategories *'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setTaskForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
+                <Text style={styles.clearLink}>Clear categories</Text>
+              </TouchableOpacity>
+              {taskSelectedCategories.length ? <Text style={styles.helper}>Categories: {taskSelectedCategories.join(', ')}</Text> : null}
+              {taskSelectedSubcategories.length ? <Text style={styles.helper}>Subcategories: {taskSelectedSubcategories.join(', ')}</Text> : null}
+
+              <Text style={styles.sectionLabel}>Node</Text>
+              <Text style={styles.modalSub}>{taskSelectedPathLabel}</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={styles.taskCascaderRow}>
+                  {taskCascadeColumns.map((column) => (
+                    <View key={`task-cascade-${column.depth}`} style={styles.taskCascaderColumn}>
+                      <Text style={styles.taskCascaderTitle}>{column.title}</Text>
+                      <ScrollView style={styles.taskCascaderList} nestedScrollEnabled>
+                        {column.options.map((option) => {
+                          const selected = String(column.selectedNodeId || '') === String(option.nodeId);
+                          return (
+                            <TouchableOpacity
+                              key={`task-cascade-option-${column.depth}-${option.key}`}
+                              style={[styles.taskCascaderItem, selected && styles.taskCascaderItemSelected]}
+                              onPress={() => void handleTaskCascadeSelect(option.nodeId)}
+                            >
+                              <Text style={[styles.taskCascaderItemText, selected && styles.taskCascaderItemTextSelected]} numberOfLines={1}>
+                                {option.label}
+                              </Text>
+                            {option.hasChildren ? (
+                              <Text style={[styles.taskCascaderArrow, selected && styles.taskCascaderArrowSelected]}>›</Text>
+                            ) : null}
+                            </TouchableOpacity>
+                          );
+                        })}
+                        {column.options.length === 0 ? <Text style={styles.modalSub}>No nodes</Text> : null}
+                      </ScrollView>
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
+              {selectedTaskNodeIsScopeRoot ? (
+                <Text style={styles.errorInline}>Warning: You cannot create task at assigned level. Select a child node below.</Text>
+              ) : null}
+
+              <Text style={styles.sectionLabel}>Status</Text>
+              <View style={styles.optionRow}>
+                {['open', 'in_progress', 'completed'].map((status) => (
+                  <TouchableOpacity
+                    key={status}
+                    style={[styles.optionChip, taskForm.status === status && styles.optionChipActive]}
+                    onPress={() => setTaskForm((prev) => ({ ...prev, status }))}
+                  >
+                    <Text style={[styles.optionChipText, taskForm.status === status && styles.optionChipTextActive]}>{status}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={styles.sectionLabel}>Assign member</Text>
+              <View style={styles.selectList}>
+                {taskMembers.map((member) => {
+                  const userId = Number(member.user_id || 0);
+                  if (!userId) return null;
+                  const selected = taskForm.assignedUserId === String(userId);
+                  return (
+                    <TouchableOpacity
+                      key={`task-member-${member.id}`}
+                      style={[styles.selectItem, selected && styles.selectItemActive]}
+                      onPress={() => setTaskForm((prev) => ({ ...prev, assignedUserId: selected ? '' : String(userId) }))}
+                    >
+                      <Text style={[styles.selectItemText, selected && styles.selectItemTextActive]}>
+                        {[member.first_name, member.father_name].filter(Boolean).join(' ') || `User #${userId}`}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                {taskMembers.length === 0 ? <Text style={styles.modalSub}>No node members found</Text> : null}
+              </View>
+
+              <Text style={styles.sectionLabel}>Attachments</Text>
+              <View style={styles.searchRow}>
+                <TextInput
+                  style={[styles.input, styles.searchInput]}
+                  value={taskForm.attachmentInput}
+                  onChangeText={(value) => setTaskForm((prev) => ({ ...prev, attachmentInput: value }))}
+                  placeholder="Document URL"
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity style={styles.searchBtn} onPress={addTaskAttachmentByUrl}>
+                  <Text style={styles.searchBtnText}>Add URL</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity
+                style={[styles.secondaryAction, taskUploadingAttachment && styles.saveBtnDisabled]}
+                disabled={taskUploadingAttachment}
+                onPress={() => void handleUploadTaskAttachment()}
+              >
+                <Text style={styles.secondaryActionText}>{taskUploadingAttachment ? 'Uploading...' : 'Upload Photo/Video'}</Text>
+              </TouchableOpacity>
+              <View style={styles.attachmentList}>
+                {taskForm.attachments.map((item, idx) => (
+                  <View key={`task-attachment-${idx}`} style={styles.attachmentItem}>
+                    <Text style={styles.attachmentText} numberOfLines={1}>{item.name || item.url}</Text>
+                    <TouchableOpacity
+                      onPress={() =>
+                        setTaskForm((prev) => ({
+                          ...prev,
+                          attachments: prev.attachments.filter((_, i) => i !== idx),
+                        }))
+                      }
+                    >
+                      <Text style={styles.removeText}>Remove</Text>
+                    </TouchableOpacity>
                   </View>
                 ))}
               </View>
             </ScrollView>
 
-            <Text style={styles.sectionLabel}>Status</Text>
-            <View style={styles.optionRow}>
-              {['open', 'in_progress', 'completed'].map((status) => (
-                <TouchableOpacity
-                  key={status}
-                  style={[styles.optionChip, taskForm.status === status && styles.optionChipActive]}
-                  onPress={() => setTaskForm((prev) => ({ ...prev, status }))}
-                >
-                  <Text style={[styles.optionChipText, taskForm.status === status && styles.optionChipTextActive]}>{status}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={styles.sectionLabel}>Assign member</Text>
-            <View style={styles.selectList}>
-              {taskMembers.map((member) => {
-                const userId = Number(member.user_id || 0);
-                if (!userId) return null;
-                const selected = taskForm.assignedUserId === String(userId);
-                return (
-                  <TouchableOpacity
-                    key={`task-member-${member.id}`}
-                    style={[styles.selectItem, selected && styles.selectItemActive]}
-                    onPress={() => setTaskForm((prev) => ({ ...prev, assignedUserId: selected ? '' : String(userId) }))}
-                  >
-                    <Text style={[styles.selectItemText, selected && styles.selectItemTextActive]}>
-                      {[member.first_name, member.father_name].filter(Boolean).join(' ') || `User #${userId}`}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-              {taskMembers.length === 0 ? <Text style={styles.modalSub}>No node members found</Text> : null}
-            </View>
-
-            <Text style={styles.sectionLabel}>Attachments</Text>
-            <View style={styles.searchRow}>
-              <TextInput
-                style={[styles.input, styles.searchInput]}
-                value={taskForm.attachmentInput}
-                onChangeText={(value) => setTaskForm((prev) => ({ ...prev, attachmentInput: value }))}
-                placeholder="Document URL"
-                autoCapitalize="none"
-              />
-              <TouchableOpacity style={styles.searchBtn} onPress={addTaskAttachmentByUrl}>
-                <Text style={styles.searchBtnText}>Add URL</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={[styles.secondaryAction, taskUploadingAttachment && styles.saveBtnDisabled]}
-              disabled={taskUploadingAttachment}
-              onPress={() => void handleUploadTaskAttachment()}
-            >
-              <Text style={styles.secondaryActionText}>{taskUploadingAttachment ? 'Uploading...' : 'Upload Photo/Video'}</Text>
-            </TouchableOpacity>
-            <View style={styles.attachmentList}>
-              {taskForm.attachments.map((item, idx) => (
-                <View key={`task-attachment-${idx}`} style={styles.attachmentItem}>
-                  <Text style={styles.attachmentText} numberOfLines={1}>{item.name || item.url}</Text>
-                  <TouchableOpacity
-                    onPress={() =>
-                      setTaskForm((prev) => ({
-                        ...prev,
-                        attachments: prev.attachments.filter((_, i) => i !== idx),
-                      }))
-                    }
-                  >
-                    <Text style={styles.removeText}>Remove</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.modalActions}>
+            <View style={[styles.modalActions, styles.memberModalStickyActions]}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowTaskModal(false)}>
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
@@ -3466,7 +3537,7 @@ export default function KaryakariniModuleScreen() {
                 <Text style={styles.saveText}>{creatingTask ? 'Saving...' : 'Create Task'}</Text>
               </TouchableOpacity>
             </View>
-          </ScrollView>
+          </View>
         </View>
       </Modal>
 
@@ -3503,7 +3574,7 @@ export default function KaryakariniModuleScreen() {
       <Modal visible={padbharTransferVisible} transparent animationType="slide" onRequestClose={() => setPadbharTransferVisible(false)}>
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCard, styles.memberModalCard]}>
-            <Text style={styles.modalTitle}>Assign Padbhar</Text>
+            <Text style={styles.modalTitle}>{padbharTransferMode === 'task' ? 'Select Task Subcategories' : 'Assign Padbhar'}</Text>
             <Text style={styles.modalSub}>Transfer subcategories from left to right</Text>
             <View style={styles.transferContainer}>
               <View style={styles.transferPanel}>

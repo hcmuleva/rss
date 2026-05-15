@@ -40,6 +40,8 @@ const parseMemberLabelList = (value, fallback = null) => {
   return fallbackRaw ? [fallbackRaw] : [];
 };
 
+const normalizeMemberUserRole = (value) => (String(value || '').trim().toLowerCase() === 'admin' ? 'admin' : 'user');
+
 const toDateString = (input, fallback = null) => {
   if (!input) return fallback;
   const raw = String(input).trim();
@@ -140,16 +142,19 @@ exports.getTree = async (req, res) => {
 
     const userRole = normalizeRole(req.userRole || req.user?.role);
     let assignableSet = new Set();
+    let scopeRootSet = new Set();
     if (isAdminRole(userRole)) {
       const ids = await KaryakariniModel.getAssignableNodeIds(req.user?.id, versionId);
       assignableSet = new Set(ids.map((id) => Number(id)));
+      const scopeRoots = await KaryakariniModel.getScopeRootNodes({ userId: req.user?.id, versionId });
+      scopeRootSet = new Set(scopeRoots.map((row) => Number(row.node_id)).filter((id) => Number.isFinite(id) && id > 0));
     }
 
     const nodesWithActions = nodes.map((node) => ({
       ...node,
       can_assign_member:
         userRole === 'superadmin' ||
-        (isAdminRole(userRole) && assignableSet.has(Number(node.id))),
+        (isAdminRole(userRole) && assignableSet.has(Number(node.id)) && !scopeRootSet.has(Number(node.id))),
     }));
 
     let breadcrumb = [];
@@ -446,6 +451,7 @@ exports.updateMember = async (req, res) => {
       subcategory: req.body?.subcategory !== undefined ? req.body.subcategory : resolvedSubcategories[0] || null,
       categories: resolvedCategories,
       subcategories: resolvedSubcategories,
+      userRole: req.body?.userRole !== undefined ? normalizeMemberUserRole(req.body.userRole) : undefined,
     });
 
     if (!updated) {
@@ -1034,6 +1040,14 @@ exports.createTask = async (req, res) => {
         message: 'Task title is required',
       });
     }
+    const taskCategories = parseMemberLabelList(req.body?.categories, req.body?.category);
+    const taskSubcategories = parseMemberLabelList(req.body?.subcategories, req.body?.subcategory);
+    if (!taskSubcategories.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'Task subcategory selection is required',
+      });
+    }
 
     const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.body?.version || 'current');
     if (!versionId) {
@@ -1049,15 +1063,18 @@ exports.createTask = async (req, res) => {
       userId: req.user?.id,
       userRole,
       versionId,
+      includeSelf: false,
     });
     if (!hasAccess) {
       return res.status(403).json({
         success: false,
-        message: 'You can create tasks only in assigned scope',
+        message: 'You can create tasks only in child nodes under your assigned scope',
       });
     }
 
     const created = await KaryakariniModel.createTask({
+      categories: taskCategories,
+      subcategories: taskSubcategories,
       nodeId,
       versionId,
       title: String(req.body.title || '').trim(),
@@ -1086,8 +1103,11 @@ exports.createTask = async (req, res) => {
       const hierarchyLabel = [created?.hierarchy_l1, created?.hierarchy_l2, created?.hierarchy_l3, created?.hierarchy_l4, created?.hierarchy_l5]
         .filter(Boolean)
         .join(' > ');
+      const subcategoryLabel = Array.isArray(created?.task_subcategories)
+        ? created.task_subcategories.map((entry) => String(entry || '').trim()).filter(Boolean).join(', ')
+        : '';
       const taskTitle = String(created?.title || req.body.title || 'Task').trim();
-      const message = hierarchyLabel ? `${taskTitle} • ${hierarchyLabel}` : taskTitle;
+      const message = [taskTitle, hierarchyLabel, subcategoryLabel].filter(Boolean).join(' • ');
       await KaryakariniModel.createNotification({
         userId: assignedUserId,
         versionId,
@@ -1101,6 +1121,8 @@ exports.createTask = async (req, res) => {
           taskStatus: String(created?.status || 'open'),
           taskDate: created?.task_date || null,
           dueDate: created?.due_date || null,
+          taskCategories: created?.task_categories || [],
+          taskSubcategories: created?.task_subcategories || [],
         },
       });
       await ablyService.publishNotification(assignedUserId, {
@@ -1421,12 +1443,15 @@ exports.updateMyTaskStatus = async (req, res) => {
       });
     }
 
+    const attachments = Array.isArray(req.body?.attachments) ? req.body.attachments : [];
+
     const updated = await KaryakariniModel.updateTaskStatus({
       taskId,
       userId: req.user?.id,
       userRole: normalizeRole(req.userRole || req.user?.role),
       versionId,
       status,
+      attachments,
     });
     if (!updated) {
       return res.status(404).json({
@@ -1640,6 +1665,7 @@ exports.createMember = async (req, res) => {
 
     const nodeId = parsePositiveNumber(rawNodeId);
     const userId = parsePositiveNumber(rawUserId);
+    const memberUserRole = normalizeMemberUserRole(req.body?.userRole);
     const categories = parseMemberLabelList(req.body?.categories, category);
     const subcategories = parseMemberLabelList(req.body?.subcategories, subcategory);
     const hasIdentity = Boolean(userId || (mobileNumber && name));
@@ -1680,12 +1706,13 @@ exports.createMember = async (req, res) => {
       userId: req.user?.id,
       userRole,
       versionId,
+      includeSelf: false,
     });
 
     if (!hasAccess) {
       return res.status(403).json({
         success: false,
-        message: 'You can add members only in assigned node and children',
+        message: 'You can add members only in child nodes under your assigned scope',
       });
     }
 
@@ -1714,6 +1741,7 @@ exports.createMember = async (req, res) => {
       nodeId,
       versionId,
       createdBy: req.user?.id || null,
+      userRole: memberUserRole,
     });
 
     if (created.status === 'skipped_existing_member') {
@@ -1766,6 +1794,7 @@ exports.createMemberWithUserMapping = async (req, res) => {
 
     const nodeId = parsePositiveNumber(rawNodeId);
     const userId = parsePositiveNumber(rawUserId);
+    const memberUserRole = normalizeMemberUserRole(req.body?.userRole);
     const categories = parseMemberLabelList(req.body?.categories, category);
     const subcategories = parseMemberLabelList(req.body?.subcategories, subcategory);
     const hasIdentity = Boolean(userId || (mobileNumber && name));
@@ -1806,12 +1835,13 @@ exports.createMemberWithUserMapping = async (req, res) => {
       userId: req.user?.id,
       userRole,
       versionId,
+      includeSelf: false,
     });
 
     if (!hasAccess) {
       return res.status(403).json({
         success: false,
-        message: 'You can add members only in assigned node and children',
+        message: 'You can add members only in child nodes under your assigned scope',
       });
     }
 
@@ -1840,6 +1870,7 @@ exports.createMemberWithUserMapping = async (req, res) => {
       password: password ? String(password).trim() : null,
       fatherOrHusbandName: fatherOrHusbandName ? String(fatherOrHusbandName).trim() : 'Unknown',
       avatar: avatar ? String(avatar).trim() : null,
+      userRole: memberUserRole,
     });
 
     if (result.status === 'skipped_existing_member') {

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppBottomNav } from '../../core/components/AppBottomNav';
 import { ProfileMenu } from '../../core/components/ProfileMenu';
@@ -16,6 +17,7 @@ import type {
 
 type MemberTab = 'myteams' | 'messages' | 'tasks';
 type MessageTab = 'received' | 'sent';
+const TASK_STATUS_OPTIONS = ['open', 'in_progress', 'completed', 'blocked', 'cancelled'] as const;
 
 const toDateText = (value?: string | null) => {
   if (!value) return '-';
@@ -33,6 +35,13 @@ const statusColor = (status?: string | null) => {
   return '#1d4ed8';
 };
 
+const parseLabelList = (value?: string | string[] | null) => {
+  if (Array.isArray(value)) return [...new Set(value.map((entry) => String(entry || '').trim()).filter(Boolean))];
+  const raw = String(value || '').trim();
+  if (!raw) return [] as string[];
+  return [...new Set(raw.split(',').map((entry) => entry.trim()).filter(Boolean))];
+};
+
 export default function KaryakariniMemberScreen() {
   const { tab } = useLocalSearchParams<{ tab?: string }>();
   const { user, logout } = useProfile();
@@ -46,6 +55,14 @@ export default function KaryakariniMemberScreen() {
   const [invitations, setInvitations] = useState<KaryakariniInvitation[]>([]);
   const [sentSummaries, setSentSummaries] = useState<KaryakariniSentInvitationSummary[]>([]);
   const [tasks, setTasks] = useState<KaryakariniTask[]>([]);
+  const [selectedAssignmentKey, setSelectedAssignmentKey] = useState('');
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [editingTask, setEditingTask] = useState<KaryakariniTask | null>(null);
+  const [taskDraftStatus, setTaskDraftStatus] = useState<string>('open');
+  const [taskDraftAttachments, setTaskDraftAttachments] = useState<{ url: string; type?: string; name?: string }[]>([]);
+  const [taskAttachmentInput, setTaskAttachmentInput] = useState('');
+  const [taskUploadingAttachment, setTaskUploadingAttachment] = useState(false);
+  const [savingTask, setSavingTask] = useState(false);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -147,6 +164,96 @@ export default function KaryakariniMemberScreen() {
     [loadData]
   );
 
+  const handleOpenTaskEditor = useCallback((task: KaryakariniTask) => {
+    setEditingTask(task);
+    setTaskDraftStatus(String(task.status || 'open').toLowerCase() || 'open');
+    setTaskDraftAttachments([]);
+    setTaskAttachmentInput('');
+    setShowTaskModal(true);
+  }, []);
+
+  const handleUploadTaskAttachment = useCallback(async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission', 'Media library permission is required');
+        return;
+      }
+
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        quality: 0.8,
+      });
+      if (picked.canceled || !picked.assets?.[0]) return;
+
+      const asset = picked.assets[0];
+      const form = new FormData();
+      form.append('folder', 'karyakarini');
+      form.append('category', 'task');
+      form.append(
+        'file',
+        {
+          uri: asset.uri,
+          name: asset.fileName || `task-${Date.now()}`,
+          type: asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg'),
+        } as any
+      );
+
+      setTaskUploadingAttachment(true);
+      const response = await karyakariniClient.post('/karyakarini/upload/attachment', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const payload = response?.data?.data || {};
+      const url = String(payload.url || '').trim();
+      if (!url) {
+        Alert.alert('Error', 'Failed to upload attachment');
+        return;
+      }
+      setTaskDraftAttachments((prev) => [
+        ...prev,
+        {
+          url,
+          type: String(payload.fileType || asset.mimeType || '').trim() || undefined,
+          name: String(payload.fileName || asset.fileName || `task-${Date.now()}`).trim(),
+        },
+      ]);
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.message || 'Failed to upload attachment');
+    } finally {
+      setTaskUploadingAttachment(false);
+    }
+  }, []);
+
+  const handleAddAttachmentLink = useCallback(() => {
+    const url = taskAttachmentInput.trim();
+    if (!url) return;
+    setTaskDraftAttachments((prev) => [...prev, { url, type: 'document', name: url.split('/').pop() || 'attachment' }]);
+    setTaskAttachmentInput('');
+  }, [taskAttachmentInput]);
+
+  const handleSaveTask = useCallback(async () => {
+    if (!editingTask || !versionId) return;
+    try {
+      setSavingTask(true);
+      const response = await karyakariniClient.patch(`/karyakarini/my/tasks/${editingTask.id}/status`, {
+        versionId,
+        status: taskDraftStatus,
+        attachments: taskDraftAttachments,
+      });
+      const updated = (response?.data?.data?.task || null) as KaryakariniTask | null;
+      setTasks((prev) => prev.map((entry) => (entry.id === editingTask.id ? { ...entry, ...(updated || {}), status: taskDraftStatus } : entry)));
+      setShowTaskModal(false);
+      setEditingTask(null);
+      setTaskDraftAttachments([]);
+      setTaskAttachmentInput('');
+      Alert.alert('Success', 'Task updated successfully');
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.message || 'Failed to update task');
+    } finally {
+      setSavingTask(false);
+    }
+  }, [editingTask, taskDraftAttachments, taskDraftStatus, versionId]);
+
   const handleLogout = useCallback(async () => {
     try {
       await logout();
@@ -164,6 +271,67 @@ export default function KaryakariniMemberScreen() {
     () => invitations.filter((invitation) => String(invitation.invitation_status || '').toLowerCase() === 'pending').length,
     [invitations]
   );
+  const assignmentCards = useMemo(() => {
+    const rows: { key: string; nodeId: number; path: string; category: string; subcategory: string; pad: string }[] = [];
+    teams.forEach((team) => {
+      const categories = parseLabelList(team.categories && team.categories.length ? team.categories : team.category || '');
+      const subcategories = parseLabelList(team.subcategories && team.subcategories.length ? team.subcategories : team.subcategory || '');
+      const nodeId = Number(team.node_id || 0);
+      const path = String(team.hierarchy_path || team.node_name || '').trim();
+      const pad = String(team.pad || '').trim();
+      if (subcategories.length) {
+        subcategories.forEach((subcategory) => {
+          const category =
+            categories.find((entry) => subcategory.toLowerCase().includes(entry.toLowerCase())) ||
+            categories[0] ||
+            'Category';
+          rows.push({
+            key: `${team.id}-${nodeId}-${subcategory}`,
+            nodeId,
+            path,
+            category,
+            subcategory,
+            pad,
+          });
+        });
+      } else if (categories.length) {
+        categories.forEach((category) => {
+          rows.push({
+            key: `${team.id}-${nodeId}-${category}`,
+            nodeId,
+            path,
+            category,
+            subcategory: '',
+            pad,
+          });
+        });
+      }
+    });
+    return rows;
+  }, [teams]);
+
+  const selectedAssignment = useMemo(
+    () => assignmentCards.find((entry) => entry.key === selectedAssignmentKey) || null,
+    [assignmentCards, selectedAssignmentKey]
+  );
+  const assignedTasks = useMemo(() => {
+    const userId = Number((user as any)?.id || 0);
+    if (userId <= 0) return tasks;
+    return tasks.filter((task) => Number(task.assigned_user_id || 0) === userId);
+  }, [tasks, user]);
+  const filteredTasks = useMemo(() => {
+    if (!selectedAssignment) return assignedTasks;
+    const selectedSubcategory = String(selectedAssignment.subcategory || '').trim().toLowerCase();
+    return assignedTasks.filter((task) => {
+      const nodeMatch = Number(task.node_id || 0) === Number(selectedAssignment.nodeId || 0);
+      if (!selectedSubcategory) return nodeMatch;
+      const taskSubcategories = Array.isArray(task.task_subcategories)
+        ? task.task_subcategories.map((entry) => String(entry || '').trim().toLowerCase()).filter(Boolean)
+        : [];
+      if (taskSubcategories.length) return taskSubcategories.includes(selectedSubcategory);
+      return nodeMatch;
+    });
+  }, [assignedTasks, selectedAssignment]);
 
   if (loading) {
     return (
@@ -199,6 +367,38 @@ export default function KaryakariniMemberScreen() {
         <Text style={styles.heading}>Karyakarini Member</Text>
         <Text style={styles.subHeading}>Version #{versionId || '-'}</Text>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+        {assignmentCards.length > 0 ? (
+          <View style={styles.listWrap}>
+            <Text style={styles.sectionTitle}>Assigned Categories</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.assignmentRow}>
+              {assignmentCards.map((entry) => {
+                const selected = selectedAssignmentKey === entry.key;
+                return (
+                  <TouchableOpacity
+                    key={entry.key}
+                    style={[styles.assignmentCard, selected && styles.assignmentCardActive]}
+                    onPress={() => {
+                      setSelectedAssignmentKey(entry.key);
+                      setActiveTab('tasks');
+                    }}
+                  >
+                    <Text style={[styles.assignmentCardTitle, selected && styles.assignmentCardTitleActive]}>
+                      {entry.subcategory || entry.category}
+                    </Text>
+                    <Text style={styles.assignmentCardMeta}>{entry.category}</Text>
+                    <Text style={styles.assignmentCardMeta}>{entry.pad || '-'}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            {selectedAssignment ? (
+              <TouchableOpacity onPress={() => setSelectedAssignmentKey('')}>
+                <Text style={styles.clearLink}>Clear selected category</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
 
         <View style={styles.tabSwitchRow}>
           <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'myteams' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('myteams')}>
@@ -325,25 +525,110 @@ export default function KaryakariniMemberScreen() {
 
         {activeTab === 'tasks' ? (
           <View style={styles.listWrap}>
-            {tasks.length === 0 ? (
-              <Text style={styles.helper}>No tasks assigned in your team scope.</Text>
+            {selectedAssignment ? (
+              <Text style={styles.subHeading}>
+                Showing tasks for: {selectedAssignment.subcategory || selectedAssignment.category} • {selectedAssignment.path || '-'}
+              </Text>
+            ) : null}
+            {filteredTasks.length === 0 ? (
+              <Text style={styles.helper}>No tasks assigned for selected category/location.</Text>
             ) : (
-              tasks.map((task) => (
+              filteredTasks.map((task) => (
                 <View key={`task-${task.id}`} style={styles.card}>
                   <View style={styles.cardHeaderRow}>
                     <Text style={styles.cardTitle}>{task.title}</Text>
                     <Text style={[styles.statusBadge, { color: statusColor(task.status) }]}>{String(task.status || 'open')}</Text>
                   </View>
                   <Text style={styles.cardMeta}>{task.hierarchy_path || task.node_name || '-'}</Text>
+                  {Array.isArray(task.task_subcategories) && task.task_subcategories.length > 0 ? (
+                    <Text style={styles.cardMeta}>Subcategories: {task.task_subcategories.join(', ')}</Text>
+                  ) : null}
                   <Text style={styles.cardMeta}>
                     Task: {toDateText(task.task_date)} • Due: {toDateText(task.due_date)}
                   </Text>
+                  <Text style={styles.cardMeta}>Attachments: {Number(task.attachment_count || 0)}</Text>
+                  <TouchableOpacity style={styles.taskEditBtn} onPress={() => handleOpenTaskEditor(task)}>
+                    <Text style={styles.taskEditBtnText}>Edit Task</Text>
+                  </TouchableOpacity>
                 </View>
               ))
             )}
           </View>
         ) : null}
       </ScrollView>
+
+      <Modal visible={showTaskModal} transparent animationType="slide" onRequestClose={() => setShowTaskModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.headingSm}>Edit Task</Text>
+            <Text style={styles.cardMeta}>{editingTask?.title || '-'}</Text>
+
+            <Text style={styles.sectionTitle}>Status</Text>
+            <View style={styles.statusRow}>
+              {TASK_STATUS_OPTIONS.map((status) => {
+                const active = taskDraftStatus === status;
+                return (
+                  <TouchableOpacity
+                    key={`status-${status}`}
+                    style={[styles.statusChip, active && styles.statusChipActive]}
+                    onPress={() => setTaskDraftStatus(status)}
+                  >
+                    <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>{status.replace(/_/g, ' ')}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.sectionTitle}>Upload Documents</Text>
+            <View style={styles.inlineRow}>
+              <TextInput
+                style={[styles.input, styles.inputFlex]}
+                placeholder="Paste attachment URL"
+                value={taskAttachmentInput}
+                onChangeText={setTaskAttachmentInput}
+                autoCapitalize="none"
+              />
+              <TouchableOpacity style={styles.inlineBtn} onPress={handleAddAttachmentLink}>
+                <Text style={styles.inlineBtnText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={[styles.inlineBtn, styles.uploadBtn, taskUploadingAttachment && styles.btnDisabled]}
+              disabled={taskUploadingAttachment}
+              onPress={() => void handleUploadTaskAttachment()}
+            >
+              <Text style={styles.inlineBtnText}>{taskUploadingAttachment ? 'Uploading...' : 'Upload from device'}</Text>
+            </TouchableOpacity>
+
+            <ScrollView style={styles.attachmentList}>
+              {taskDraftAttachments.map((entry, idx) => (
+                <View key={`task-attachment-${idx}`} style={styles.attachmentItem}>
+                  <Text style={styles.attachmentText} numberOfLines={1}>
+                    {entry.name || entry.url}
+                  </Text>
+                  <TouchableOpacity onPress={() => setTaskDraftAttachments((prev) => prev.filter((_, i) => i !== idx))}>
+                    <Text style={styles.removeText}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {taskDraftAttachments.length === 0 ? <Text style={styles.helper}>No attachments added</Text> : null}
+            </ScrollView>
+
+            <View style={styles.actionRow}>
+              <TouchableOpacity style={[styles.actionBtn, styles.rejectBtn]} onPress={() => setShowTaskModal(false)}>
+                <Text style={styles.actionText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.acceptBtn, savingTask && styles.btnDisabled]}
+                disabled={savingTask}
+                onPress={() => void handleSaveTask()}
+              >
+                <Text style={styles.actionText}>{savingTask ? 'Saving...' : 'Save'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <AppBottomNav activeKey="home" userRole={(user as any)?.role || null} />
     </View>
@@ -407,6 +692,50 @@ const styles = StyleSheet.create({
   errorText: {
     color: theme.colors.error,
     fontSize: 12,
+    fontWeight: '600',
+  },
+  sectionTitle: {
+    color: theme.colors.text.primary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  headingSm: {
+    color: theme.colors.text.primary,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  clearLink: {
+    color: theme.colors.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  assignmentRow: {
+    gap: 8,
+  },
+  assignmentCard: {
+    width: 180,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 10,
+    backgroundColor: theme.colors.surface,
+    padding: 10,
+    gap: 4,
+  },
+  assignmentCardActive: {
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primarySoft,
+  },
+  assignmentCardTitle: {
+    color: theme.colors.text.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  assignmentCardTitleActive: {
+    color: theme.colors.primary,
+  },
+  assignmentCardMeta: {
+    color: theme.colors.text.secondary,
+    fontSize: 11,
     fontWeight: '600',
   },
   tabSwitchRow: {
@@ -525,6 +854,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  taskEditBtn: {
+    marginTop: 2,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  taskEditBtnText: {
+    color: theme.colors.primary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
   statusBadge: {
     fontSize: 11,
     fontWeight: '700',
@@ -553,6 +896,106 @@ const styles = StyleSheet.create({
   actionText: {
     color: '#fff',
     fontSize: 12,
+    fontWeight: '700',
+  },
+  btnDisabled: {
+    opacity: 0.65,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  modalCard: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: 14,
+    padding: 12,
+    gap: 10,
+    maxHeight: '88%',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  statusChip: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: theme.colors.surface,
+  },
+  statusChipActive: {
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primarySoft,
+  },
+  statusChipText: {
+    color: theme.colors.text.secondary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  statusChipTextActive: {
+    color: theme.colors.primary,
+  },
+  inlineRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 10,
+    backgroundColor: theme.colors.background,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    color: theme.colors.text.primary,
+    fontSize: 13,
+  },
+  inputFlex: {
+    flex: 1,
+  },
+  inlineBtn: {
+    borderRadius: 10,
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlineBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  uploadBtn: {
+    alignSelf: 'flex-start',
+  },
+  attachmentList: {
+    maxHeight: 140,
+  },
+  attachmentItem: {
+    borderWidth: 1,
+    borderColor: theme.colors.borderLight,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    marginBottom: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  attachmentText: {
+    flex: 1,
+    color: theme.colors.text.primary,
+    fontSize: 12,
+  },
+  removeText: {
+    color: theme.colors.error,
+    fontSize: 11,
     fontWeight: '700',
   },
 });
