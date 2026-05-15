@@ -1,0 +1,823 @@
+/**
+ * =====================================================================
+ * Analytics Controller
+ * Company: emeelan
+ * =====================================================================
+ * Handles all analytics and reporting queries
+ */
+
+const pool = require('../config/database');
+
+/**
+ * Get Demographic Overview Report
+ * Supports drill-down: Country > State > District > Temple
+ */
+exports.getDemographicReport = async (req, res) => {
+  try {
+    const { templeId, state, district, village } = req.query;
+
+    let query = `
+      SELECT 
+        fds.*,
+        dg.temple_name,
+        dg.village,
+        dg.tehsil,
+        dg.district,
+        dg.state,
+        dg.country
+      FROM fact_demographic_summary fds
+      LEFT JOIN dim_geography dg ON fds.temple_id = dg.temple_id
+      WHERE fds.snapshot_date = CURRENT_DATE
+    `;
+
+    const params = [];
+    let paramCount = 1;
+
+    if (templeId) {
+      query += ` AND fds.temple_id = $${paramCount}`;
+      params.push(templeId);
+      paramCount++;
+    }
+
+    if (state) {
+      query += ` AND fds.state = $${paramCount}`;
+      params.push(state);
+      paramCount++;
+    }
+
+    if (district) {
+      query += ` AND fds.district = $${paramCount}`;
+      params.push(district);
+      paramCount++;
+    }
+
+    if (village) {
+      query += ` AND fds.village = $${paramCount}`;
+      params.push(village);
+      paramCount++;
+    }
+
+    query += ` ORDER BY fds.total_members DESC`;
+
+    const result = await pool.query(query, params);
+
+    // Calculate totals
+    const totals = {
+      totalMembers: 0,
+      totalFamilies: 0,
+      maleCount: 0,
+      femaleCount: 0,
+      marriedCount: 0,
+      bachelorCount: 0
+    };
+
+    result.rows.forEach(row => {
+      totals.totalMembers += row.total_members || 0;
+      totals.totalFamilies += row.total_families || 0;
+      totals.maleCount += row.male_count || 0;
+      totals.femaleCount += row.female_count || 0;
+      totals.marriedCount += row.married_count || 0;
+      totals.bachelorCount += row.bachelor_count || 0;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        summary: totals,
+        breakdown: result.rows
+      }
+    });
+  } catch (error) {
+    console.error('Demographic report error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch demographic report'
+    });
+  }
+};
+
+/**
+ * Get Age Distribution Report
+ */
+exports.getAgeDistributionReport = async (req, res) => {
+  try {
+    const { templeId, state, district } = req.query;
+
+    let query = `
+      SELECT 
+        far.*,
+        ar.range_name,
+        ar.min_age,
+        ar.max_age
+      FROM fact_age_range_summary far
+      JOIN dim_age_ranges ar ON far.age_range_id = ar.id
+      WHERE far.snapshot_date = CURRENT_DATE
+    `;
+
+    const params = [];
+    let paramCount = 1;
+
+    if (templeId) {
+      query += ` AND far.temple_id = $${paramCount}`;
+      params.push(templeId);
+      paramCount++;
+    }
+
+    if (state) {
+      query += ` AND far.state = $${paramCount}`;
+      params.push(state);
+      paramCount++;
+    }
+
+    if (district) {
+      query += ` AND far.district = $${paramCount}`;
+      params.push(district);
+      paramCount++;
+    }
+
+    query += ` ORDER BY ar.display_order`;
+
+    const result = await pool.query(query, params);
+
+    // Aggregate by age range
+    const ageRanges = {};
+    result.rows.forEach(row => {
+      const key = row.range_name;
+      if (!ageRanges[key]) {
+        ageRanges[key] = {
+          rangeName: row.range_name,
+          minAge: row.min_age,
+          maxAge: row.max_age,
+          maleCount: 0,
+          femaleCount: 0,
+          totalCount: 0
+        };
+      }
+      ageRanges[key].maleCount += row.male_count || 0;
+      ageRanges[key].femaleCount += row.female_count || 0;
+      ageRanges[key].totalCount += row.total_count || 0;
+    });
+
+    res.json({
+      success: true,
+      data: Object.values(ageRanges)
+    });
+  } catch (error) {
+    console.error('Age distribution error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch age distribution'
+    });
+  }
+};
+
+/**
+ * Get Gotra Distribution Report
+ */
+exports.getGotraReport = async (req, res) => {
+  try {
+    const { templeId, state, district } = req.query;
+
+    let query = `
+      SELECT 
+        fg.*,
+        g.gotra_name,
+        g.lineage
+      FROM fact_gotra_summary fg
+      JOIN dim_gotras g ON fg.gotra_id = g.id
+      WHERE fg.snapshot_date = CURRENT_DATE
+    `;
+
+    const params = [];
+    let paramCount = 1;
+
+    if (templeId) {
+      query += ` AND fg.temple_id = $${paramCount}`;
+      params.push(templeId);
+      paramCount++;
+    }
+
+    if (state) {
+      query += ` AND fg.state = $${paramCount}`;
+      params.push(state);
+      paramCount++;
+    }
+
+    if (district) {
+      query += ` AND fg.district = $${paramCount}`;
+      params.push(district);
+      paramCount++;
+    }
+
+    query += ` ORDER BY g.gotra_name`;
+
+    const result = await pool.query(query, params);
+
+    // Aggregate by gotra
+    const gotras = {};
+    result.rows.forEach(row => {
+      const key = row.gotra_name;
+      if (!gotras[key]) {
+        gotras[key] = {
+          gotraName: row.gotra_name,
+          lineage: row.lineage,
+          familyCount: 0,
+          memberCount: 0
+        };
+      }
+      gotras[key].familyCount += row.family_count || 0;
+      gotras[key].memberCount += row.member_count || 0;
+    });
+
+    // Sort by family count
+    const sorted = Object.values(gotras).sort((a, b) => b.familyCount - a.familyCount);
+
+    res.json({
+      success: true,
+      data: sorted
+    });
+  } catch (error) {
+    console.error('Gotra report error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch gotra report'
+    });
+  }
+};
+
+/**
+ * Get Family Statistics Report
+ */
+exports.getFamilyReport = async (req, res) => {
+  try {
+    const { templeId, state, district, gotra } = req.query;
+
+    let query = `
+      SELECT 
+        ff.*
+      FROM fact_family_summary ff
+      WHERE ff.snapshot_date = CURRENT_DATE
+    `;
+
+    const params = [];
+    let paramCount = 1;
+
+    if (templeId) {
+      query += ` AND ff.temple_id = $${paramCount}`;
+      params.push(templeId);
+      paramCount++;
+    }
+
+    if (state) {
+      query += ` AND ff.state = $${paramCount}`;
+      params.push(state);
+      paramCount++;
+    }
+
+    if (district) {
+      query += ` AND ff.district = $${paramCount}`;
+      params.push(district);
+      paramCount++;
+    }
+
+    if (gotra) {
+      query += ` AND ff.gotra = $${paramCount}`;
+      params.push(gotra);
+      paramCount++;
+    }
+
+    query += ` ORDER BY ff.family_size DESC LIMIT 100`;
+
+    const result = await pool.query(query, params);
+
+    // Calculate statistics
+    let totalSize = 0;
+    let maxSize = 0;
+    let minSize = 999;
+
+    result.rows.forEach(row => {
+      totalSize += row.family_size || 0;
+      if (row.family_size > maxSize) maxSize = row.family_size;
+      if (row.family_size < minSize) minSize = row.family_size;
+    });
+
+    const avgSize = result.rows.length > 0 ? (totalSize / result.rows.length).toFixed(2) : 0;
+
+    res.json({
+      success: true,
+      data: {
+        statistics: {
+          totalFamilies: result.rows.length,
+          averageSize: parseFloat(avgSize),
+          largestFamily: maxSize,
+          smallestFamily: minSize === 999 ? 0 : minSize
+        },
+        families: result.rows
+      }
+    });
+  } catch (error) {
+    console.error('Family report error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch family report'
+    });
+  }
+};
+
+/**
+ * Get Geographic Hierarchy (for drill-down filters)
+ */
+exports.getGeographicHierarchy = async (req, res) => {
+  try {
+    const { level, parentValue } = req.query;
+
+    let query = '';
+    let params = [];
+
+    switch (level) {
+      case 'country':
+        query = 'SELECT DISTINCT country FROM dim_geography WHERE country IS NOT NULL ORDER BY country';
+        break;
+      
+      case 'state':
+        query = 'SELECT DISTINCT state FROM dim_geography WHERE state IS NOT NULL';
+        if (parentValue) {
+          query += ' AND country = $1';
+          params.push(parentValue);
+        }
+        query += ' ORDER BY state';
+        break;
+      
+      case 'district':
+        query = 'SELECT DISTINCT district FROM dim_geography WHERE district IS NOT NULL';
+        if (parentValue) {
+          query += ' AND state = $1';
+          params.push(parentValue);
+        }
+        query += ' ORDER BY district';
+        break;
+      
+      case 'village':
+        query = 'SELECT DISTINCT village FROM dim_geography WHERE village IS NOT NULL';
+        if (parentValue) {
+          query += ' AND district = $1';
+          params.push(parentValue);
+        }
+        query += ' ORDER BY village';
+        break;
+      
+      case 'temple':
+        query = 'SELECT temple_id as id, temple_name as name FROM dim_geography';
+        if (parentValue) {
+          query += ' WHERE village = $1';
+          params.push(parentValue);
+        }
+        query += ' ORDER BY temple_name';
+        break;
+      
+      default:
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid level. Use: country, state, district, village, or temple'
+        });
+    }
+
+    const result = await pool.query(query, params);
+
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Geographic hierarchy error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch geographic hierarchy'
+    });
+  }
+};
+
+/**
+ * Get All Temples (for filter dropdown)
+ */
+exports.getTemples = async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        t.id,
+        t.name,
+        t.city,
+        t.state,
+        dg.district,
+        dg.village
+      FROM temples t
+      LEFT JOIN dim_geography dg ON t.id = dg.temple_id
+      WHERE t.is_active = true
+      ORDER BY t.name
+    `);
+
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Get temples error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch temples'
+    });
+  }
+};
+
+/**
+ * Refresh Analytics Summaries
+ */
+exports.refreshAnalytics = async (req, res) => {
+  try {
+    const { templeId } = req.body;
+
+    await pool.query('SELECT refresh_all_analytics($1)', [templeId || null]);
+
+    res.json({
+      success: true,
+      message: templeId 
+        ? `Analytics refreshed for temple ${templeId}` 
+        : 'All analytics refreshed successfully'
+    });
+  } catch (error) {
+    console.error('Refresh analytics error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to refresh analytics'
+    });
+  }
+};
+
+/**
+ * Get Dashboard Summary (Quick Overview)
+ * Now supports filtering by location
+ */
+exports.getDashboardSummary = async (req, res) => {
+  try {
+    const { templeId, state, district, tehsil, village } = req.query;
+
+    // Build WHERE clause for filters
+    let whereClause = 'WHERE snapshot_date = CURRENT_DATE';
+    const params = [];
+    let paramCount = 1;
+
+    if (templeId) {
+      whereClause += ` AND temple_id = $${paramCount}`;
+      params.push(templeId);
+      paramCount++;
+    }
+
+    if (state) {
+      whereClause += ` AND state = $${paramCount}`;
+      params.push(state);
+      paramCount++;
+    }
+
+    if (district) {
+      whereClause += ` AND district = $${paramCount}`;
+      params.push(district);
+      paramCount++;
+    }
+
+    if (tehsil) {
+      whereClause += ` AND tehsil = $${paramCount}`;
+      params.push(tehsil);
+      paramCount++;
+    }
+
+    if (village) {
+      whereClause += ` AND village = $${paramCount}`;
+      params.push(village);
+      paramCount++;
+    }
+
+    // Demographic summary
+    const summary = await pool.query(`
+      SELECT 
+        SUM(total_members) as total_members,
+        SUM(total_families) as total_families,
+        SUM(male_count) as male_count,
+        SUM(female_count) as female_count,
+        SUM(married_count) as married_count,
+        SUM(bachelor_count) as bachelor_count,
+        SUM(married_male) as married_male,
+        SUM(married_female) as married_female,
+        SUM(bachelor_male) as bachelor_male,
+        SUM(bachelor_female) as bachelor_female,
+        COUNT(DISTINCT temple_id) as total_temples,
+        COUNT(DISTINCT state) as total_states,
+        COUNT(DISTINCT district) as total_districts
+      FROM fact_demographic_summary
+      ${whereClause}
+    `, params);
+
+    // Top Gotras (with same filters)
+    const topGotras = await pool.query(`
+      SELECT 
+        g.gotra_name,
+        SUM(fg.family_count) as families,
+        SUM(fg.member_count) as members
+      FROM fact_gotra_summary fg
+      JOIN dim_gotras g ON fg.gotra_id = g.id
+      ${whereClause.replace(/temple_id/g, 'fg.temple_id').replace(/state/g, 'fg.state').replace(/district/g, 'fg.district').replace(/tehsil/g, 'fg.tehsil').replace(/village/g, 'fg.village')}
+      GROUP BY g.gotra_name
+      ORDER BY families DESC
+      LIMIT 5
+    `, params);
+
+    // State/District Distribution (adjusted based on filter level)
+    let distributionQuery = '';
+    if (!state) {
+      // No state filter - show state distribution
+      distributionQuery = `
+        SELECT 
+          state,
+          SUM(total_members) as members,
+          SUM(total_families) as families
+        FROM fact_demographic_summary
+        ${whereClause}
+        GROUP BY state
+        ORDER BY members DESC
+        LIMIT 10
+      `;
+    } else if (!district) {
+      // State selected - show district distribution
+      distributionQuery = `
+        SELECT 
+          district,
+          SUM(total_members) as members,
+          SUM(total_families) as families
+        FROM fact_demographic_summary
+        ${whereClause}
+        GROUP BY district
+        ORDER BY members DESC
+        LIMIT 10
+      `;
+    } else if (!tehsil) {
+      // District selected - show tehsil distribution
+      distributionQuery = `
+        SELECT 
+          tehsil,
+          SUM(total_members) as members,
+          SUM(total_families) as families
+        FROM fact_demographic_summary
+        ${whereClause}
+        GROUP BY tehsil
+        ORDER BY members DESC
+        LIMIT 10
+      `;
+    } else {
+      // Tehsil selected - show village distribution
+      distributionQuery = `
+        SELECT 
+          village,
+          SUM(total_members) as members,
+          SUM(total_families) as families
+        FROM fact_demographic_summary
+        ${whereClause}
+        GROUP BY village
+        ORDER BY members DESC
+        LIMIT 10
+      `;
+    }
+
+    const distribution = await pool.query(distributionQuery, params);
+
+    // Agriculture summary (with same filters)
+    const agriculture = await pool.query(`
+      SELECT 
+        SUM(total_families) as total_families,
+        SUM(families_with_land) as families_with_land,
+        SUM(total_land_acres) as total_land_acres,
+        SUM(total_agri_income) as total_agri_income
+      FROM fact_agriculture_summary
+      ${whereClause}
+    `, params);
+
+    // Occupation summary (with same filters)
+    const occupation = await pool.query(`
+      SELECT 
+        SUM(total_in_jobs) as total_in_jobs,
+        SUM(total_in_business) as total_in_business,
+        SUM(student_count) as student_count,
+        SUM(homemaker_count) as homemaker_count
+      FROM fact_occupation_summary
+      ${whereClause}
+    `, params);
+
+    res.json({
+      success: true,
+      data: {
+        summary: summary.rows[0],
+        topGotras: topGotras.rows,
+        distribution: distribution.rows,
+        distributionLevel: !state ? 'state' : (!district ? 'district' : (!tehsil ? 'tehsil' : 'village')),
+        agriculture: agriculture.rows[0] || {},
+        occupation: occupation.rows[0] || {}
+      }
+    });
+  } catch (error) {
+    console.error('Dashboard summary error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch dashboard summary'
+    });
+  }
+};
+
+/**
+ * Get Agriculture Land Report
+ */
+exports.getAgricultureReport = async (req, res) => {
+  try {
+    const { templeId, state, district, tehsil, village } = req.query;
+
+    let query = `
+      SELECT fa.*
+      FROM fact_agriculture_summary fa
+      WHERE fa.snapshot_date = CURRENT_DATE
+    `;
+
+    const params = [];
+    let paramCount = 1;
+
+    if (templeId) {
+      query += ` AND fa.temple_id = $${paramCount}`;
+      params.push(templeId);
+      paramCount++;
+    }
+
+    if (state) {
+      query += ` AND fa.state = $${paramCount}`;
+      params.push(state);
+      paramCount++;
+    }
+
+    if (district) {
+      query += ` AND fa.district = $${paramCount}`;
+      params.push(district);
+      paramCount++;
+    }
+
+    if (tehsil) {
+      query += ` AND fa.tehsil = $${paramCount}`;
+      params.push(tehsil);
+      paramCount++;
+    }
+
+    if (village) {
+      query += ` AND fa.village = $${paramCount}`;
+      params.push(village);
+      paramCount++;
+    }
+
+    query += ` ORDER BY fa.total_land_acres DESC`;
+
+    const result = await pool.query(query, params);
+
+    // Calculate totals
+    const totals = {
+      totalFamilies: 0,
+      familiesWithLand: 0,
+      familiesWithoutLand: 0,
+      totalLandAcres: 0,
+      irrigatedLandAcres: 0,
+      rainfedLandAcres: 0,
+      mixedLandAcres: 0,
+      totalAgriIncome: 0
+    };
+
+    result.rows.forEach(row => {
+      totals.totalFamilies += row.total_families || 0;
+      totals.familiesWithLand += row.families_with_land || 0;
+      totals.familiesWithoutLand += row.families_without_land || 0;
+      totals.totalLandAcres += parseFloat(row.total_land_acres) || 0;
+      totals.irrigatedLandAcres += parseFloat(row.irrigated_land_acres) || 0;
+      totals.rainfedLandAcres += parseFloat(row.rainfed_land_acres) || 0;
+      totals.mixedLandAcres += parseFloat(row.mixed_land_acres) || 0;
+      totals.totalAgriIncome += parseFloat(row.total_agri_income) || 0;
+    });
+
+    totals.avgLandPerFamily = totals.familiesWithLand > 0 
+      ? parseFloat((totals.totalLandAcres / totals.familiesWithLand).toFixed(2)) 
+      : 0;
+
+    res.json({
+      success: true,
+      data: {
+        summary: totals,
+        breakdown: result.rows
+      }
+    });
+  } catch (error) {
+    console.error('Agriculture report error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch agriculture report'
+    });
+  }
+};
+
+/**
+ * Get Occupation (Job vs Business) Report
+ */
+exports.getOccupationReport = async (req, res) => {
+  try {
+    const { templeId, state, district, tehsil, village } = req.query;
+
+    let query = `
+      SELECT fo.*
+      FROM fact_occupation_summary fo
+      WHERE fo.snapshot_date = CURRENT_DATE
+    `;
+
+    const params = [];
+    let paramCount = 1;
+
+    if (templeId) {
+      query += ` AND fo.temple_id = $${paramCount}`;
+      params.push(templeId);
+      paramCount++;
+    }
+
+    if (state) {
+      query += ` AND fo.state = $${paramCount}`;
+      params.push(state);
+      paramCount++;
+    }
+
+    if (district) {
+      query += ` AND fo.district = $${paramCount}`;
+      params.push(district);
+      paramCount++;
+    }
+
+    if (tehsil) {
+      query += ` AND fo.tehsil = $${paramCount}`;
+      params.push(tehsil);
+      paramCount++;
+    }
+
+    if (village) {
+      query += ` AND fo.village = $${paramCount}`;
+      params.push(village);
+      paramCount++;
+    }
+
+    const result = await pool.query(query, params);
+
+    // Calculate totals
+    const totals = {
+      totalWorkingMembers: 0,
+      totalInJobs: 0,
+      totalInBusiness: 0,
+      governmentJob: 0,
+      privateJob: 0,
+      selfEmployed: 0,
+      shopBusiness: 0,
+      tradingBusiness: 0,
+      manufacturingBusiness: 0,
+      agricultureBusiness: 0,
+      studentCount: 0,
+      homemakerCount: 0,
+      retiredCount: 0,
+      unemployedCount: 0
+    };
+
+    result.rows.forEach(row => {
+      totals.totalWorkingMembers += row.total_working_members || 0;
+      totals.totalInJobs += row.total_in_jobs || 0;
+      totals.totalInBusiness += row.total_in_business || 0;
+      totals.governmentJob += row.government_job || 0;
+      totals.privateJob += row.private_job || 0;
+      totals.selfEmployed += row.self_employed || 0;
+      totals.shopBusiness += row.shop_business || 0;
+      totals.tradingBusiness += row.trading_business || 0;
+      totals.manufacturingBusiness += row.manufacturing_business || 0;
+      totals.agricultureBusiness += row.agriculture_business || 0;
+      totals.studentCount += row.student_count || 0;
+      totals.homemakerCount += row.homemaker_count || 0;
+      totals.retiredCount += row.retired_count || 0;
+      totals.unemployedCount += row.unemployed_count || 0;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        summary: totals,
+        breakdown: result.rows
+      }
+    });
+  } catch (error) {
+    console.error('Occupation report error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch occupation report'
+    });
+  }
+};
