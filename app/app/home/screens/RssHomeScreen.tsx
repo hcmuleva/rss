@@ -6,30 +6,73 @@ import { useProfile } from '../../core/context/ProfileContext';
 import { theme } from '../../theme';
 
 type Announcement = { id: number; title: string; message: string; category: string };
+type CategoryCard = { key: string; category: string; subcategory: string; count: number };
 
 export default function RssHomeScreen() {
   const { user, isLoading } = useProfile();
   const [loading, setLoading] = useState(true);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [karyakariniCount, setKaryakariniCount] = useState(0);
+  const [categoryCards, setCategoryCards] = useState<CategoryCard[]>([]);
 
   const load = useCallback(async () => {
+    if (!user) {
+      setAnnouncements([]);
+      setKaryakariniCount(0);
+      setCategoryCards([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
-      const [announcementRes, teamRes] = await Promise.all([
+      const [announcementResult, teamResult] = await Promise.allSettled([
         authClient.get('/announcements', { params: { page: 1, limit: 10 } }),
-        karyakariniClient.get('/karyakarini/my/teams').catch(() => ({ data: { data: { teams: [] } } })),
+        karyakariniClient.get('/karyakarini/my/teams'),
       ]);
+
+      const announcementStatus = announcementResult.status === 'rejected' ? announcementResult.reason?.response?.status : null;
+      const teamStatus = teamResult.status === 'rejected' ? teamResult.reason?.response?.status : null;
+      if (announcementStatus === 401 || teamStatus === 401) {
+        router.replace('/auth/login' as any);
+        return;
+      }
+
+      const announcementRes = announcementResult.status === 'fulfilled' ? announcementResult.value : null;
+      const teamRes = teamResult.status === 'fulfilled' ? teamResult.value : null;
       setAnnouncements((announcementRes?.data?.data?.announcements || []) as Announcement[]);
-      setKaryakariniCount(Number((teamRes as any)?.data?.data?.teams?.length || 0));
+
+      const teams = ((teamRes as any)?.data?.data?.teams || []) as { category?: string | null; subcategory?: string | null }[];
+      setKaryakariniCount(Number(teams.length || 0));
+      const categoryMap = new Map<string, CategoryCard>();
+      teams.forEach((team) => {
+        const category = String(team?.category || '').trim();
+        if (!category) return;
+        const subcategory = String(team?.subcategory || '').trim();
+        const key = `${category}__${subcategory}`;
+        const existing = categoryMap.get(key);
+        categoryMap.set(key, {
+          key,
+          category,
+          subcategory,
+          count: Number(existing?.count || 0) + 1,
+        });
+      });
+      setCategoryCards(Array.from(categoryMap.values()).sort((a, b) => a.category.localeCompare(b.category)));
+    } catch {
+      setAnnouncements([]);
+      setKaryakariniCount(0);
+      setCategoryCards([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!isLoading && user) {
+      void load();
+    }
+  }, [isLoading, load, user]);
 
   useEffect(() => {
     if (!isLoading && !user) router.replace('/auth/login');
@@ -47,6 +90,21 @@ export default function RssHomeScreen() {
         <Text style={styles.cardSub}>Read-only team structure access</Text>
         <Text style={styles.meta}>My assigned nodes: {karyakariniCount}</Text>
       </TouchableOpacity>
+
+      {categoryCards.length > 0 ? (
+        <>
+          <Text style={styles.section}>My Assigned Categories</Text>
+          <View style={styles.categoryGrid}>
+            {categoryCards.map((entry) => (
+              <View key={entry.key} style={styles.categoryCard}>
+                <Text style={styles.categoryTitle}>{entry.category}</Text>
+                <Text style={styles.categorySub}>{entry.subcategory || 'General'}</Text>
+                <Text style={styles.categoryMeta}>Assignments: {entry.count}</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      ) : null}
 
       <Text style={styles.section}>Latest Announcements</Text>
       {loading ? (
@@ -75,6 +133,11 @@ const styles = StyleSheet.create({
   cardSub: { color: theme.colors.text.secondary, fontSize: 13 },
   meta: { color: theme.colors.primaryDark, fontWeight: '600', fontSize: 12, marginTop: 4 },
   section: { marginTop: 4, fontSize: 16, fontWeight: '700', color: theme.colors.text.primary },
+  categoryGrid: { gap: 8 },
+  categoryCard: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#EDDED5', padding: 12, gap: 4 },
+  categoryTitle: { fontSize: 13, fontWeight: '700', color: theme.colors.text.primary },
+  categorySub: { fontSize: 12, color: theme.colors.text.secondary, fontWeight: '600' },
+  categoryMeta: { fontSize: 11, color: theme.colors.primaryDark, fontWeight: '700' },
   announcementCard: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#EDDED5', padding: 12, gap: 5 },
   announcementCategory: { fontSize: 11, fontWeight: '700', color: theme.colors.primaryDark, textTransform: 'uppercase' },
   announcementTitle: { fontSize: 14, fontWeight: '700', color: theme.colors.text.primary },

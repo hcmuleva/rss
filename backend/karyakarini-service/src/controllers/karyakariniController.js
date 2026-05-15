@@ -19,6 +19,27 @@ const parseNumberArray = (value) => {
   return [...new Set(value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry) && entry > 0))];
 };
 
+const parseStringArray = (value) => {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map((entry) => String(entry || '').trim().toLowerCase()).filter(Boolean))];
+  }
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  return [...new Set(raw.split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean))];
+};
+
+const parseMemberLabelList = (value, fallback = null) => {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map((entry) => String(entry || '').trim()).filter(Boolean))];
+  }
+  const raw = String(value || '').trim();
+  if (raw) {
+    return [...new Set(raw.split(',').map((entry) => entry.trim()).filter(Boolean))];
+  }
+  const fallbackRaw = String(fallback || '').trim();
+  return fallbackRaw ? [fallbackRaw] : [];
+};
+
 const toDateString = (input, fallback = null) => {
   if (!input) return fallback;
   const raw = String(input).trim();
@@ -35,6 +56,22 @@ const getLevelIndex = (level) => LEVEL_ORDER.indexOf(String(level || '').trim().
 const normalizeInvitationStatus = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
   return ['accepted', 'rejected', 'tentative'].includes(normalized) ? normalized : null;
+};
+
+const validateRequiredMemberFields = (payload = {}) => {
+  const hasValue = (value) => {
+    if (Array.isArray(value)) return value.map((entry) => String(entry || '').trim()).filter(Boolean).length > 0;
+    return Boolean(String(value || '').trim());
+  };
+  const required = [
+    ['pad', 'Pad'],
+    ['category', 'Category'],
+    ['subcategory', 'Subcategory'],
+  ];
+  const missing = required
+    .filter(([key]) => !hasValue(payload[key]))
+    .map(([, label]) => label);
+  return missing.length ? `${missing.join(', ')} is required` : null;
 };
 
 exports.getVersions = async (req, res) => {
@@ -286,6 +323,19 @@ exports.getMembers = async (req, res) => {
 
     const page = Number(req.query.page || 1);
     const limit = Number(req.query.limit || 20);
+    const userRole = normalizeRole(req.userRole || req.user?.role);
+    const hasAccess = await KaryakariniModel.hasNodeAccess({
+      nodeId,
+      userId: req.user?.id,
+      userRole,
+      versionId,
+    });
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can view members only in assigned scope',
+      });
+    }
 
     const result = await KaryakariniModel.getMembersByNode({
       nodeId,
@@ -308,6 +358,116 @@ exports.getMembers = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to get members',
+    });
+  }
+};
+
+exports.updateMember = async (req, res) => {
+  try {
+    const memberId = parsePositiveNumber(req.params.memberId);
+    if (!memberId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid member id',
+      });
+    }
+
+    const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.query?.versionId || 'current');
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const existing = await KaryakariniModel.getMemberById({
+      memberId,
+      versionId,
+    });
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Member not found',
+      });
+    }
+
+    const userRole = normalizeRole(req.userRole || req.user?.role);
+    const hasAccess = await KaryakariniModel.hasNodeAccess({
+      nodeId: Number(existing.node_id),
+      userId: req.user?.id,
+      userRole,
+      versionId,
+    });
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can edit members only in assigned node and children',
+      });
+    }
+
+    const resolvedCategories = parseMemberLabelList(
+      req.body?.categories !== undefined ? req.body.categories : existing.categories,
+      req.body?.category !== undefined ? req.body.category : existing.category
+    );
+    const resolvedSubcategories = parseMemberLabelList(
+      req.body?.subcategories !== undefined ? req.body.subcategories : existing.subcategories,
+      req.body?.subcategory !== undefined ? req.body.subcategory : existing.subcategory
+    );
+
+    const memberValidationMessage = validateRequiredMemberFields({
+      pad: req.body?.pad !== undefined ? req.body.pad : existing.pad,
+      category: resolvedCategories,
+      subcategory: resolvedSubcategories,
+    });
+    if (memberValidationMessage) {
+      return res.status(400).json({
+        success: false,
+        message: memberValidationMessage,
+      });
+    }
+
+    const updated = await KaryakariniModel.updateMember({
+      memberId,
+      versionId,
+      name: req.body?.name,
+      fatherOrHusbandName: req.body?.fatherOrHusbandName,
+      mobileNumber: req.body?.mobileNumber,
+      avatar: req.body?.avatar,
+      pad: req.body?.pad,
+      period: req.body?.period,
+      startDate: req.body?.startDate,
+      endDate: req.body?.endDate,
+      village: req.body?.village,
+      tehsil: req.body?.tehsil,
+      district: req.body?.district,
+      state: req.body?.state,
+      pincode: req.body?.pincode,
+      category: req.body?.category !== undefined ? req.body.category : resolvedCategories[0] || null,
+      subcategory: req.body?.subcategory !== undefined ? req.body.subcategory : resolvedSubcategories[0] || null,
+      categories: resolvedCategories,
+      subcategories: resolvedSubcategories,
+    });
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: 'Member not found',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Member updated successfully',
+      data: {
+        versionId,
+        member: updated,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to update member:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Failed to update member',
     });
   }
 };
@@ -905,10 +1065,53 @@ exports.createTask = async (req, res) => {
       taskDate: toDateString(req.body.taskDate || req.body.date, new Date().toISOString().slice(0, 10)),
       dueDate: toDateString(req.body.dueDate, null),
       status: req.body.status ? String(req.body.status) : 'open',
+      locationHierarchy:
+        req.body?.locationHierarchy && typeof req.body.locationHierarchy === 'object'
+          ? req.body.locationHierarchy
+          : {
+              l1: req.body?.hierarchyL1,
+              l2: req.body?.hierarchyL2,
+              l3: req.body?.hierarchyL3,
+              l4: req.body?.hierarchyL4,
+              l5: req.body?.hierarchyL5,
+              l5Sublevels: req.body?.hierarchyL5Sublevels,
+            },
       assignedUserId: parsePositiveNumber(req.body.assignedUserId),
       attachments: Array.isArray(req.body.attachments) ? req.body.attachments : [],
       createdBy: req.user?.id || null,
     });
+
+    const assignedUserId = Number(created?.assigned_user_id || 0);
+    if (assignedUserId > 0) {
+      const hierarchyLabel = [created?.hierarchy_l1, created?.hierarchy_l2, created?.hierarchy_l3, created?.hierarchy_l4, created?.hierarchy_l5]
+        .filter(Boolean)
+        .join(' > ');
+      const taskTitle = String(created?.title || req.body.title || 'Task').trim();
+      const message = hierarchyLabel ? `${taskTitle} • ${hierarchyLabel}` : taskTitle;
+      await KaryakariniModel.createNotification({
+        userId: assignedUserId,
+        versionId,
+        category: 'tasks',
+        type: 'task-assigned',
+        title: 'New task assigned',
+        message,
+        entityType: 'task',
+        entityId: Number(created?.id || 0),
+        metadata: {
+          taskStatus: String(created?.status || 'open'),
+          taskDate: created?.task_date || null,
+          dueDate: created?.due_date || null,
+        },
+      });
+      await ablyService.publishNotification(assignedUserId, {
+        type: 'task-assigned',
+        title: 'New task assigned',
+        message,
+        taskId: Number(created?.id || 0),
+        versionId,
+        taskStatus: String(created?.status || 'open'),
+      });
+    }
 
     return res.status(201).json({
       success: true,
@@ -945,6 +1148,14 @@ exports.getTasks = async (req, res) => {
       versionId,
       visibleNodeIds,
       nodeId: parsePositiveNumber(req.query.nodeId),
+      hierarchy: {
+        l1: req.query.hierarchyL1,
+        l2: req.query.hierarchyL2,
+        l3: req.query.hierarchyL3,
+        l4: req.query.hierarchyL4,
+        l5: req.query.hierarchyL5,
+        hierarchySublevel: req.query.hierarchySublevel,
+      },
       page: Number(req.query.page || 1),
       limit: Number(req.query.limit || 20),
     });
@@ -1162,6 +1373,7 @@ exports.getMyTasks = async (req, res) => {
     const result = await KaryakariniModel.getTasksForUser({
       userId: req.user?.id,
       versionId,
+      statuses: parseStringArray(req.query.statuses || req.query.status),
       page: Number(req.query.page || 1),
       limit: Number(req.query.limit || 20),
     });
@@ -1179,6 +1391,184 @@ exports.getMyTasks = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to load my tasks',
+    });
+  }
+};
+
+exports.updateMyTaskStatus = async (req, res) => {
+  try {
+    const taskId = parsePositiveNumber(req.params.taskId);
+    if (!taskId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid task id',
+      });
+    }
+
+    const status = String(req.body?.status || '').trim().toLowerCase();
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: 'status is required',
+      });
+    }
+
+    const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.query?.versionId || 'current');
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const updated = await KaryakariniModel.updateTaskStatus({
+      taskId,
+      userId: req.user?.id,
+      userRole: normalizeRole(req.userRole || req.user?.role),
+      versionId,
+      status,
+    });
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found',
+      });
+    }
+
+    const actorName = [req.user?.first_name, req.user?.firstName, req.user?.name].find(Boolean) || `User #${req.user?.id}`;
+    const notificationTitle = `Task marked ${String(updated.status || status).replace(/_/g, ' ')}`;
+    const notificationMessage = `${actorName}: ${updated.title || `Task #${updated.id}`}`;
+
+    const receivers = [Number(updated.created_by || 0), Number(updated.assigned_user_id || 0)]
+      .filter((id) => id > 0 && id !== Number(req.user?.id || 0));
+    await Promise.all(
+      receivers.map(async (receiverId) => {
+        await KaryakariniModel.createNotification({
+          userId: receiverId,
+          versionId,
+          category: 'tasks',
+          type: 'task-status-updated',
+          title: notificationTitle,
+          message: notificationMessage,
+          entityType: 'task',
+          entityId: Number(updated.id || 0),
+          metadata: {
+            taskStatus: String(updated.status || status),
+            taskDate: updated.task_date || null,
+            dueDate: updated.due_date || null,
+          },
+        });
+        await ablyService.publishNotification(receiverId, {
+          type: 'task-status-updated',
+          title: notificationTitle,
+          message: notificationMessage,
+          taskId: Number(updated.id || 0),
+          versionId,
+          taskStatus: String(updated.status || status),
+        });
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Task status updated successfully',
+      data: {
+        versionId,
+        task: updated,
+      },
+    });
+  } catch (error) {
+    const message = error?.message || 'Failed to update task status';
+    const statusCode = /status must be/.test(message) ? 400 : /scope|assigned/.test(message) ? 403 : 500;
+    return res.status(statusCode).json({
+      success: false,
+      message,
+    });
+  }
+};
+
+exports.getMyNotificationUnreadCount = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.query.versionId || req.query.version || 'current');
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const counts = await KaryakariniModel.getUnreadNotificationCount({
+      userId: req.user?.id,
+      versionId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        versionId,
+        ...counts,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load unread notification count',
+    });
+  }
+};
+
+exports.getMyNotifications = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.query.versionId || req.query.version || 'current');
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const result = await KaryakariniModel.getNotificationFeed({
+      userId: req.user?.id,
+      versionId,
+      category: req.query.category || 'all',
+      onlyUnread: String(req.query.onlyUnread || '').trim().toLowerCase() === 'true',
+      page: Number(req.query.page || 1),
+      limit: Number(req.query.limit || 20),
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        versionId,
+        notifications: result.rows,
+        pagination: result.pagination,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load notifications',
+    });
+  }
+};
+
+exports.markMyNotificationsRead = async (req, res) => {
+  try {
+    const result = await KaryakariniModel.markNotificationsRead({
+      userId: req.user?.id,
+      notificationIds: parseNumberArray(req.body?.notificationIds),
+      invitationIds: parseNumberArray(req.body?.invitationIds),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Notifications marked as read',
+      data: result,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to mark notifications read',
     });
   }
 };
@@ -1250,11 +1640,29 @@ exports.createMember = async (req, res) => {
 
     const nodeId = parsePositiveNumber(rawNodeId);
     const userId = parsePositiveNumber(rawUserId);
+    const categories = parseMemberLabelList(req.body?.categories, category);
+    const subcategories = parseMemberLabelList(req.body?.subcategories, subcategory);
     const hasIdentity = Boolean(userId || (mobileNumber && name));
     if (!hasIdentity || !nodeId) {
       return res.status(400).json({
         success: false,
         message: 'nodeId and either userId or mobileNumber+name are required',
+      });
+    }
+    const memberValidationMessage = validateRequiredMemberFields({
+      pad,
+      category: categories,
+      subcategory: subcategories,
+      state,
+      district,
+      tehsil,
+      village,
+      pincode,
+    });
+    if (memberValidationMessage) {
+      return res.status(400).json({
+        success: false,
+        message: memberValidationMessage,
       });
     }
 
@@ -1296,8 +1704,10 @@ exports.createMember = async (req, res) => {
       district: district ? String(district).trim() : null,
       state: state ? String(state).trim() : null,
       pincode: pincode ? String(pincode).trim() : null,
-      category: category ? String(category).trim() : null,
-      subcategory: subcategory ? String(subcategory).trim() : null,
+      category: categories[0] || (category ? String(category).trim() : null),
+      subcategory: subcategories[0] || (subcategory ? String(subcategory).trim() : null),
+      categories,
+      subcategories,
       dob: dob ? String(dob).trim() : '1990-01-01',
       gotra: gotra ? String(gotra).trim() : 'Unknown',
       password: password ? String(password).trim() : null,
@@ -1356,11 +1766,29 @@ exports.createMemberWithUserMapping = async (req, res) => {
 
     const nodeId = parsePositiveNumber(rawNodeId);
     const userId = parsePositiveNumber(rawUserId);
+    const categories = parseMemberLabelList(req.body?.categories, category);
+    const subcategories = parseMemberLabelList(req.body?.subcategories, subcategory);
     const hasIdentity = Boolean(userId || (mobileNumber && name));
     if (!hasIdentity || !nodeId) {
       return res.status(400).json({
         success: false,
         message: 'nodeId and either userId or mobileNumber+name are required',
+      });
+    }
+    const memberValidationMessage = validateRequiredMemberFields({
+      pad,
+      category: categories,
+      subcategory: subcategories,
+      state,
+      district,
+      tehsil,
+      village,
+      pincode,
+    });
+    if (memberValidationMessage) {
+      return res.status(400).json({
+        success: false,
+        message: memberValidationMessage,
       });
     }
 
@@ -1400,8 +1828,10 @@ exports.createMemberWithUserMapping = async (req, res) => {
       district: district ? String(district).trim() : null,
       state: state ? String(state).trim() : null,
       pincode: pincode ? String(pincode).trim() : null,
-      category: category ? String(category).trim() : null,
-      subcategory: subcategory ? String(subcategory).trim() : null,
+      category: categories[0] || (category ? String(category).trim() : null),
+      subcategory: subcategories[0] || (subcategory ? String(subcategory).trim() : null),
+      categories,
+      subcategories,
       nodeId,
       versionId,
       createdBy: req.user?.id || null,

@@ -11,6 +11,7 @@ type Props = {
   pagination: KaryakariniPagination;
   onClose: () => void;
   onChangePage: (page: number) => void;
+  onEditMember?: (member: KaryakariniMember) => void;
 };
 
 const initials = (value: string) =>
@@ -36,7 +37,16 @@ const memberPeriod = (member: KaryakariniMember) =>
   [member.start_date || null, member.end_date || null].filter(Boolean).join(' to ') ||
   '-';
 
-export function MemberDialog({ visible, loading, node, members, pagination, onClose, onChangePage }: Props) {
+const parseLabelList = (value?: string | string[] | null) => {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map((entry) => String(entry || '').trim()).filter(Boolean))];
+  }
+  const raw = String(value || '').trim();
+  if (!raw) return [] as string[];
+  return [...new Set(raw.split(',').map((entry) => entry.trim()).filter(Boolean))];
+};
+
+export function MemberDialog({ visible, loading, node, members, pagination, onClose, onChangePage, onEditMember }: Props) {
   const canPrev = pagination.page > 1;
   const canNext = pagination.page < (pagination.totalPages || 1);
 
@@ -60,11 +70,14 @@ export function MemberDialog({ visible, loading, node, members, pagination, onCl
                 <Text style={[styles.headerCell, styles.colAvatar]}>Avatar</Text>
                 <Text style={[styles.headerCell, styles.colName]}>Name</Text>
                 <Text style={[styles.headerCell, styles.colFather]}>Pad</Text>
+                <Text style={[styles.headerCell, styles.colCategory]}>Categories</Text>
+                <Text style={[styles.headerCell, styles.colSubcategory]}>Subcategories</Text>
                 <Text style={[styles.headerCell, styles.colMobile]}>Mobile</Text>
                 <Text style={[styles.headerCell, styles.colGotra]}>Gotra</Text>
                 <Text style={[styles.headerCell, styles.colVillage]}>Village</Text>
                 <Text style={[styles.headerCell, styles.colPeriod]}>Period</Text>
                 <Text style={[styles.headerCell, styles.colPath]}>Path</Text>
+                <Text style={[styles.headerCell, styles.colAction]}>Action</Text>
               </View>
 
               {loading ? (
@@ -93,6 +106,30 @@ export function MemberDialog({ visible, loading, node, members, pagination, onCl
                     <View style={[styles.cell, styles.colFather]}>
                       <RowValue text={member.pad} />
                     </View>
+                    <View style={[styles.cell, styles.colCategory]}>
+                      <View style={styles.pillsWrap}>
+                        {parseLabelList(member.categories && member.categories.length ? member.categories : member.category || '').map((entry) => (
+                          <View key={`cat-${member.id}-${entry}`} style={styles.pill}>
+                            <Text style={styles.pillText}>{entry}</Text>
+                          </View>
+                        ))}
+                        {parseLabelList(member.categories && member.categories.length ? member.categories : member.category || '').length === 0 ? (
+                          <Text style={styles.value}>-</Text>
+                        ) : null}
+                      </View>
+                    </View>
+                    <View style={[styles.cell, styles.colSubcategory]}>
+                      <View style={styles.pillsWrap}>
+                        {parseLabelList(member.subcategories && member.subcategories.length ? member.subcategories : member.subcategory || '').map((entry) => (
+                          <View key={`sub-${member.id}-${entry}`} style={styles.pill}>
+                            <Text style={styles.pillText}>{entry}</Text>
+                          </View>
+                        ))}
+                        {parseLabelList(member.subcategories && member.subcategories.length ? member.subcategories : member.subcategory || '').length === 0 ? (
+                          <Text style={styles.value}>-</Text>
+                        ) : null}
+                      </View>
+                    </View>
                     <View style={[styles.cell, styles.colMobile]}>
                       <RowValue text={member.mobile_number} />
                     </View>
@@ -107,6 +144,13 @@ export function MemberDialog({ visible, loading, node, members, pagination, onCl
                     </View>
                     <View style={[styles.cell, styles.colPath]}>
                       <RowValue text={member.hierarchy_path} />
+                    </View>
+                    <View style={[styles.cell, styles.colAction]}>
+                      {onEditMember ? (
+                        <TouchableOpacity style={styles.editBtn} onPress={() => onEditMember(member)}>
+                          <Text style={styles.editBtnText}>Edit</Text>
+                        </TouchableOpacity>
+                      ) : null}
                     </View>
                   </View>
                 ))
@@ -214,6 +258,12 @@ const styles = StyleSheet.create({
   colFather: {
     width: 180,
   },
+  colCategory: {
+    width: 200,
+  },
+  colSubcategory: {
+    width: 240,
+  },
   colMobile: {
     width: 140,
   },
@@ -228,6 +278,22 @@ const styles = StyleSheet.create({
   },
   colPath: {
     width: 260,
+  },
+  colAction: {
+    width: 110,
+  },
+  editBtn: {
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+  },
+  editBtnText: {
+    color: theme.colors.primary,
+    fontSize: 11,
+    fontWeight: '700',
   },
   avatar: {
     width: 34,
@@ -248,6 +314,24 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   loadingWrap: {
+  pillsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  pill: {
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primarySoft,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  pillText: {
+    color: theme.colors.primary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
     paddingVertical: 20,
     alignItems: 'center',
   },

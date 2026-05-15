@@ -46,6 +46,7 @@ export default function KaryakariniMemberScreen() {
   const [invitations, setInvitations] = useState<KaryakariniInvitation[]>([]);
   const [sentSummaries, setSentSummaries] = useState<KaryakariniSentInvitationSummary[]>([]);
   const [tasks, setTasks] = useState<KaryakariniTask[]>([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
@@ -62,17 +63,19 @@ export default function KaryakariniMemberScreen() {
       return;
     }
 
-    const [teamsRes, invitationRes, sentRes, taskRes] = await Promise.all([
+    const [teamsRes, invitationRes, sentRes, taskRes, unreadRes] = await Promise.all([
       karyakariniClient.get('/karyakarini/my/teams', { params: { versionId: selectedVersionId } }),
       karyakariniClient.get('/karyakarini/my/invitations', { params: { versionId: selectedVersionId, limit: 100 } }),
       karyakariniClient.get('/karyakarini/my/invitations/sent-summary', { params: { versionId: selectedVersionId, limit: 100 } }),
       karyakariniClient.get('/karyakarini/my/tasks', { params: { versionId: selectedVersionId, limit: 100 } }),
+      karyakariniClient.get('/karyakarini/my/notifications/unread-count', { params: { versionId: selectedVersionId } }),
     ]);
 
     setTeams((teamsRes?.data?.data?.teams || []) as KaryakariniMyTeam[]);
     setInvitations((invitationRes?.data?.data?.invitations || []) as KaryakariniInvitation[]);
     setSentSummaries((sentRes?.data?.data?.sent || []) as KaryakariniSentInvitationSummary[]);
     setTasks((taskRes?.data?.data?.tasks || []) as KaryakariniTask[]);
+    setNotificationUnreadCount(Number(unreadRes?.data?.data?.total || 0));
   }, []);
 
   const loadData = useCallback(async () => {
@@ -111,9 +114,13 @@ export default function KaryakariniMemberScreen() {
       return;
     }
     const unreadIds = invitations.filter((invitation) => !invitation.notification_read_at).map((invitation) => Number(invitation.id));
-    void karyakariniClient.post('/karyakarini/my/invitations/read', {
-      invitationIds: unreadIds,
-    });
+    void karyakariniClient
+      .post('/karyakarini/my/invitations/read', {
+        invitationIds: unreadIds,
+      })
+      .then(() => {
+        setNotificationUnreadCount((prev) => Math.max(0, prev - unreadIds.length));
+      });
   }, [activeTab, invitations, messageTab]);
 
   const handleRefresh = useCallback(async () => {
@@ -149,6 +156,10 @@ export default function KaryakariniMemberScreen() {
     }
   }, [logout]);
 
+  const handleOpenNotifications = useCallback(() => {
+    router.push('/karyakarini-notifications' as any);
+  }, []);
+
   const pendingInvitations = useMemo(
     () => invitations.filter((invitation) => String(invitation.invitation_status || '').toLowerCase() === 'pending').length,
     [invitations]
@@ -170,7 +181,14 @@ export default function KaryakariniMemberScreen() {
           <Image source={require('../../../assets/images/logo.png')} style={styles.headerLogo} resizeMode="contain" />
           <Text style={styles.headerBrand}>Emeelan</Text>
         </View>
-        {user ? <ProfileMenu user={user as any} onLogout={handleLogout} /> : null}
+        {user ? (
+          <ProfileMenu
+            user={user as any}
+            onLogout={handleLogout}
+            notificationCount={notificationUnreadCount}
+            onPressNotifications={handleOpenNotifications}
+          />
+        ) : null}
       </View>
 
       <ScrollView

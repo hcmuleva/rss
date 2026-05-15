@@ -7,8 +7,6 @@ import {
   StyleSheet,
   Pressable,
   Animated,
-  ScrollView,
-  Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { theme } from '../../theme';
@@ -17,17 +15,16 @@ import type { User } from '../types';
 interface ProfileMenuProps {
   user: User;
   onLogout: () => void;
+  notificationCount?: number;
+  onPressNotifications?: () => void;
 }
 
-export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout }) => {
+export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout, notificationCount = 0, onPressNotifications }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const [fadeAnim] = useState(new Animated.Value(0));
-  const menuMaxHeight = Math.min(Dimensions.get('window').height * 0.78, 560);
-  
-  console.log('ProfileMenu: Component rendered, onLogout is:', typeof onLogout);
+  const showBell = Boolean(onPressNotifications);
 
   const openMenu = () => {
-    console.log('ProfileMenu: Opening menu');
     setMenuVisible(true);
     Animated.timing(fadeAnim, {
       toValue: 1,
@@ -45,74 +42,19 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout }) => {
   };
 
   const handleMenuOption = (action: () => void) => {
-    console.log('ProfileMenu: Menu option clicked');
-    console.log('ProfileMenu: Action type:', typeof action);
-    console.log('ProfileMenu: Action is:', action);
     closeMenu();
     setTimeout(() => {
-      console.log('ProfileMenu: Executing action');
-      try {
-        const result = action();
-        console.log('ProfileMenu: Action result:', result);
-      } catch (error) {
-        console.error('ProfileMenu: Action error:', error);
-      }
+      action();
     }, 200);
   };
 
   const menuItems = [
     {
-      icon: '👤',
       label: 'My Profile',
-      description: 'Personal, Education, Business, Jobs',
-      onPress: () => router.push('/user-profile'),
+      onPress: () => router.push('/user-profile' as any),
     },
     {
-      icon: '👨‍👩‍👧',
-      label: 'Family Profiles',
-      description: 'Manage student profiles and grades',
-      onPress: () => router.push('/els-profiles'),
-    },
-    {
-      icon: '🧬',
-      label: 'Family Members',
-      description: 'View family tree members',
-      onPress: () => router.push('/family-profile'),
-    },
-    {
-      icon: '💳',
-      label: 'Financials',
-      description: 'Invoices, subscriptions, payments',
-      onPress: () => router.push('/financials' as any),
-    },
-    {
-      icon: '🪪',
-      label: 'Seervi Card',
-      description: 'Preview ID card',
-      onPress: () => router.push('/seervi-card' as any),
-    },
-    {
-      icon: '⬇️',
-      label: 'Profile Downloads',
-      description: 'Download printable card',
-      onPress: () => router.push('/profile-downloads' as any),
-    },
-    {
-      icon: '🧾',
-      label: 'Subscriptions',
-      description: 'Manage your subscriptions',
-      onPress: () => router.push('/subscriptions-checkout'),
-    },
-    {
-      icon: '⚙️',
-      label: 'Settings',
-      description: 'App preferences',
-      onPress: () => router.push('/settings'),
-    },
-    {
-      icon: '🚪',
       label: 'Logout',
-      description: 'Sign out of your account',
       onPress: onLogout,
       destructive: true,
     },
@@ -120,14 +62,29 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout }) => {
 
   return (
     <>
-      {/* Avatar Button */}
-      <TouchableOpacity onPress={openMenu} style={styles.avatarButton} activeOpacity={0.7}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {user.firstName.substring(0, 1).toUpperCase()}
-          </Text>
-        </View>
-      </TouchableOpacity>
+      <View style={styles.headerActions}>
+        {showBell ? (
+          <TouchableOpacity
+            onPress={onPressNotifications}
+            style={styles.bellButton}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.bellIcon}>🔔</Text>
+            {notificationCount > 0 ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{notificationCount > 99 ? '99+' : String(notificationCount)}</Text>
+              </View>
+            ) : null}
+          </TouchableOpacity>
+        ) : null}
+        <TouchableOpacity onPress={openMenu} style={styles.avatarButton} activeOpacity={0.7}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>
+              {user.firstName.substring(0, 1).toUpperCase()}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
 
       {/* Dropdown Menu Modal */}
       <Modal
@@ -140,7 +97,6 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout }) => {
           <Animated.View
             style={[
               styles.menuContainer,
-              { maxHeight: menuMaxHeight },
               {
                 opacity: fadeAnim,
                 transform: [
@@ -170,11 +126,7 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout }) => {
             <View style={styles.menuDivider} />
 
             {/* Menu Items */}
-            <ScrollView
-              style={styles.menuItemsScroll}
-              contentContainerStyle={styles.menuItemsContent}
-              showsVerticalScrollIndicator
-            >
+            <View style={styles.menuItemsContent}>
               {menuItems.map((item, index) => (
                 <TouchableOpacity
                   key={index}
@@ -182,15 +134,9 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout }) => {
                     styles.menuItem,
                     item.destructive && styles.menuItemDestructive,
                   ]}
-                  onPress={() => {
-                    console.log('ProfileMenu: Item tapped:', item.label);
-                    handleMenuOption(item.onPress);
-                  }}
+                  onPress={() => handleMenuOption(item.onPress)}
                   activeOpacity={0.7}
                 >
-                  <View style={styles.menuItemIcon}>
-                    <Text style={styles.menuItemIconText}>{item.icon}</Text>
-                  </View>
                   <View style={styles.menuItemContent}>
                     <Text
                       style={[
@@ -200,12 +146,10 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout }) => {
                     >
                       {item.label}
                     </Text>
-                    <Text style={styles.menuItemDescription}>{item.description}</Text>
                   </View>
-                  <Text style={styles.menuItemArrow}>›</Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
           </Animated.View>
         </Pressable>
       </Modal>
@@ -214,6 +158,42 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout }) => {
 };
 
 const styles = StyleSheet.create({
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  bellButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    ...theme.shadows.sm,
+  },
+  bellIcon: {
+    fontSize: 18,
+  },
+  badge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    minWidth: 16,
+    paddingHorizontal: 4,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: theme.colors.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700',
+  },
   avatarButton: {
     padding: 4,
   },
@@ -243,18 +223,20 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   menuContainer: {
-    backgroundColor: theme.colors.background,
-    borderRadius: theme.borderRadius.lg,
-    width: 320,
-    maxWidth: '92%',
-    ...theme.shadows.lg,
+    backgroundColor: theme.colors.surface,
+    borderRadius: 12,
+    width: 240,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    ...theme.shadows.md,
     overflow: 'hidden',
   },
   menuHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: theme.spacing.lg,
-    backgroundColor: theme.colors.primaryLight,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    backgroundColor: theme.colors.surfaceContainerHigh,
   },
   menuAvatar: {
     width: 50,
@@ -270,8 +252,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   menuUserInfo: {
-    marginLeft: theme.spacing.md,
-    flex: 1,
+    marginLeft: theme.spacing.sm,
   },
   menuUserName: {
     ...theme.typography.h3,
@@ -290,48 +271,27 @@ const styles = StyleSheet.create({
     flexGrow: 0,
   },
   menuItemsContent: {
-    paddingBottom: theme.spacing.xs,
+    paddingVertical: 4,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: theme.spacing.md,
-    paddingVertical: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.borderLight,
   },
   menuItemDestructive: {
     borderBottomWidth: 0,
   },
-  menuItemIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: theme.colors.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: theme.spacing.md,
-  },
-  menuItemIconText: {
-    fontSize: 20,
-  },
   menuItemContent: {
     flex: 1,
   },
   menuItemLabel: {
-    ...theme.typography.button,
+    ...theme.typography.labelLg,
     color: theme.colors.text.primary,
-    marginBottom: 2,
   },
   menuItemLabelDestructive: {
     color: theme.colors.error,
-  },
-  menuItemDescription: {
-    ...theme.typography.caption,
-    color: theme.colors.text.secondary,
-  },
-  menuItemArrow: {
-    ...theme.typography.h3,
-    color: theme.colors.text.disabled,
   },
 });

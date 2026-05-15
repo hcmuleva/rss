@@ -29,6 +29,15 @@ export type KaryakariniMember = {
   period?: string | null;
   start_date?: string | null;
   end_date?: string | null;
+  category?: string | null;
+  subcategory?: string | null;
+  categories?: string[] | null;
+  subcategories?: string[] | null;
+  state?: string | null;
+  district?: string | null;
+  tehsil?: string | null;
+  address_village?: string | null;
+  pincode?: string | null;
   gotra?: string | null;
   village?: string | null;
   node_id: number;
@@ -91,6 +100,7 @@ export type KaryakariniMeeting = {
   attendee_count?: number;
   invited_count?: number;
   attachment_count?: number;
+  created_by?: number | null;
   created_by_name?: string;
 };
 
@@ -168,6 +178,10 @@ export type KaryakariniMyTeam = {
   period?: string | null;
   start_date?: string | null;
   end_date?: string | null;
+  category?: string | null;
+  subcategory?: string | null;
+  categories?: string[] | null;
+  subcategories?: string[] | null;
   node_id: number;
   node_name?: string | null;
   node_level?: string | null;
@@ -181,6 +195,12 @@ export type KaryakariniTask = {
   task_date: string;
   due_date?: string | null;
   status?: string;
+  hierarchy_l1?: string | null;
+  hierarchy_l2?: string | null;
+  hierarchy_l3?: string | null;
+  hierarchy_l4?: string | null;
+  hierarchy_l5?: string | null;
+  hierarchy_l5_sublevels?: string[] | null;
   node_id: number;
   node_name?: string;
   node_level?: string;
@@ -190,4 +210,20 @@ export type KaryakariniTask = {
   assigned_father_name?: string | null;
   attachment_count?: number;
   created_by_name?: string;
+};
+
+export type KaryakariniNotificationItem = {
+  id: number;
+  source: 'task_notification' | 'invitation' | string;
+  category: 'tasks' | 'invitations' | string;
+  type: string;
+  title: string;
+  message?: string | null;
+  status?: string | null;
+  entity_type?: string | null;
+  entity_id?: number | null;
+  metadata?: Record<string, any> | null;
+  is_read?: boolean;
+  read_at?: string | null;
+  created_at?: string | null;
 };

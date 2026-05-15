@@ -62,7 +62,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 12,
     gap: 8,
-    marginRight: 10,
   },
   cardSelected: {
     borderColor: theme.colors.primary,
@@ -97,14 +96,18 @@ const styles = StyleSheet.create({
   actions: {
     marginTop: 4,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
   actionBtn: {
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: 8,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 6,
+    flexGrow: 1,
+    minWidth: 62,
+    alignItems: 'center',
   },
   actionBtnPrimary: {
     borderColor: theme.colors.primary,
