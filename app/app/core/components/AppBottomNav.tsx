@@ -28,7 +28,7 @@ export function AppBottomNav({ activeKey, userRole }: AppBottomNavProps) {
     : BASE_NAV_ITEMS;
   
   const handlePress = (key: AppNavKey) => {
-    if (key === 'karyakarini') return router.replace('/');
+    if (key === 'karyakarini') return router.replace('/karyakarini-member');
     if (key === 'report') return router.replace('/karyakarini-report');
     if (key === 'admin') return router.replace('/admin');
   };
