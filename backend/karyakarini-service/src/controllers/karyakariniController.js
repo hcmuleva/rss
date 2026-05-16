@@ -1072,79 +1072,130 @@ exports.createTask = async (req, res) => {
       });
     }
 
-    const created = await KaryakariniModel.createTask({
-      categories: taskCategories,
-      subcategories: taskSubcategories,
-      nodeId,
-      versionId,
-      title: String(req.body.title || '').trim(),
-      description: req.body.description ? String(req.body.description) : null,
-      taskDate: toDateString(req.body.taskDate || req.body.date, new Date().toISOString().slice(0, 10)),
-      dueDate: toDateString(req.body.dueDate, null),
-      status: req.body.status ? String(req.body.status) : 'open',
-      locationHierarchy:
-        req.body?.locationHierarchy && typeof req.body.locationHierarchy === 'object'
-          ? req.body.locationHierarchy
-          : {
-              l1: req.body?.hierarchyL1,
-              l2: req.body?.hierarchyL2,
-              l3: req.body?.hierarchyL3,
-              l4: req.body?.hierarchyL4,
-              l5: req.body?.hierarchyL5,
-              l5Sublevels: req.body?.hierarchyL5Sublevels,
-            },
-      assignedUserId: parsePositiveNumber(req.body.assignedUserId),
-      attachments: Array.isArray(req.body.attachments) ? req.body.attachments : [],
-      createdBy: req.user?.id || null,
-    });
+    const assignedUserIds = Array.isArray(req.body?.assignedUserIds) && req.body.assignedUserIds.length > 0
+      ? [...new Set(req.body.assignedUserIds.map(Number).filter((id) => id > 0))]
+      : (parsePositiveNumber(req.body?.assignedUserId) ? [parsePositiveNumber(req.body.assignedUserId)] : []);
 
-    const assignedUserId = Number(created?.assigned_user_id || 0);
-    if (assignedUserId > 0) {
-      const hierarchyLabel = [created?.hierarchy_l1, created?.hierarchy_l2, created?.hierarchy_l3, created?.hierarchy_l4, created?.hierarchy_l5]
-        .filter(Boolean)
-        .join(' > ');
-      const subcategoryLabel = Array.isArray(created?.task_subcategories)
-        ? created.task_subcategories.map((entry) => String(entry || '').trim()).filter(Boolean).join(', ')
-        : '';
-      const taskTitle = String(created?.title || req.body.title || 'Task').trim();
-      const message = [taskTitle, hierarchyLabel, subcategoryLabel].filter(Boolean).join(' • ');
-      await KaryakariniModel.createNotification({
-        userId: assignedUserId,
+    if (assignedUserIds.length === 0) {
+      assignedUserIds.push(0);
+    }
+
+    const createdTasks = [];
+    for (const assignedUserId of assignedUserIds) {
+      const created = await KaryakariniModel.createTask({
+        categories: taskCategories,
+        subcategories: taskSubcategories,
+        nodeId,
         versionId,
-        category: 'tasks',
-        type: 'task-assigned',
-        title: 'New task assigned',
-        message,
-        entityType: 'task',
-        entityId: Number(created?.id || 0),
-        metadata: {
+        title: String(req.body.title || '').trim(),
+        description: req.body.description ? String(req.body.description) : null,
+        taskDate: toDateString(req.body.taskDate || req.body.date, new Date().toISOString().slice(0, 10)),
+        dueDate: toDateString(req.body.dueDate, null),
+        status: req.body.status ? String(req.body.status) : 'open',
+        locationHierarchy:
+          req.body?.locationHierarchy && typeof req.body.locationHierarchy === 'object'
+            ? req.body.locationHierarchy
+            : {
+                l1: req.body?.hierarchyL1,
+                l2: req.body?.hierarchyL2,
+                l3: req.body?.hierarchyL3,
+                l4: req.body?.hierarchyL4,
+                l5: req.body?.hierarchyL5,
+                l5Sublevels: req.body?.hierarchyL5Sublevels,
+              },
+        assignedUserId: assignedUserId > 0 ? assignedUserId : null,
+        attachments: Array.isArray(req.body.attachments) ? req.body.attachments : [],
+        createdBy: req.user?.id || null,
+      });
+
+      createdTasks.push(created);
+
+      if (assignedUserId > 0) {
+        const hierarchyLabel = [created?.hierarchy_l1, created?.hierarchy_l2, created?.hierarchy_l3, created?.hierarchy_l4, created?.hierarchy_l5]
+          .filter(Boolean)
+          .join(' > ');
+        const subcategoryLabel = Array.isArray(created?.task_subcategories)
+          ? created.task_subcategories.map((entry) => String(entry || '').trim()).filter(Boolean).join(', ')
+          : '';
+        const taskTitle = String(created?.title || req.body.title || 'Task').trim();
+        const message = [taskTitle, hierarchyLabel, subcategoryLabel].filter(Boolean).join(' • ');
+        await KaryakariniModel.createNotification({
+          userId: assignedUserId,
+          versionId,
+          category: 'tasks',
+          type: 'task-assigned',
+          title: 'New task assigned',
+          message,
+          entityType: 'task',
+          entityId: Number(created?.id || 0),
+          metadata: {
+            taskStatus: String(created?.status || 'open'),
+            taskDate: created?.task_date || null,
+            dueDate: created?.due_date || null,
+            taskCategories: created?.task_categories || [],
+            taskSubcategories: created?.task_subcategories || [],
+          },
+        });
+        await ablyService.publishNotification(assignedUserId, {
+          type: 'task-assigned',
+          title: 'New task assigned',
+          message,
+          taskId: Number(created?.id || 0),
+          versionId,
           taskStatus: String(created?.status || 'open'),
-          taskDate: created?.task_date || null,
-          dueDate: created?.due_date || null,
-          taskCategories: created?.task_categories || [],
-          taskSubcategories: created?.task_subcategories || [],
-        },
-      });
-      await ablyService.publishNotification(assignedUserId, {
-        type: 'task-assigned',
-        title: 'New task assigned',
-        message,
-        taskId: Number(created?.id || 0),
-        versionId,
-        taskStatus: String(created?.status || 'open'),
-      });
+        });
+      }
     }
 
     return res.status(201).json({
       success: true,
-      message: 'Task created successfully',
-      data: created,
+      message: createdTasks.length > 1 ? `${createdTasks.length} tasks created successfully` : 'Task created successfully',
+      data: createdTasks[0],
+      createdTasks,
     });
   } catch (error) {
     console.error('Failed to create task:', error);
     return res.status(500).json({
       success: false,
       message: error?.message || 'Failed to create task',
+    });
+  }
+};
+
+exports.updateTask = async (req, res) => {
+  try {
+    const taskId = req.params.taskId;
+    const versionId = req.body.versionId || req.query.versionId;
+    if (!taskId || !versionId) {
+      return res.status(400).json({ success: false, message: 'Task ID and version ID are required' });
+    }
+    const updated = await KaryakariniModel.updateTask({
+      taskId,
+      versionId,
+      nodeId: req.body.nodeId,
+      title: req.body.title,
+      description: req.body.description,
+      taskDate: req.body.taskDate,
+      dueDate: req.body.dueDate,
+      status: req.body.status,
+      assignedUserId: req.body.assignedUserId,
+      assignedUserIds: req.body.assignedUserIds,
+      categories: req.body.categories || (req.body.category ? [req.body.category] : []),
+      subcategories: req.body.subcategories || (req.body.subcategory ? [req.body.subcategory] : []),
+      locationHierarchy: req.body.locationHierarchy || req.body.hierarchy || {},
+      attachments: req.body.attachments,
+      updatedBy: req.user ? req.user.id : null,
+    });
+    return res.status(200).json({
+      success: true,
+      message: 'Task updated successfully',
+      data: updated,
+    });
+  } catch (error) {
+    console.error('Update Task error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Internal server error while updating task',
     });
   }
 };

@@ -1,0 +1,159 @@
+{
+  "gotras": [
+    {
+      "id": "Kag",
+      "name": "Kag",
+      "nameHindi": "काग",
+      "category": "primary"
+    },
+    {
+      "id": "Sencha",
+      "name": "Sencha",
+      "nameHindi": "सैणचा",
+      "category": "primary"
+    },
+    {
+      "id": "Parmar",
+      "name": "Parmar",
+      "nameHindi": "परमार",
+      "category": "primary"
+    },
+    {
+      "id": "Pawar",
+      "name": "Pawar",
+      "nameHindi": "पंवार",
+      "category": "primary"
+    },
+    {
+      "id": "Bhayal",
+      "name": "Bhayal",
+      "nameHindi": "भायल",
+      "category": "primary"
+    },
+    {
+      "id": "Hambad/Hammad",
+      "name": "Hambad/Hammad",
+      "nameHindi": "हाम्बड़/हम्मड़",
+      "category": "primary"
+    },
+    {
+      "id": "Sindarha",
+      "name": "Sindarha",
+      "nameHindi": "सिन्दडा",
+      "category": "primary"
+    },
+    {
+      "id": "Muleva",
+      "name": "Muleva",
+      "nameHindi": "मुलेवा",
+      "category": "primary"
+    },
+    {
+      "id": "Rathod",
+      "name": "Rathod",
+      "nameHindi": "राठोड़",
+      "category": "primary"
+    },
+    {
+      "id": "Barfa",
+      "name": "Barfa",
+      "nameHindi": "बरफा",
+      "category": "primary"
+    },
+    {
+      "id": "Chouhan",
+      "name": "Chouhan",
+      "nameHindi": "चौहान",
+      "category": "primary"
+    },
+    {
+      "id": "Choyal",
+      "name": "Choyal",
+      "nameHindi": "चोयल",
+      "category": "primary"
+    },
+    {
+      "id": "Dewda",
+      "name": "Dewda",
+      "nameHindi": "देवड़ा",
+      "category": "primary"
+    },
+    {
+      "id": "Septa",
+      "name": "Septa",
+      "nameHindi": "सेपटा",
+      "category": "common"
+    },
+    {
+      "id": "Mogrecha",
+      "name": "Mogrecha",
+      "nameHindi": "मोगरेचा",
+      "category": "common"
+    },
+    {
+      "id": "Chaanwdia",
+      "name": "Chaanwdia",
+      "nameHindi": "चांवडिया",
+      "category": "common"
+    },
+    {
+      "id": "Aaglecha",
+      "name": "Aaglecha",
+      "nameHindi": "आगलेचा",
+      "category": "common"
+    },
+    {
+      "id": "Gahlot",
+      "name": "Gahlot",
+      "nameHindi": "गेहलोत",
+      "category": "common"
+    },
+    {
+      "id": "Khandala",
+      "name": "Khandala",
+      "nameHindi": "खण्डाला",
+      "category": "common"
+    },
+    {
+      "id": "Solanki",
+      "name": "Solanki",
+      "nameHindi": "सोलंकी",
+      "category": "common"
+    },
+    {
+      "id": "Lachheta",
+      "name": "Lachheta",
+      "nameHindi": "लचेटा",
+      "category": "common"
+    },
+    {
+      "id": "Parihar",
+      "name": "Parihar",
+      "nameHindi": "परिहार",
+      "category": "common"
+    },
+    {
+      "id": "Parihariya",
+      "name": "Parihariya",
+      "nameHindi": "परिहारिया",
+      "category": "common"
+    },
+    {
+      "id": "Bhumblia",
+      "name": "Bhumblia",
+      "nameHindi": "भूमलिया",
+      "category": "common"
+    },
+    {
+      "id": "Sanupura/Satpura/Sanpada",
+      "name": "Sanupura/Satpura/Sanpada",
+      "nameHindi": "सानपुरा/सतपुड़ा/सनपाड़ा",
+      "category": "common"
+    }
+  ],
+  "metadata": {
+    "total": 25,
+    "lastUpdated": "2026-03-26",
+    "source": "Seervi Community Records"
+  }
+}

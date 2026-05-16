@@ -211,8 +211,15 @@ export type KaryakariniTask = {
   assigned_user_id?: number | null;
   assigned_first_name?: string | null;
   assigned_father_name?: string | null;
+  assigned_mobile_number?: string | null;
   attachment_count?: number;
   created_by_name?: string;
+  assignees?: {
+    id: number;
+    name: string;
+    father_name?: string;
+    mobile_number?: string;
+  }[];
 };
 
 export type KaryakariniCategoryActivity = {

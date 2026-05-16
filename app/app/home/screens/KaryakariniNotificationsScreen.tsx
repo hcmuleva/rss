@@ -3,7 +3,7 @@ import { ActivityIndicator, Alert, Image, RefreshControl, ScrollView, StyleSheet
 import { router } from 'expo-router';
 import { karyakariniClient } from '../../api/client';
 import { AppBottomNav } from '../../core/components/AppBottomNav';
-import { ProfileMenu } from '../../core/components/ProfileMenu';
+import { ScreenHeader } from '../../core/components/ScreenHeader';
 import { useProfile } from '../../core/context/ProfileContext';
 import { theme } from '../../theme';
 import type { KaryakariniNotificationItem, KaryakariniVersion } from '../../services/karyakarini-module/types';
@@ -187,16 +187,13 @@ export default function KaryakariniNotificationsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.topHeader}>
-        <View style={styles.headerLeft}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <Text style={styles.backBtnText}>← Back</Text>
-          </TouchableOpacity>
-          <Image source={require('../../../assets/images/logo.png')} style={styles.headerLogo} resizeMode="contain" />
-          <Text style={styles.headerBrand}>Notifications</Text>
-        </View>
-        {user ? <ProfileMenu user={user as any} onLogout={handleLogout} notificationCount={unreadCount} /> : null}
-      </View>
+      <ScreenHeader
+        title="Notifications"
+        showBack
+        user={user}
+        onLogout={handleLogout}
+        notificationCount={unreadCount}
+      />
 
       {loading ? (
         <View style={styles.center}>

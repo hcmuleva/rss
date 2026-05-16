@@ -14,10 +14,14 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { MaterialIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { karyakariniClient } from '../../api/client';
 import { AppBottomNav } from '../../core/components/AppBottomNav';
 import { ProfileMenu } from '../../core/components/ProfileMenu';
+import { ScreenHeader } from '../../core/components/ScreenHeader';
+import { PageHeaderCard } from '../../core/components/PageHeaderCard';
+import { StandardModal } from '../../core/components/StandardModal';
 import { useProfile } from '../../core/context/ProfileContext';
 import { theme } from '../../theme';
 import { MemberDialog } from '../../services/karyakarini-module/components/MemberDialog';
@@ -156,19 +160,6 @@ const deriveCategoriesFromSubcategories = (subcategories: string[]) => {
 };
 
 type KaryakariniTab = 'tree' | 'meetings' | 'tasks' | 'activities' | 'roles';
-type TaskCascadeOption = {
-  key: string;
-  label: string;
-  nodeId: number;
-  pathParts: string[];
-  hasChildren: boolean;
-};
-type TaskCascadeColumn = {
-  depth: number;
-  title: string;
-  options: TaskCascadeOption[];
-  selectedNodeId: number | null;
-};
 
 const toDateInput = (value?: string | null) => {
   if (!value) return new Date().toISOString().slice(0, 10);
@@ -350,8 +341,12 @@ export default function KaryakariniModuleScreen() {
 
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [creatingTask, setCreatingTask] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
+  const [editingTaskAssignees, setEditingTaskAssignees] = useState<any[]>([]);
   const [taskMembers, setTaskMembers] = useState<KaryakariniMember[]>([]);
   const [taskUploadingAttachment, setTaskUploadingAttachment] = useState(false);
+  const [showAssigneesModal, setShowAssigneesModal] = useState(false);
+  const [selectedTaskForAssignees, setSelectedTaskForAssignees] = useState<KaryakariniTask | null>(null);
   const [taskForm, setTaskForm] = useState({
     title: '',
     description: '',
@@ -368,9 +363,14 @@ export default function KaryakariniModuleScreen() {
     subcategory: '',
     nodeId: '',
     assignedUserId: '',
+    assignedUserIds: [] as number[],
     attachmentInput: '',
     attachments: [] as KaryakariniAttachment[],
   });
+  const [taskLevels, setTaskLevels] = useState<TreeLevelState[]>([]);
+  const [taskMemberSearchQuery, setTaskMemberSearchQuery] = useState('');
+  const [taskMemberSearchResults, setTaskMemberSearchResults] = useState<KaryakariniAssignableUser[]>([]);
+  const [taskMemberSearching, setTaskMemberSearching] = useState(false);
   const [taskHierarchyFilterL1, setTaskHierarchyFilterL1] = useState('');
 
   const [scopeRows, setScopeRows] = useState<{ node_id: number; node_level: string; node_name: string }[]>([]);
@@ -411,117 +411,43 @@ export default function KaryakariniModuleScreen() {
     () => currentUserRole !== 'superadmin' && scopeRootNodeIds.has(Number(taskForm.nodeId || 0)),
     [currentUserRole, scopeRootNodeIds, taskForm.nodeId]
   );
-  const taskCascadeColumns = useMemo<TaskCascadeColumn[]>(() => {
-    const parsedNodes = assignableNodes
-      .map((node) => {
-        const path = String(node.hierarchy_path || '').trim();
-        const parts = path ? path.split(/\s*>\s*/).filter(Boolean) : [String(node.name || '').trim()].filter(Boolean);
-        const depth = parts.length;
-        return {
-          nodeId: Number(node.id),
-          parentId: Number(node.parent_id || 0),
-          nodeName: String(node.name || '').trim(),
-          level: String(node.level || '').trim(),
-          parts,
-          depth,
-        };
-      })
-      .filter((node) => node.nodeId > 0 && node.parts.length > 0);
 
-    if (!parsedNodes.length) return [];
-
-    const scopeRoots = parsedNodes.filter((node) => scopeRootNodeIds.has(Number(node.nodeId)));
-    const sortedScopeRoots = [...scopeRoots].sort((a, b) => a.parts.join(' > ').localeCompare(b.parts.join(' > ')));
-    const selectedAbsoluteNode = parsedNodes.find((node) => String(node.nodeId) === String(taskForm.nodeId)) || null;
-    const selectedScopeRoot =
-      currentUserRole !== 'superadmin'
-        ? sortedScopeRoots.find((root) =>
-            selectedAbsoluteNode
-              ? selectedAbsoluteNode.parts.slice(0, root.parts.length).join(' > ') === root.parts.join(' > ')
-              : false
-          ) || sortedScopeRoots[0] || null
-        : null;
-    const scopeBaseParts = selectedScopeRoot?.parts || [];
-
-    const scopedParsedNodes =
-      currentUserRole !== 'superadmin' && scopeBaseParts.length
-        ? parsedNodes
-            .filter((node) => node.parts.slice(0, scopeBaseParts.length).join(' > ') === scopeBaseParts.join(' > '))
-            .map((node) => ({
-              ...node,
-              parts: node.parts.slice(scopeBaseParts.length - 1),
-              depth: node.parts.slice(scopeBaseParts.length - 1).length,
-            }))
-        : parsedNodes;
-
-    if (!scopedParsedNodes.length) return [];
-
-    const selectedNode = scopedParsedNodes.find((node) => String(node.nodeId) === String(taskForm.nodeId)) || null;
-    const selectedParts = selectedNode?.parts || [];
-    const columns: TaskCascadeColumn[] = [];
-    let activePrefix: string[] = [];
-    let depth = 1;
-
-    while (depth <= 12) {
-      const optionsMap = new Map<string, TaskCascadeOption>();
-      scopedParsedNodes.forEach((node) => {
-        if (node.depth < depth) return;
-        const prefix = node.parts.slice(0, depth - 1);
-        if (prefix.join(' > ') !== activePrefix.join(' > ')) return;
-        const label = node.parts[depth - 1];
-        if (!label) return;
-
-        const exact = scopedParsedNodes.find(
-          (candidate) => candidate.depth === depth && candidate.parts.slice(0, depth).join(' > ') === [...prefix, label].join(' > ')
-        );
-        const mappedNode = exact || node;
-        const key = [...prefix, label].join(' > ');
-        if (optionsMap.has(key)) return;
-        const hasChildren = scopedParsedNodes.some((candidate) => candidate.parentId === mappedNode.nodeId);
-        optionsMap.set(key, {
-          key,
-          label,
-          nodeId: mappedNode.nodeId,
-          pathParts: mappedNode.parts.slice(0, depth),
-          hasChildren,
-        });
-      });
-
-      const options = [...optionsMap.values()];
-      if (!options.length) break;
-
-      const selectedOption =
-        options.find((option) => option.label === selectedParts[depth - 1]) ||
-        options.find((option) => String(option.nodeId) === String(taskForm.nodeId)) ||
-        null;
-
-      columns.push({
-        depth,
-        title: depth === 1 ? 'Root' : `Level ${depth}`,
-        options,
-        selectedNodeId: selectedOption?.nodeId || null,
-      });
-
-      if (!selectedOption) break;
-      activePrefix = selectedOption.pathParts;
-      depth += 1;
-    }
-
-    return columns;
-  }, [assignableNodes, currentUserRole, scopeRootNodeIds, taskForm.nodeId]);
   const taskHierarchyFilterOptions = useMemo(
     () =>
       [...new Set(taskRows.map((row) => String(row.hierarchy_l1 || '').trim()).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b)),
     [taskRows]
   );
-  const filteredTaskRows = useMemo(
-    () =>
-      taskHierarchyFilterL1
-        ? taskRows.filter((row) => String(row.hierarchy_l1 || '').trim() === taskHierarchyFilterL1)
-        : taskRows,
-    [taskHierarchyFilterL1, taskRows]
-  );
+  const filteredTaskRows = useMemo(() => {
+    const list = taskHierarchyFilterL1
+      ? taskRows.filter((row) => String(row.hierarchy_l1 || '').trim() === taskHierarchyFilterL1)
+      : taskRows;
+
+    const map = new Map<string, KaryakariniTask>();
+    list.forEach((row) => {
+      const key = `${row.title?.trim()}###${row.task_date}###${row.node_id}`;
+      const assigneeObj = row.assigned_user_id ? {
+        id: Number(row.assigned_user_id),
+        name: row.assigned_first_name || `User #${row.assigned_user_id}`,
+        father_name: row.assigned_father_name || '',
+        mobile_number: row.assigned_mobile_number || '',
+      } : null;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          ...row,
+          assignees: assigneeObj ? [assigneeObj] : [],
+        });
+      } else {
+        const existing = map.get(key)!;
+        if (assigneeObj && !existing.assignees?.some((a) => a.id === assigneeObj.id)) {
+          existing.assignees = [...(existing.assignees || []), assigneeObj];
+        }
+      }
+    });
+
+    return Array.from(map.values());
+  }, [taskHierarchyFilterL1, taskRows]);
   const addFormSelectedSubcategories = useMemo(
     () => parseLabelList(memberModalTab === 'assign' ? assignForm.subcategory : memberForm.subcategory),
     [assignForm.subcategory, memberForm.subcategory, memberModalTab]
@@ -1995,6 +1921,8 @@ export default function KaryakariniModuleScreen() {
       return;
     }
     const defaultNodeId = String(assignableNodes[0]?.id || '');
+    setEditingTaskId(null);
+    setEditingTaskAssignees([]);
     setTaskForm({
       title: '',
       description: '',
@@ -2011,6 +1939,7 @@ export default function KaryakariniModuleScreen() {
       subcategory: '',
       nodeId: defaultNodeId,
       assignedUserId: '',
+      assignedUserIds: [],
       attachmentInput: '',
       attachments: [],
     });
@@ -2018,18 +1947,107 @@ export default function KaryakariniModuleScreen() {
     if (defaultNodeId) {
       await loadNodeMembersForForm(Number(defaultNodeId), selectedVersionId, 'task');
     }
+    setTaskLevels(levels.length > 0 ? [{ ...levels[0], selectedNodeId: null }] : []);
+    setTaskMemberSearchQuery('');
+    setTaskMemberSearchResults([]);
     setShowTaskModal(true);
-  }, [assignableNodes, loadNodeMembersForForm, selectedVersionId]);
+  }, [assignableNodes, levels, loadNodeMembersForForm, selectedVersionId]);
 
-  const handleTaskCascadeSelect = useCallback(
-    async (nodeId: number) => {
-      if (!selectedVersionId || !nodeId) return;
-      const nodeValue = String(nodeId);
-      setTaskForm((prev) => ({ ...prev, nodeId: nodeValue, assignedUserId: '' }));
+  const handleOpenTaskEdit = useCallback(async (taskRow: any) => {
+    if (!selectedVersionId) return;
+    setEditingTaskId(taskRow.id);
+    const assignedIds = taskRow.assignees ? taskRow.assignees.map((a: any) => Number(a.id)).filter(Boolean) : (taskRow.assigned_user_id ? [Number(taskRow.assigned_user_id)] : []);
+    const cat = Array.isArray(taskRow.task_categories) && taskRow.task_categories.length > 0 ? taskRow.task_categories[0] : '';
+    const sub = Array.isArray(taskRow.task_subcategories) && taskRow.task_subcategories.length > 0 ? taskRow.task_subcategories[0] : '';
+    setEditingTaskAssignees(taskRow.assignees || []);
+    setTaskForm({
+      title: taskRow.title || '',
+      description: taskRow.description || '',
+      taskDate: taskRow.task_date || toDateInput(),
+      dueDate: taskRow.due_date || '',
+      status: taskRow.status || 'open',
+      hierarchyL1: taskRow.hierarchy_l1 || '',
+      hierarchyL2: taskRow.hierarchy_l2 || '',
+      hierarchyL3: taskRow.hierarchy_l3 || '',
+      hierarchyL4: taskRow.hierarchy_l4 || '',
+      hierarchyL5: taskRow.hierarchy_l5 || '',
+      hierarchyL5Sublevels: '',
+      category: cat,
+      subcategory: sub,
+      nodeId: String(taskRow.node_id || ''),
+      assignedUserId: assignedIds.length > 0 ? String(assignedIds[0]) : '',
+      assignedUserIds: assignedIds,
+      attachmentInput: '',
+      attachments: [],
+    });
+
+    const nodeId = Number(taskRow.node_id || 0);
+    if (nodeId > 0) {
       await loadNodeMembersForForm(nodeId, selectedVersionId, 'task');
+    }
+    setTaskLevels(levels.length > 0 ? [{ ...levels[0], selectedNodeId: null }] : []);
+    setTaskMemberSearchQuery('');
+    setTaskMemberSearchResults([]);
+    setShowTaskModal(true);
+  }, [selectedVersionId, levels, loadNodeMembersForForm]);
+
+  const handleTaskSelectNode = useCallback(
+    async (levelIndex: number, node: KaryakariniNode) => {
+      if (!selectedVersionId) return;
+
+      const trimmed = taskLevels.slice(0, levelIndex + 1).map((level, idx) =>
+        idx === levelIndex ? { ...level, selectedNodeId: node.id } : level
+      );
+      setTaskLevels(trimmed);
+      setTaskForm((prev) => ({ ...prev, nodeId: String(node.id), assignedUserId: '', assignedUserIds: [] }));
+      await loadNodeMembersForForm(node.id, selectedVersionId, 'task');
+
+      try {
+        const children = await fetchNodes(selectedVersionId, node.id);
+        if (!children.length) return;
+        setTaskLevels([
+          ...trimmed,
+          {
+            parentNode: node,
+            nodes: children,
+            selectedNodeId: null,
+          },
+        ]);
+      } catch (err: any) {
+        Alert.alert('Error', err?.response?.data?.message || 'Failed to load child nodes');
+      }
     },
-    [loadNodeMembersForForm, selectedVersionId]
+    [fetchNodes, loadNodeMembersForForm, selectedVersionId, taskLevels]
   );
+
+  const handleSearchTaskMembers = useCallback(async (queryOverride?: string) => {
+    const q = (queryOverride !== undefined ? queryOverride : taskMemberSearchQuery).trim();
+    if (q.length < 3) return;
+    try {
+      setTaskMemberSearching(true);
+      const response = await karyakariniClient.get('/karyakarini/members/search-users', {
+        params: { q, limit: 20 },
+      });
+      setTaskMemberSearchResults((response?.data?.data?.users || []) as KaryakariniAssignableUser[]);
+    } catch (err: any) {
+      console.warn('Search task members error:', err?.message);
+      setTaskMemberSearchResults([]);
+    } finally {
+      setTaskMemberSearching(false);
+    }
+  }, [taskMemberSearchQuery]);
+
+  useEffect(() => {
+    const q = taskMemberSearchQuery.trim();
+    if (q.length < 3) {
+      setTaskMemberSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void handleSearchTaskMembers(q);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [taskMemberSearchQuery, handleSearchTaskMembers]);
 
   const addMeetingAttachmentByUrl = useCallback(() => {
     const url = meetingForm.attachmentInput.trim();
@@ -2210,7 +2228,7 @@ export default function KaryakariniModuleScreen() {
 
     try {
       setCreatingTask(true);
-      await karyakariniClient.post('/karyakarini/tasks', {
+      const payload = {
         versionId: selectedVersionId,
         nodeId,
         title: taskForm.title.trim(),
@@ -2222,18 +2240,25 @@ export default function KaryakariniModuleScreen() {
         subcategory: taskSubcategories[0] || null,
         categories: taskCategories,
         subcategories: taskSubcategories,
-        assignedUserId: taskForm.assignedUserId ? Number(taskForm.assignedUserId) : null,
+        assignedUserId: taskForm.assignedUserIds.length > 0 ? taskForm.assignedUserIds[0] : (taskForm.assignedUserId ? Number(taskForm.assignedUserId) : null),
+        assignedUserIds: taskForm.assignedUserIds,
         attachments: taskForm.attachments,
-      });
+      };
+
+      if (editingTaskId) {
+        await karyakariniClient.put(`/karyakarini/tasks/${editingTaskId}`, payload);
+      } else {
+        await karyakariniClient.post('/karyakarini/tasks', payload);
+      }
       setShowTaskModal(false);
       await loadTasks(selectedVersionId, 1);
-      Alert.alert('Success', 'Task created successfully');
+      Alert.alert('Success', editingTaskId ? 'Task updated successfully' : 'Task created successfully');
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to create task');
+      Alert.alert('Error', err?.response?.data?.message || `Failed to ${editingTaskId ? 'update' : 'create'} task`);
     } finally {
       setCreatingTask(false);
     }
-  }, [currentUserRole, loadTasks, scopeRootNodeIds, selectedVersionId, taskForm]);
+  }, [currentUserRole, editingTaskId, loadTasks, scopeRootNodeIds, selectedVersionId, taskForm]);
 
   const handleAssignRole = useCallback(async () => {
     if (!selectedVersionId) return;
@@ -2300,23 +2325,20 @@ export default function KaryakariniModuleScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.topHeader}>
-        <View style={styles.headerLeft}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.push('/admin' as any)}>
-            <Text style={styles.backBtnText}>← Back</Text>
-          </TouchableOpacity>
-          <Image source={require('../../../assets/images/logo.png')} style={styles.headerLogo} resizeMode="contain" />
-          <Text style={styles.headerBrand}>Emeelan</Text>
-        </View>
-        {user ? (
-          <ProfileMenu
-            user={user as any}
-            onLogout={handleLogout}
-            notificationCount={notificationUnreadCount}
-            onPressNotifications={handleOpenNotifications}
-          />
-        ) : null}
-      </View>
+      <ScreenHeader
+        user={user}
+        onLogout={handleLogout}
+        notificationCount={notificationUnreadCount}
+        onPressNotifications={handleOpenNotifications}
+        onBack={() => router.push('/admin' as any)}
+        showBack
+      />
+
+      <PageHeaderCard
+        title="Karyakarini Admin"
+        subtitle="Manage Hierarchies & Activities"
+        icon={<MaterialIcons name="admin-panel-settings" size={24} color={theme.colors.primary} />}
+      />
 
       <ScrollView
         style={{ flex: 1 }}
@@ -2423,13 +2445,15 @@ export default function KaryakariniModuleScreen() {
                     <Text style={styles.helper}>No meetings found</Text>
                   </View>
                 ) : (
-                  meetingRows.map((row) => (
-                    <View key={`meeting-${row.id}`} style={styles.tableRow}>
+                  meetingRows.map((row, index) => (
+                    <View key={`meeting-${row.id}`} style={[styles.tableRow, index % 2 === 1 && styles.tableRowEven]}>
                       <Text style={[styles.tableCell, styles.colDate]}>{row.meeting_date || '-'}</Text>
                       <Text style={[styles.tableCell, styles.colTitle]} numberOfLines={2}>{row.title}</Text>
                       <Text style={[styles.tableCell, styles.colNode]} numberOfLines={2}>{row.hierarchy_path || row.node_name || '-'}</Text>
-                      <Text style={[styles.tableCell, styles.colCount]}>{Number(row.attendee_count || 0)}</Text>
-                      <View style={[styles.tableCell, styles.colCount]}>
+                      <View style={[styles.tableCell, styles.colCount, { alignItems: 'center' }]}>
+                        <Text style={styles.tableCellTextCompact}>{Number(row.attendee_count || 0)}</Text>
+                      </View>
+                      <View style={[styles.tableCell, styles.colCount, { alignItems: 'center' }]}>
                         {Number(row.attachment_count || 0) > 0 ? (
                           <TouchableOpacity onPress={() => void handleViewMeetingAttachments(Number(row.id), row.title)} disabled={meetingDetailLoading}>
                             <Text style={styles.linkText}>📎 {Number(row.attachment_count || 0)}</Text>
@@ -2479,6 +2503,7 @@ export default function KaryakariniModuleScreen() {
                   <Text style={[styles.tableHeaderCell, styles.colNode]}>Node</Text>
                   <Text style={[styles.tableHeaderCell, styles.colAssignee]}>Assignee</Text>
                   <Text style={[styles.tableHeaderCell, styles.colStatus]}>Status</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colAction]}>Action</Text>
                 </View>
                 {tasksLoading ? (
                   <View style={styles.tableEmpty}>
@@ -2489,8 +2514,8 @@ export default function KaryakariniModuleScreen() {
                     <Text style={styles.helper}>No tasks found</Text>
                   </View>
                 ) : (
-                  filteredTaskRows.map((row) => (
-                    <View key={`task-${row.id}`} style={styles.tableRow}>
+                  filteredTaskRows.map((row, index) => (
+                    <View key={`task-${row.id}`} style={[styles.tableRow, index % 2 === 1 && styles.tableRowEven]}>
                       <Text style={[styles.tableCell, styles.colDate]}>{row.task_date || '-'}</Text>
                       <View style={[styles.tableCell, styles.colTitle]}>
                         <Text style={styles.tableCellTextCompact} numberOfLines={2}>{row.title}</Text>
@@ -2499,10 +2524,51 @@ export default function KaryakariniModuleScreen() {
                             {summarizeTaskHierarchy(row)}
                           </Text>
                         ) : null}
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                          {Array.isArray(row.task_categories) && row.task_categories.map((cat, i) => (
+                            <View key={`cat-${i}`} style={{ backgroundColor: theme.colors.primarySoft, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 10, color: theme.colors.primary, fontWeight: '600' }}>{cat}</Text>
+                            </View>
+                          ))}
+                          {Array.isArray(row.task_subcategories) && row.task_subcategories.map((sub, i) => (
+                            <View key={`sub-${i}`} style={{ backgroundColor: '#EFEFEF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 10, color: theme.colors.text.secondary, fontWeight: '600' }}>{sub}</Text>
+                            </View>
+                          ))}
+                        </View>
                       </View>
                       <Text style={[styles.tableCell, styles.colNode]} numberOfLines={2}>{row.hierarchy_path || row.node_name || '-'}</Text>
-                      <Text style={[styles.tableCell, styles.colAssignee]} numberOfLines={2}>{summarizeAssignedUser(row)}</Text>
-                      <Text style={[styles.tableCell, styles.colStatus]}>{String(row.status || 'open')}</Text>
+                      <TouchableOpacity
+                        style={[styles.tableCell, styles.colAssignee, { justifyContent: 'center' }]}
+                        onPress={() => {
+                          if (row.assignees && row.assignees.length > 0) {
+                            setSelectedTaskForAssignees(row);
+                            setShowAssigneesModal(true);
+                          }
+                        }}
+                      >
+                        <Text style={[styles.tableCellTextCompact, row.assignees && row.assignees.length > 0 ? { color: theme.colors.primary, fontWeight: '600' } : null]} numberOfLines={2}>
+                          {row.assignees && row.assignees.length > 0
+                            ? `${row.assignees.length} Assignee${row.assignees.length > 1 ? 's' : ''}`
+                            : 'Unassigned'}
+                        </Text>
+                      </TouchableOpacity>
+                      <View style={[styles.tableCell, styles.colStatus]}>
+                        <View style={[styles.statusBadge, row.status === 'completed' && styles.statusBadgeCompleted]}>
+                          <Text style={[styles.statusBadgeText, row.status === 'completed' && styles.statusBadgeTextCompleted]}>
+                            {String(row.status || 'open')}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={[styles.tableCell, styles.colAction]}>
+                        <TouchableOpacity
+                          style={styles.rowActionBtn}
+                          onPress={() => void handleOpenTaskEdit(row)}
+                          disabled={!canManageActivities}
+                        >
+                          <Text style={styles.rowActionText}>Edit</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   ))
                 )}
@@ -2520,33 +2586,41 @@ export default function KaryakariniModuleScreen() {
               <Text style={styles.sectionTitle}>Category Activities</Text>
             </View>
 
-            <View style={styles.searchRow}>
-              <TextInput
-                style={[styles.input, styles.searchInput]}
-                value={activityFilterCategory}
-                onChangeText={setActivityFilterCategory}
-                placeholder="Filter category"
-              />
-              <TextInput
-                style={[styles.input, styles.searchInput]}
-                value={activityFilterSubcategory}
-                onChangeText={setActivityFilterSubcategory}
-                placeholder="Filter subcategory"
-              />
-            </View>
-            <View style={styles.searchRow}>
-              <TextInput
-                style={[styles.input, styles.searchInput]}
-                value={activityFilterNodeLevel}
-                onChangeText={setActivityFilterNodeLevel}
-                placeholder="Filter node level"
-              />
+            <View style={styles.filterGrid}>
+              <View style={styles.filterCol}>
+                <Text style={styles.sectionLabel}>Category</Text>
+                <TextInput
+                  style={styles.inputCompact}
+                  value={activityFilterCategory}
+                  onChangeText={setActivityFilterCategory}
+                  placeholder="Filter category"
+                />
+              </View>
+              <View style={styles.filterCol}>
+                <Text style={styles.sectionLabel}>Subcategory</Text>
+                <TextInput
+                  style={styles.inputCompact}
+                  value={activityFilterSubcategory}
+                  onChangeText={setActivityFilterSubcategory}
+                  placeholder="Filter subcategory"
+                />
+              </View>
+              <View style={styles.filterCol}>
+                <Text style={styles.sectionLabel}>Level</Text>
+                <TextInput
+                  style={styles.inputCompact}
+                  value={activityFilterNodeLevel}
+                  onChangeText={setActivityFilterNodeLevel}
+                  placeholder="Filter node level"
+                />
+              </View>
               <TouchableOpacity
-                style={styles.searchBtn}
+                style={styles.filterApplyBtn}
                 onPress={() => selectedVersionId && void loadCategoryActivities(selectedVersionId, 1)}
                 disabled={!selectedVersionId}
               >
-                <Text style={styles.searchBtnText}>Apply</Text>
+                <MaterialIcons name="filter-list" size={18} color="#fff" />
+                <Text style={styles.filterApplyText}>Apply</Text>
               </TouchableOpacity>
             </View>
 
@@ -2570,8 +2644,8 @@ export default function KaryakariniModuleScreen() {
                     <Text style={styles.helper}>No activities found</Text>
                   </View>
                 ) : (
-                  activityRows.map((row) => (
-                    <View key={`activity-${row.id}`} style={styles.tableRow}>
+                  activityRows.map((row, index) => (
+                    <View key={`activity-${row.id}`} style={[styles.tableRow, index % 2 === 1 && styles.tableRowEven]}>
                       <Text style={[styles.tableCell, styles.colDate]}>{String(row.created_at || '').slice(0, 10) || '-'}</Text>
                       <View style={[styles.tableCell, styles.colTitle]}>
                         <Text style={styles.tableCellTextCompact} numberOfLines={2}>{row.title}</Text>
@@ -2616,61 +2690,77 @@ export default function KaryakariniModuleScreen() {
             ) : roleLevelOptions.length === 0 ? (
               <Text style={styles.modalSub}>No lower node levels available for role assignment</Text>
             ) : (
-              <>
-                <Text style={styles.sectionLabel}>Node Level</Text>
-                <View style={styles.optionRow}>
-                  {roleLevelOptions.map((level) => (
-                    <TouchableOpacity
-                      key={`role-level-${level.value}`}
-                      style={[styles.optionChip, selectedRoleLevel === level.value && styles.optionChipActive]}
-                      onPress={() => setSelectedRoleLevel(level.value)}
-                    >
-                      <Text style={[styles.optionChipText, selectedRoleLevel === level.value && styles.optionChipTextActive]}>
-                        {level.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+              <View style={styles.assignCardContent}>
+                <View style={styles.twoColRow}>
+                  <View style={styles.twoColField}>
+                    <Text style={styles.sectionLabel}>Node Level</Text>
+                    <View style={styles.optionRowCompact}>
+                      {roleLevelOptions.map((level) => (
+                        <TouchableOpacity
+                          key={`role-level-${level.value}`}
+                          style={[styles.optionChipSmall, selectedRoleLevel === level.value && styles.optionChipActive]}
+                          onPress={() => setSelectedRoleLevel(level.value)}
+                        >
+                          <Text style={[styles.optionChipTextSmall, selectedRoleLevel === level.value && styles.optionChipTextActive]}>
+                            {level.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  <View style={styles.twoColField}>
+                    <Text style={styles.sectionLabel}>Select Node</Text>
+                    <View style={styles.optionRowCompact}>
+                      {roleNodesByLevel.map((node) => (
+                        <TouchableOpacity
+                          key={`role-node-${node.id}`}
+                          style={[styles.optionChipSmall, selectedRoleNodeId === String(node.id) && styles.optionChipActive]}
+                          onPress={() => setSelectedRoleNodeId(String(node.id))}
+                        >
+                          <Text style={[styles.optionChipTextSmall, selectedRoleNodeId === String(node.id) && styles.optionChipTextActive]}>
+                            {node.name}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
                 </View>
 
-                <Text style={styles.sectionLabel}>Node</Text>
-                <View style={styles.optionRow}>
-                  {roleNodesByLevel.map((node) => (
-                    <TouchableOpacity
-                      key={`role-node-${node.id}`}
-                      style={[styles.optionChip, selectedRoleNodeId === String(node.id) && styles.optionChipActive]}
-                      onPress={() => setSelectedRoleNodeId(String(node.id))}
-                    >
-                      <Text style={[styles.optionChipText, selectedRoleNodeId === String(node.id) && styles.optionChipTextActive]}>
-                        {node.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Text style={styles.sectionLabel}>Select Member</Text>
-                <View style={styles.selectList}>
-                  {loadingRoleMembers ? <Text style={styles.modalSub}>Loading members...</Text> : null}
-                  {!loadingRoleMembers &&
-                    roleMembers
-                      .filter((member) => Number(member.user_id || 0) > 0)
-                      .map((member) => {
-                        const userId = Number(member.user_id || 0);
-                        const selected = selectedRoleUserId === String(userId);
-                        return (
-                          <TouchableOpacity
-                            key={`role-member-${member.id}`}
-                            style={[styles.selectItem, selected && styles.selectItemActive]}
-                            onPress={() => setSelectedRoleUserId(String(userId))}
-                          >
-                            <Text style={[styles.selectItemText, selected && styles.selectItemTextActive]}>
-                              {[member.first_name, member.father_name].filter(Boolean).join(' ') || `User #${userId}`}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                  {!loadingRoleMembers && roleMembers.filter((member) => Number(member.user_id || 0) > 0).length === 0 ? (
-                    <Text style={styles.modalSub}>No members found for selected node</Text>
-                  ) : null}
+                <View style={styles.assignmentMemberSection}>
+                  <Text style={styles.sectionLabel}>Select Member to Promote</Text>
+                  <View style={styles.selectList}>
+                    {loadingRoleMembers ? (
+                      <View style={styles.loadingWrapper}><Text style={styles.modalSub}>Loading members...</Text></View>
+                    ) : null}
+                    {!loadingRoleMembers &&
+                      roleMembers
+                        .filter((member) => Number(member.user_id || 0) > 0)
+                        .map((member) => {
+                          const userId = Number(member.user_id || 0);
+                          const selected = selectedRoleUserId === String(userId);
+                          return (
+                            <TouchableOpacity
+                              key={`role-member-${member.id}`}
+                              style={[styles.selectItem, selected && styles.selectItemActive]}
+                              onPress={() => setSelectedRoleUserId(String(userId))}
+                            >
+                              <View style={styles.memberSelectItemRow}>
+                                <View style={styles.memberMiniAvatar}>
+                                  <Text style={styles.memberMiniAvatarText}>{getInitials(member.first_name || '')}</Text>
+                                </View>
+                                <Text style={[styles.selectItemText, selected && styles.selectItemTextActive]}>
+                                  {[member.first_name, member.father_name].filter(Boolean).join(' ') || `User #${userId}`}
+                                </Text>
+                              </View>
+                              {selected && <MaterialIcons name="check-circle" size={18} color={theme.colors.primary} />}
+                            </TouchableOpacity>
+                          );
+                        })}
+                    {!loadingRoleMembers && roleMembers.filter((member) => Number(member.user_id || 0) > 0).length === 0 ? (
+                      <View style={styles.loadingWrapper}><Text style={styles.modalSub}>No members found for selected node</Text></View>
+                    ) : null}
+                  </View>
                 </View>
 
                 <TouchableOpacity
@@ -2680,7 +2770,7 @@ export default function KaryakariniModuleScreen() {
                 >
                   <Text style={styles.primaryActionText}>{assigningRole ? 'Assigning...' : 'Assign Admin Role'}</Text>
                 </TouchableOpacity>
-              </>
+              </View>
             )}
           </View>
         ) : null}
@@ -2697,93 +2787,146 @@ export default function KaryakariniModuleScreen() {
         onEditMember={handleOpenEditMember}
       />
 
-      <Modal
+      <StandardModal
         visible={showEditMemberModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowEditMemberModal(false)}
+        onClose={() => setShowEditMemberModal(false)}
+        title="Edit Member"
+        subtitle={editingMember?.hierarchy_path || editingMember?.node_name || 'Member details'}
+        footer={
+          <>
+            <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowEditMemberModal(false)}>
+              <Text style={styles.btnTextDark}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.btn, savingMemberEdit && styles.btnDisabled]}
+              disabled={savingMemberEdit}
+              onPress={() => void handleSubmitMemberEdit()}
+            >
+              <Text style={styles.btnText}>{savingMemberEdit ? 'Saving...' : 'Save Changes'}</Text>
+            </TouchableOpacity>
+          </>
+        }
       >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, styles.memberModalCard]}>
-            <Text style={styles.modalTitle}>Edit Member</Text>
-            <Text style={styles.modalSub}>{editingMember?.hierarchy_path || editingMember?.node_name || 'Member details'}</Text>
-
-            <ScrollView style={styles.memberModalScroll} contentContainerStyle={styles.memberModalScrollContent}>
+        <View style={styles.formBody}>
+          <View style={styles.twoColRow}>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>Name</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.name}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, name: value }))}
-                placeholder="Name"
+                placeholder="Enter name"
               />
+            </View>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>Father/Husband Name</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.fatherOrHusbandName}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, fatherOrHusbandName: value }))}
-                placeholder="Father/Husband name"
+                placeholder="Enter father/husband name"
               />
+            </View>
+          </View>
+
+          <View style={styles.twoColRow}>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>Mobile Number</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.mobileNumber}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, mobileNumber: value }))}
-                placeholder="Mobile number"
+                placeholder="Enter mobile"
                 keyboardType="phone-pad"
               />
+            </View>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>Pad</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.pad}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, pad: value }))}
-                placeholder="Pad *"
+                placeholder="Enter pad"
               />
-              <Text style={styles.sectionLabel}>User Role</Text>
-              <View style={styles.optionRow}>
-                {(['user', 'admin'] as const).map((role) => (
-                  <TouchableOpacity
-                    key={`edit-role-${role}`}
-                    style={[styles.optionChip, editMemberForm.userRole === role && styles.optionChipActive]}
-                    onPress={() => setEditMemberForm((prev) => ({ ...prev, userRole: role }))}
-                  >
-                    <Text style={[styles.optionChipText, editMemberForm.userRole === role && styles.optionChipTextActive]}>
-                      {role === 'admin' ? 'Admin' : 'User'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('edit')}>
-                <Text style={editSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                  {editSelectedSubcategories.length ? `${editSelectedSubcategories.length} subcategories selected` : 'Assign Padbhar *'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setEditMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-                <Text style={styles.clearLink}>Clear category/subcategory</Text>
-              </TouchableOpacity>
-              {editSelectedCategories.length ? <Text style={styles.helper}>Categories: {editSelectedCategories.join(', ')}</Text> : null}
-              {editSelectedSubcategories.length ? (
-                <Text style={styles.helper}>Subcategories: {editSelectedSubcategories.join(', ')}</Text>
-              ) : null}
+            </View>
+          </View>
+
+          <View>
+            <Text style={styles.fieldLabel}>User Role</Text>
+            <View style={[styles.optionRow, { marginTop: 8 }]}>
+              {(['user', 'admin'] as const).map((role) => (
+                <TouchableOpacity
+                  key={`edit-role-${role}`}
+                  style={[styles.optionChip, editMemberForm.userRole === role && styles.optionChipActive]}
+                  onPress={() => setEditMemberForm((prev) => ({ ...prev, userRole: role }))}
+                >
+                  <Text style={[styles.optionChipText, editMemberForm.userRole === role && styles.optionChipTextActive]}>
+                    {role === 'admin' ? 'Admin' : 'User'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View>
+            <Text style={styles.fieldLabel}>Assign Padbhar</Text>
+            <TouchableOpacity style={[styles.input, { marginTop: 8 }]} onPress={() => void handleOpenPadbharTransfer('edit')}>
+              <Text style={editSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
+                {editSelectedSubcategories.length ? `${editSelectedSubcategories.length} subcategories selected` : 'Select Padbhar *'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setEditMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
+              <Text style={[styles.clearLink, { marginTop: 6 }]}>Clear category/subcategory</Text>
+            </TouchableOpacity>
+            {editSelectedCategories.length ? <Text style={styles.helper}>Categories: {editSelectedCategories.join(', ')}</Text> : null}
+            {editSelectedSubcategories.length ? (
+              <Text style={styles.helper}>Subcategories: {editSelectedSubcategories.join(', ')}</Text>
+            ) : null}
+          </View>
+
+          <View style={styles.twoColRow}>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>State</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.state}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, state: value }))}
                 placeholder="State"
               />
+            </View>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>District</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.district}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, district: value }))}
                 placeholder="District"
               />
+            </View>
+          </View>
+          <View style={styles.twoColRow}>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>Tehsil</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.tehsil}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, tehsil: value }))}
                 placeholder="Tehsil"
               />
+            </View>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>Village</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.village}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, village: value }))}
                 placeholder="Village"
               />
+            </View>
+          </View>
+          <View style={styles.twoColRow}>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>Pincode</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.pincode}
@@ -2791,392 +2934,397 @@ export default function KaryakariniModuleScreen() {
                 placeholder="Pincode"
                 keyboardType="number-pad"
               />
-            </ScrollView>
-
-            <View style={[styles.modalActions, styles.memberModalStickyActions]}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowEditMemberModal(false)}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveBtn, savingMemberEdit && styles.saveBtnDisabled]}
-                disabled={savingMemberEdit}
-                onPress={() => void handleSubmitMemberEdit()}
-              >
-                <Text style={styles.saveText}>{savingMemberEdit ? 'Saving...' : 'Save Changes'}</Text>
-              </TouchableOpacity>
             </View>
+            <View style={styles.twoColField} />
           </View>
         </View>
-      </Modal>
+      </StandardModal>
 
-      <Modal
+      <StandardModal
         visible={showAddMemberModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowAddMemberModal(false)}
+        onClose={() => setShowAddMemberModal(false)}
+        title="Add Member"
+        subtitle={addTargetNode?.name || 'Selected Node'}
+        topContent={
+          <View style={styles.modalTabRow}>
+            <TouchableOpacity
+              style={[styles.modalTabBtn, memberModalTab === 'create' && styles.modalTabBtnActive]}
+              onPress={() => setMemberModalTab('create')}
+            >
+              <Text style={[styles.modalTabText, memberModalTab === 'create' && styles.modalTabTextActive]}>
+                Create Member
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalTabBtn, memberModalTab === 'assign' && styles.modalTabBtnActive]}
+              onPress={() => setMemberModalTab('assign')}
+            >
+              <Text style={[styles.modalTabText, memberModalTab === 'assign' && styles.modalTabTextActive]}>
+                Existing User
+              </Text>
+            </TouchableOpacity>
+          </View>
+        }
+        footer={
+          <>
+            <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowAddMemberModal(false)}>
+              <Text style={styles.btnTextDark}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.btn, addingMember && styles.btnDisabled]}
+              disabled={addingMember}
+              onPress={() => void handleSubmitMember()}
+            >
+              <Text style={styles.btnText}>{addingMember ? 'Saving...' : memberModalTab === 'assign' ? 'Assign Member' : 'Create Member'}</Text>
+            </TouchableOpacity>
+          </>
+        }
       >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, styles.memberModalCard]}>
-            <Text style={styles.modalTitle}>Add Member</Text>
-            <Text style={styles.modalSub}>{addTargetNode?.name || 'Selected Node'}</Text>
+        {memberModalTab === 'create' ? (
+          <View style={styles.formBody}>
+            <View style={styles.twoColRow}>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>Mobile Number *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={memberForm.mobileNumber}
+                  onChangeText={(value) => setMemberForm((prev) => ({ ...prev, mobileNumber: value }))}
+                  keyboardType="phone-pad"
+                  placeholder="Enter mobile"
+                />
+              </View>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>Name *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={memberForm.name}
+                  onChangeText={(value) => setMemberForm((prev) => ({ ...prev, name: value }))}
+                  placeholder="Enter name"
+                />
+              </View>
+            </View>
 
-            <View style={styles.memberModalStickyTabs}>
-              <View style={styles.modalTabRow}>
+            <View style={styles.twoColRow}>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>Password (Optional)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={memberForm.password}
+                  onChangeText={(value) => setMemberForm((prev) => ({ ...prev, password: value }))}
+                  placeholder="Enter password"
+                  autoCapitalize="none"
+                  secureTextEntry
+                />
+              </View>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>Father/Husband Name</Text>
+                <TextInput
+                  style={styles.input}
+                  value={memberForm.fatherOrHusbandName}
+                  onChangeText={(value) => setMemberForm((prev) => ({ ...prev, fatherOrHusbandName: value }))}
+                  placeholder="Enter father/husband"
+                />
+              </View>
+            </View>
+
+            <Text style={styles.fieldLabel}>Member Photo</Text>
+            <View style={styles.photoActionsRow}>
+              {memberForm.avatar ? (
+                <Image source={{ uri: memberForm.avatar }} style={styles.memberPhotoPreview} />
+              ) : null}
+              <View style={styles.photoBtnGroup}>
                 <TouchableOpacity
-                  style={[styles.modalTabBtn, memberModalTab === 'create' && styles.modalTabBtnActive]}
-                  onPress={() => setMemberModalTab('create')}
+                  style={[styles.secondaryAction, uploadingMemberPhoto && styles.saveBtnDisabled]}
+                  onPress={() => void uploadMemberPhotoFromSource('camera')}
+                  disabled={uploadingMemberPhoto}
                 >
-                  <Text style={[styles.modalTabText, memberModalTab === 'create' && styles.modalTabTextActive]}>
-                    Create Member
-                  </Text>
+                  <Text style={styles.secondaryActionText}>Take Photo</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.modalTabBtn, memberModalTab === 'assign' && styles.modalTabBtnActive]}
-                  onPress={() => setMemberModalTab('assign')}
+                  style={[styles.secondaryAction, uploadingMemberPhoto && styles.saveBtnDisabled]}
+                  onPress={() => void uploadMemberPhotoFromSource('gallery')}
+                  disabled={uploadingMemberPhoto}
                 >
-                  <Text style={[styles.modalTabText, memberModalTab === 'assign' && styles.modalTabTextActive]}>
-                    Existing User
+                  <Text style={styles.secondaryActionText}>Upload</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.twoColRow}>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>Pad</Text>
+                <TouchableOpacity
+                  style={styles.input}
+                  onPress={() => {
+                    if (selectedVersionId && padOptions.length === 0 && !loadingPads) {
+                      void loadPadOptions(selectedVersionId);
+                    }
+                    setPadPickerVisible(true);
+                  }}
+                  disabled={loadingPads}
+                >
+                  <Text style={memberForm.pad ? styles.inputText : styles.inputPlaceholder}>
+                    {memberForm.pad || (loadingPads ? 'Loading...' : 'Select pad')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>Assign Padbhar *</Text>
+                <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer()}>
+                  <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
+                    {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} selected` : 'Select Padbhar'}
                   </Text>
                 </TouchableOpacity>
               </View>
             </View>
-            <ScrollView
-              style={styles.memberModalScroll}
-              contentContainerStyle={styles.memberModalScrollContent}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
 
-            {memberModalTab === 'create' ? (
-              <>
-                <View style={styles.twoColRow}>
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.mobileNumber}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, mobileNumber: value }))}
-                    keyboardType="phone-pad"
-                    placeholder="Mobile Number *"
-                  />
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.name}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, name: value }))}
-                    placeholder="Name *"
-                  />
-                </View>
-
-                <View style={styles.twoColRow}>
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.password}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, password: value }))}
-                    placeholder="Login password (optional)"
-                    autoCapitalize="none"
-                    secureTextEntry
-                  />
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.fatherOrHusbandName}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, fatherOrHusbandName: value }))}
-                    placeholder="Father/Husband Name"
-                  />
-                </View>
-
-                <Text style={styles.sectionLabel}>Member Photo</Text>
-                {memberForm.avatar ? (
-                  <Image source={{ uri: memberForm.avatar }} style={styles.memberPhotoPreview} />
-                ) : null}
-                <View style={styles.photoActionsRow}>
-                  <TouchableOpacity
-                    style={[styles.secondaryAction, styles.photoActionBtn, uploadingMemberPhoto && styles.saveBtnDisabled]}
-                    onPress={() => void uploadMemberPhotoFromSource('camera')}
-                    disabled={uploadingMemberPhoto}
-                  >
-                    <Text style={styles.secondaryActionText}>{uploadingMemberPhoto ? 'Uploading...' : 'Take Photo'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.secondaryAction, styles.photoActionBtn, uploadingMemberPhoto && styles.saveBtnDisabled]}
-                    onPress={() => void uploadMemberPhotoFromSource('gallery')}
-                    disabled={uploadingMemberPhoto}
-                  >
-                    <Text style={styles.secondaryActionText}>{uploadingMemberPhoto ? 'Uploading...' : 'Upload Photo'}</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.twoColRow}>
-                  <TouchableOpacity
-                    style={[styles.input, styles.twoColField]}
-                    onPress={() => {
-                      if (selectedVersionId && padOptions.length === 0 && !loadingPads) {
-                        void loadPadOptions(selectedVersionId);
-                      }
-                      setPadPickerVisible(true);
-                    }}
-                    disabled={loadingPads}
-                  >
-                    <Text style={memberForm.pad ? styles.inputText : styles.inputPlaceholder}>
-                      {memberForm.pad || (loadingPads ? 'Loading pad options...' : 'Select pad')}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.input, styles.twoColField]} onPress={() => void handleOpenPadbharTransfer()}>
-                    <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                      {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} subcategories selected` : 'Assign Padbhar *'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.sectionLabel}>User Role</Text>
-                <View style={styles.optionRow}>
-                  {(['user', 'admin'] as const).map((role) => (
-                    <TouchableOpacity
-                      key={`create-role-${role}`}
-                      style={[styles.optionChip, memberForm.userRole === role && styles.optionChipActive]}
-                      onPress={() => setMemberForm((prev) => ({ ...prev, userRole: role }))}
-                    >
-                      <Text style={[styles.optionChipText, memberForm.userRole === role && styles.optionChipTextActive]}>
-                        {role === 'admin' ? 'Admin' : 'User'}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                {padOptionsError ? <Text style={styles.errorInline}>{padOptionsError}</Text> : null}
-                <TouchableOpacity onPress={() => setMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-                  <Text style={styles.clearLink}>Clear category/subcategory</Text>
-                </TouchableOpacity>
-                {addFormSelectedCategories.length ? (
-                  <Text style={styles.helper}>Categories: {addFormSelectedCategories.join(', ')}</Text>
-                ) : null}
-                {addFormSelectedSubcategories.length ? (
-                  <Text style={styles.helper}>Subcategories: {addFormSelectedSubcategories.join(', ')}</Text>
-                ) : null}
-
-                <Text style={styles.sectionLabel}>Address (Optional)</Text>
-                <View style={styles.twoColRow}>
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.state}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, state: value }))}
-                    placeholder="State"
-                  />
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.district}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, district: value }))}
-                    placeholder="District"
-                  />
-                </View>
-                <View style={styles.twoColRow}>
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.tehsil}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, tehsil: value }))}
-                    placeholder="Tehsil"
-                  />
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.village}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, village: value }))}
-                    placeholder="Village"
-                  />
-                </View>
-                <View style={styles.twoColRow}>
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.pincode}
-                    onChangeText={handleMemberPincodeChange}
-                    placeholder="Pincode (auto-fill)"
-                    keyboardType="number-pad"
-                  />
-                  <View style={styles.twoColField} />
-                </View>
-                {pincodeLookupLoading ? <Text style={styles.helper}>Fetching address from pincode...</Text> : null}
-                {pincodeLookupMessage ? <Text style={styles.helper}>{pincodeLookupMessage}</Text> : null}
-              </>
-            ) : (
-              <>
-                <Text style={styles.sectionLabel}>Search existing user by mobile/email</Text>
-                <View style={styles.searchRow}>
-                  <TextInput
-                    style={[styles.input, styles.searchInput]}
-                    value={userSearchQuery}
-                    onChangeText={setUserSearchQuery}
-                    placeholder="Enter mobile or email"
-                    keyboardType="default"
-                    autoCapitalize="none"
-                  />
-                  <TouchableOpacity
-                    style={[styles.searchBtn, searchingUsers && styles.saveBtnDisabled]}
-                    onPress={() => void handleSearchUsers()}
-                    disabled={searchingUsers}
-                  >
-                    <Text style={styles.searchBtnText}>{searchingUsers ? '...' : 'Search'}</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {selectedUser ? (
-                  <View style={styles.selectedUserBox}>
-                    <Text style={styles.selectedUserTitle}>Selected User</Text>
-                    <Text style={styles.selectedUserText}>{fullUserName(selectedUser) || 'Unnamed User'}</Text>
-                    <Text style={styles.selectedUserText}>{selectedUser.phone || selectedUser.email || '-'}</Text>
-                    <TouchableOpacity onPress={() => setSelectedUser(null)}>
-                      <Text style={styles.clearLink}>Clear selection</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : null}
-
-                {searchResults.length > 0 ? (
-                  <View style={styles.searchResultsWrap}>
-                    {searchResults.map((entry) => (
-                      <TouchableOpacity key={`user-${entry.id}`} style={styles.searchResultItem} onPress={() => handlePickUser(entry)}>
-                        <Text style={styles.searchResultName}>{fullUserName(entry) || `User #${entry.id}`}</Text>
-                        <Text style={styles.searchResultMeta}>{entry.phone || entry.email || '-'}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                ) : null}
-
-                <View style={styles.twoColRow}>
-                  <TouchableOpacity
-                    style={[styles.input, styles.twoColField]}
-                    onPress={() => {
-                      if (selectedVersionId && padOptions.length === 0 && !loadingPads) {
-                        void loadPadOptions(selectedVersionId);
-                      }
-                      setPadPickerVisible(true);
-                    }}
-                    disabled={loadingPads}
-                  >
-                    <Text style={assignForm.pad ? styles.inputText : styles.inputPlaceholder}>
-                      {assignForm.pad || (loadingPads ? 'Loading pad options...' : 'Select pad')}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.input, styles.twoColField]} onPress={() => void handleOpenPadbharTransfer()}>
-                    <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                      {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} subcategories selected` : 'Assign Padbhar *'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.sectionLabel}>User Role</Text>
-                <View style={styles.optionRow}>
-                  {(['user', 'admin'] as const).map((role) => (
-                    <TouchableOpacity
-                      key={`assign-role-${role}`}
-                      style={[styles.optionChip, assignForm.userRole === role && styles.optionChipActive]}
-                      onPress={() => setAssignForm((prev) => ({ ...prev, userRole: role }))}
-                    >
-                      <Text style={[styles.optionChipText, assignForm.userRole === role && styles.optionChipTextActive]}>
-                        {role === 'admin' ? 'Admin' : 'User'}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                {padOptionsError ? <Text style={styles.errorInline}>{padOptionsError}</Text> : null}
-                <TouchableOpacity onPress={() => setAssignForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-                  <Text style={styles.clearLink}>Clear category/subcategory</Text>
-                </TouchableOpacity>
-                {addFormSelectedCategories.length ? (
-                  <Text style={styles.helper}>Categories: {addFormSelectedCategories.join(', ')}</Text>
-                ) : null}
-                {addFormSelectedSubcategories.length ? (
-                  <Text style={styles.helper}>Subcategories: {addFormSelectedSubcategories.join(', ')}</Text>
-                ) : null}
-              </>
-            )}
-
-            </ScrollView>
-
-            <View style={[styles.modalActions, styles.memberModalStickyActions]}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowAddMemberModal(false)}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveBtn, addingMember && styles.saveBtnDisabled]}
-                disabled={addingMember}
-                onPress={() => void handleSubmitMember()}
-              >
-                <Text style={styles.saveText}>{addingMember ? 'Saving...' : memberModalTab === 'assign' ? 'Assign Member' : 'Create Member'}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={showAddNodeModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowAddNodeModal(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Add Node</Text>
-            <Text style={styles.modalSub}>{addTargetNode?.name || 'Selected Node'}</Text>
-
-            <TextInput
-              style={styles.input}
-              value={nodeForm.name}
-              onChangeText={(value) => setNodeForm((prev) => ({ ...prev, name: value }))}
-              placeholder="Node name *"
-            />
-
-            <Text style={styles.sectionLabel}>Create this as</Text>
+            <Text style={styles.fieldLabel}>User Role</Text>
             <View style={styles.optionRow}>
-              <TouchableOpacity
-                style={[styles.optionChip, nodeForm.relation === 'child' && styles.optionChipActive]}
-                onPress={() => setNodeForm((prev) => ({ ...prev, relation: 'child' }))}
-              >
-                <Text style={[styles.optionChipText, nodeForm.relation === 'child' && styles.optionChipTextActive]}>
-                  Child of selected node
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.optionChip, nodeForm.relation === 'parent' && styles.optionChipActive]}
-                onPress={() => setNodeForm((prev) => ({ ...prev, relation: 'parent' }))}
-              >
-                <Text style={[styles.optionChipText, nodeForm.relation === 'parent' && styles.optionChipTextActive]}>
-                  Parent of selected node
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.sectionLabel}>Node level</Text>
-            <View style={styles.optionRow}>
-              {allowedNodeLevelOptions.map((option) => (
+              {(['user', 'admin'] as const).map((role) => (
                 <TouchableOpacity
-                  key={option.value}
-                  style={[styles.optionChip, nodeForm.level === option.value && styles.optionChipActive]}
-                  onPress={() => setNodeForm((prev) => ({ ...prev, level: option.value }))}
+                  key={`create-role-${role}`}
+                  style={[styles.optionChip, memberForm.userRole === role && styles.optionChipActive]}
+                  onPress={() => setMemberForm((prev) => ({ ...prev, userRole: role }))}
                 >
-                  <Text style={[styles.optionChipText, nodeForm.level === option.value && styles.optionChipTextActive]}>
-                    {option.label}
+                  <Text style={[styles.optionChipText, memberForm.userRole === role && styles.optionChipTextActive]}>
+                    {role === 'admin' ? 'Admin' : 'User'}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
-            {allowedNodeLevelOptions.length === 0 ? (
-              <Text style={styles.modalSub}>No levels available for this relation</Text>
-            ) : null}
+            <TouchableOpacity onPress={() => setMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
+              <Text style={styles.clearLink}>Clear categories</Text>
+            </TouchableOpacity>
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowAddNodeModal(false)}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveBtn, (addingNode || allowedNodeLevelOptions.length === 0) && styles.saveBtnDisabled]}
-                disabled={addingNode || allowedNodeLevelOptions.length === 0}
-                onPress={() => void handleSubmitNode()}
-              >
-                <Text style={styles.saveText}>{addingNode ? 'Saving...' : 'Create Node'}</Text>
-              </TouchableOpacity>
+            <Text style={styles.fieldLabel}>Address</Text>
+            <View style={styles.twoColRow}>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>State</Text>
+                <TextInput
+                  style={styles.input}
+                  value={memberForm.state}
+                  onChangeText={(value) => setMemberForm((prev) => ({ ...prev, state: value }))}
+                  placeholder="State"
+                />
+              </View>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>District</Text>
+                <TextInput
+                  style={styles.input}
+                  value={memberForm.district}
+                  onChangeText={(value) => setMemberForm((prev) => ({ ...prev, district: value }))}
+                  placeholder="District"
+                />
+              </View>
+            </View>
+            <View style={styles.twoColRow}>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>Tehsil</Text>
+                <TextInput
+                  style={styles.input}
+                  value={memberForm.tehsil}
+                  onChangeText={(value) => setMemberForm((prev) => ({ ...prev, tehsil: value }))}
+                  placeholder="Tehsil"
+                />
+              </View>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>Village</Text>
+                <TextInput
+                  style={styles.input}
+                  value={memberForm.village}
+                  onChangeText={(value) => setMemberForm((prev) => ({ ...prev, village: value }))}
+                  placeholder="Village"
+                />
+              </View>
+            </View>
+            <View style={styles.twoColRow}>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>Pincode</Text>
+                <TextInput
+                  style={styles.input}
+                  value={memberForm.pincode}
+                  onChangeText={handleMemberPincodeChange}
+                  placeholder="Pincode"
+                  keyboardType="number-pad"
+                />
+              </View>
+              <View style={styles.twoColField} />
             </View>
           </View>
-        </View>
-      </Modal>
+        ) : (
+          <View style={styles.formBody}>
+            <Text style={styles.fieldLabel}>Search existing user by mobile/email</Text>
+            <View style={styles.searchRow}>
+              <TextInput
+                style={[styles.input, styles.searchInput]}
+                value={userSearchQuery}
+                onChangeText={setUserSearchQuery}
+                placeholder="Enter mobile or email"
+                autoCapitalize="none"
+              />
+              <TouchableOpacity
+                style={[styles.searchBtn, searchingUsers && styles.saveBtnDisabled]}
+                onPress={() => void handleSearchUsers()}
+                disabled={searchingUsers}
+              >
+                <Text style={styles.searchBtnText}>{searchingUsers ? '...' : 'Search'}</Text>
+              </TouchableOpacity>
+            </View>
 
-      <Modal
+            {selectedUser ? (
+              <View style={styles.selectedUserBox}>
+                <Text style={styles.fieldLabel}>Selected User</Text>
+                <View style={styles.memberSelectItemRow}>
+                  <View style={styles.memberMiniAvatar}>
+                    <Text style={styles.memberMiniAvatarText}>{getInitials(fullUserName(selectedUser) || '')}</Text>
+                  </View>
+                  <View>
+                    <Text style={styles.infoValue}>{fullUserName(selectedUser) || 'Unnamed User'}</Text>
+                    <Text style={styles.modalSub}>{selectedUser.phone || selectedUser.email || '-'}</Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => setSelectedUser(null)}>
+                  <Text style={styles.clearLink}>Clear selection</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            {searchResults.length > 0 ? (
+              <View style={styles.searchResultsWrap}>
+                {searchResults.map((entry) => (
+                  <TouchableOpacity key={`user-${entry.id}`} style={styles.searchResultItem} onPress={() => handlePickUser(entry)}>
+                    <View style={styles.memberSelectItemRow}>
+                      <View style={styles.memberMiniAvatar}>
+                        <Text style={styles.memberMiniAvatarText}>{getInitials(fullUserName(entry) || '')}</Text>
+                      </View>
+                      <View>
+                        <Text style={styles.searchResultName}>{fullUserName(entry) || `User #${entry.id}`}</Text>
+                        <Text style={styles.searchResultMeta}>{entry.phone || entry.email || '-'}</Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
+
+            <View style={styles.twoColRow}>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>Pad</Text>
+                <TouchableOpacity
+                  style={styles.input}
+                  onPress={() => {
+                    if (selectedVersionId && padOptions.length === 0 && !loadingPads) {
+                      void loadPadOptions(selectedVersionId);
+                    }
+                    setPadPickerVisible(true);
+                  }}
+                  disabled={loadingPads}
+                >
+                  <Text style={assignForm.pad ? styles.inputText : styles.inputPlaceholder}>
+                    {assignForm.pad || (loadingPads ? 'Loading...' : 'Select pad')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.twoColField}>
+                <Text style={styles.fieldLabel}>Assign Padbhar *</Text>
+                <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer()}>
+                  <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
+                    {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} selected` : 'Select Padbhar'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            
+            <Text style={styles.fieldLabel}>User Role</Text>
+            <View style={styles.optionRow}>
+              {(['user', 'admin'] as const).map((role) => (
+                <TouchableOpacity
+                  key={`assign-role-${role}`}
+                  style={[styles.optionChip, assignForm.userRole === role && styles.optionChipActive]}
+                  onPress={() => setAssignForm((prev) => ({ ...prev, userRole: role }))}
+                >
+                  <Text style={[styles.optionChipText, assignForm.userRole === role && styles.optionChipTextActive]}>
+                    {role === 'admin' ? 'Admin' : 'User'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity onPress={() => setAssignForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
+              <Text style={styles.clearLink}>Clear categories</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </StandardModal>
+
+      <StandardModal
+        visible={showAddNodeModal}
+        onClose={() => setShowAddNodeModal(false)}
+        title="Add Node"
+        subtitle={addTargetNode?.name || 'Selected Node'}
+        footer={
+          <>
+            <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowAddNodeModal(false)}>
+              <Text style={styles.btnTextDark}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.btn, (addingNode || allowedNodeLevelOptions.length === 0) && styles.btnDisabled]}
+              disabled={addingNode || allowedNodeLevelOptions.length === 0}
+              onPress={() => void handleSubmitNode()}
+            >
+              <Text style={styles.btnText}>{addingNode ? 'Saving...' : 'Create Node'}</Text>
+            </TouchableOpacity>
+          </>
+        }
+      >
+        <TextInput
+          style={styles.input}
+          value={nodeForm.name}
+          onChangeText={(value) => setNodeForm((prev) => ({ ...prev, name: value }))}
+          placeholder="Node name *"
+        />
+
+        <Text style={styles.sectionLabel}>Create this as</Text>
+        <View style={styles.optionRow}>
+          <TouchableOpacity
+            style={[styles.optionChip, nodeForm.relation === 'child' && styles.optionChipActive]}
+            onPress={() => setNodeForm((prev) => ({ ...prev, relation: 'child' }))}
+          >
+            <Text style={[styles.optionChipText, nodeForm.relation === 'child' && styles.optionChipTextActive]}>
+              Child of selected node
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.optionChip, nodeForm.relation === 'parent' && styles.optionChipActive]}
+            onPress={() => setNodeForm((prev) => ({ ...prev, relation: 'parent' }))}
+          >
+            <Text style={[styles.optionChipText, nodeForm.relation === 'parent' && styles.optionChipTextActive]}>
+              Parent of selected node
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.sectionLabel}>Node level</Text>
+        <View style={styles.optionRow}>
+          {allowedNodeLevelOptions.map((option) => (
+            <TouchableOpacity
+              key={option.value}
+              style={[styles.optionChip, nodeForm.level === option.value && styles.optionChipActive]}
+              onPress={() => setNodeForm((prev) => ({ ...prev, level: option.value }))}
+            >
+              <Text style={[styles.optionChipText, nodeForm.level === option.value && styles.optionChipTextActive]}>
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {allowedNodeLevelOptions.length === 0 ? (
+          <Text style={styles.modalSub}>No levels available for this relation</Text>
+        ) : null}
+      </StandardModal>
+
+      <StandardModal
         visible={showMeetingModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
+        onClose={() => {
           setShowMeetingModal(false);
           setEditingMeetingId(null);
           setAttendanceBrowseNodeId('');
@@ -3186,544 +3334,685 @@ export default function KaryakariniModuleScreen() {
           setShowAttendanceTransferModal(false);
           setShowInvitationTransferModal(false);
         }}
-      >
-        <View style={styles.modalBackdrop}>
-          <ScrollView style={styles.modalCard} contentContainerStyle={styles.modalCardContent}>
-            <Text style={styles.modalTitle}>{editingMeetingId ? 'Edit Meeting' : 'Create Meeting'}</Text>
-            <TextInput
-              style={styles.input}
-              value={meetingForm.title}
-              onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, title: value }))}
-              placeholder="Meeting title *"
-            />
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              multiline
-              value={meetingForm.description}
-              onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, description: value }))}
-              placeholder="Description"
-            />
-            <TextInput
-              style={styles.input}
-              value={meetingForm.meetingDate}
-              onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, meetingDate: value }))}
-              placeholder="Meeting date (YYYY-MM-DD)"
-            />
-            <Text style={styles.sectionLabel}>Node</Text>
-            <View style={styles.optionRow}>
-              {assignableNodes.map((node) => (
-                <TouchableOpacity
-                  key={`meeting-node-${node.id}`}
-                  style={[styles.optionChip, meetingForm.nodeId === String(node.id) && styles.optionChipActive]}
-                  onPress={() => void handleChangeMeetingNode(String(node.id))}
-                >
-                  <Text style={[styles.optionChipText, meetingForm.nodeId === String(node.id) && styles.optionChipTextActive]}>
-                    {node.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionLabel}>Attendance ({meetingTransferSelectedItems.length})</Text>
-              <TouchableOpacity style={styles.rowActionBtn} onPress={() => setShowAttendanceTransferModal(true)}>
-                <Text style={styles.rowActionText}>Manage</Text>
-              </TouchableOpacity>
-            </View>
-            {meetingTransferSelectedItems.length > 0 ? (
-              <View style={styles.avatarSummaryRow}>
-                {meetingTransferSelectedItems.slice(0, 8).map((item) => (
-                  <View key={`preview-${item.key}`} style={styles.avatarBadge}>
-                    <Text style={styles.avatarBadgeText}>{getInitials(item.name)}</Text>
-                  </View>
-                ))}
-                {meetingTransferSelectedItems.length > 8 ? (
-                  <View style={[styles.avatarBadge, styles.avatarBadgeMore]}>
-                    <Text style={styles.avatarBadgeText}>+{meetingTransferSelectedItems.length - 8}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : (
-              <Text style={styles.modalSub}>No attendees selected yet</Text>
-            )}
-
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionLabel}>Invited Members ({meetingInviteSelectedItems.length})</Text>
-              <TouchableOpacity style={styles.rowActionBtn} onPress={() => setShowInvitationTransferModal(true)}>
-                <Text style={styles.rowActionText}>Manage</Text>
-              </TouchableOpacity>
-            </View>
-            {meetingInviteSelectedItems.length > 0 ? (
-              <View style={styles.avatarSummaryRow}>
-                {meetingInviteSelectedItems.slice(0, 8).map((item) => (
-                  <View key={`invite-preview-${item.key}`} style={[styles.avatarBadge, styles.avatarBadgeInvite]}>
-                    <Text style={styles.avatarBadgeText}>{getInitials(item.name)}</Text>
-                  </View>
-                ))}
-                {meetingInviteSelectedItems.length > 8 ? (
-                  <View style={[styles.avatarBadge, styles.avatarBadgeMore]}>
-                    <Text style={styles.avatarBadgeText}>+{meetingInviteSelectedItems.length - 8}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : (
-              <Text style={styles.modalSub}>No invited members selected yet</Text>
-            )}
-
-            <Text style={styles.sectionLabel}>Attachments</Text>
-            <View style={styles.searchRow}>
-              <TextInput
-                style={[styles.input, styles.searchInput]}
-                value={meetingForm.attachmentInput}
-                onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, attachmentInput: value }))}
-                placeholder="Document URL"
-                autoCapitalize="none"
-              />
-              <TouchableOpacity style={styles.searchBtn} onPress={addMeetingAttachmentByUrl}>
-                <Text style={styles.searchBtnText}>Add URL</Text>
-              </TouchableOpacity>
-            </View>
+        title={editingMeetingId ? 'Edit Meeting' : 'Create Meeting'}
+        footer={
+          <>
             <TouchableOpacity
-              style={[styles.secondaryAction, meetingUploadingAttachment && styles.saveBtnDisabled]}
-              disabled={meetingUploadingAttachment}
-              onPress={() => void handleUploadMeetingAttachment()}
+              style={[styles.btn, styles.btnLight]}
+              onPress={() => {
+                setShowMeetingModal(false);
+                setEditingMeetingId(null);
+              }}
             >
-              <Text style={styles.secondaryActionText}>{meetingUploadingAttachment ? 'Uploading...' : 'Upload Photo/Video'}</Text>
+              <Text style={styles.btnTextDark}>Cancel</Text>
             </TouchableOpacity>
-            <View style={styles.attachmentList}>
-              {meetingForm.attachments.map((item, idx) => (
-                <View key={`meeting-attachment-${idx}`} style={styles.attachmentItem}>
-                  <Text style={styles.attachmentText} numberOfLines={1}>{item.name || item.url}</Text>
-                  <TouchableOpacity
-                    onPress={() =>
-                      setMeetingForm((prev) => ({
-                        ...prev,
-                        attachments: prev.attachments.filter((_, i) => i !== idx),
-                      }))
-                    }
-                  >
-                    <Text style={styles.removeText}>Remove</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
+            <TouchableOpacity
+              style={[styles.btn, creatingMeeting && styles.btnDisabled]}
+              disabled={creatingMeeting}
+              onPress={() => void handleSubmitMeeting()}
+            >
+              <Text style={styles.btnText}>{creatingMeeting ? 'Saving...' : editingMeetingId ? 'Update Meeting' : 'Create Meeting'}</Text>
+            </TouchableOpacity>
+          </>
+        }
+      >
+        <TextInput
+          style={styles.input}
+          value={meetingForm.title}
+          onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, title: value }))}
+          placeholder="Meeting title *"
+        />
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          multiline
+          value={meetingForm.description}
+          onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, description: value }))}
+          placeholder="Description"
+        />
+        <TextInput
+          style={styles.input}
+          value={meetingForm.meetingDate}
+          onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, meetingDate: value }))}
+          placeholder="Meeting date (YYYY-MM-DD)"
+        />
+        <Text style={styles.sectionLabel}>Node</Text>
+        <View style={styles.optionRow}>
+          {assignableNodes.map((node) => (
+            <TouchableOpacity
+              key={`meeting-node-${node.id}`}
+              style={[styles.optionChip, meetingForm.nodeId === String(node.id) && styles.optionChipActive]}
+              onPress={() => void handleChangeMeetingNode(String(node.id))}
+            >
+              <Text style={[styles.optionChipText, meetingForm.nodeId === String(node.id) && styles.optionChipTextActive]}>
+                {node.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
-            <View style={styles.modalActions}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionLabel}>Attendance ({meetingTransferSelectedItems.length})</Text>
+          <TouchableOpacity style={styles.rowActionBtn} onPress={() => setShowAttendanceTransferModal(true)}>
+            <Text style={styles.rowActionText}>Manage</Text>
+          </TouchableOpacity>
+        </View>
+        {meetingTransferSelectedItems.length > 0 ? (
+          <View style={styles.avatarSummaryRow}>
+            {meetingTransferSelectedItems.slice(0, 8).map((item) => (
+              <View key={`preview-${item.key}`} style={styles.avatarBadge}>
+                <Text style={styles.avatarBadgeText}>{getInitials(item.name)}</Text>
+              </View>
+            ))}
+            {meetingTransferSelectedItems.length > 8 ? (
+              <View style={[styles.avatarBadge, styles.avatarBadgeMore]}>
+                <Text style={styles.avatarBadgeText}>+{meetingTransferSelectedItems.length - 8}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : (
+          <Text style={styles.modalSub}>No attendees selected yet</Text>
+        )}
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionLabel}>Invited Members ({meetingInviteSelectedItems.length})</Text>
+          <TouchableOpacity style={styles.rowActionBtn} onPress={() => setShowInvitationTransferModal(true)}>
+            <Text style={styles.rowActionText}>Manage</Text>
+          </TouchableOpacity>
+        </View>
+        {meetingInviteSelectedItems.length > 0 ? (
+          <View style={styles.avatarSummaryRow}>
+            {meetingInviteSelectedItems.slice(0, 8).map((item) => (
+              <View key={`invite-preview-${item.key}`} style={[styles.avatarBadge, styles.avatarBadgeInvite]}>
+                <Text style={styles.avatarBadgeText}>{getInitials(item.name)}</Text>
+              </View>
+            ))}
+            {meetingInviteSelectedItems.length > 8 ? (
+              <View style={[styles.avatarBadge, styles.avatarBadgeMore]}>
+                <Text style={styles.avatarBadgeText}>+{meetingInviteSelectedItems.length - 8}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : (
+          <Text style={styles.modalSub}>No invited members selected yet</Text>
+        )}
+
+        <Text style={styles.sectionLabel}>Attachments</Text>
+        <View style={styles.searchRow}>
+          <TextInput
+            style={[styles.input, styles.searchInput]}
+            value={meetingForm.attachmentInput}
+            onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, attachmentInput: value }))}
+            placeholder="Document URL"
+            autoCapitalize="none"
+          />
+          <TouchableOpacity style={styles.searchBtn} onPress={addMeetingAttachmentByUrl}>
+            <Text style={styles.searchBtnText}>Add URL</Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity
+          style={[styles.secondaryAction, meetingUploadingAttachment && styles.saveBtnDisabled]}
+          disabled={meetingUploadingAttachment}
+          onPress={() => void handleUploadMeetingAttachment()}
+        >
+          <Text style={styles.secondaryActionText}>{meetingUploadingAttachment ? 'Uploading...' : 'Upload Photo/Video'}</Text>
+        </TouchableOpacity>
+        <View style={styles.attachmentList}>
+          {meetingForm.attachments.map((item, idx) => (
+            <View key={`meeting-attachment-${idx}`} style={styles.attachmentItem}>
+              <Text style={styles.attachmentText} numberOfLines={1}>{item.name || item.url}</Text>
               <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={() => {
-                  setShowMeetingModal(false);
-                  setEditingMeetingId(null);
-                  setAttendanceBrowseNodeId('');
-                  setInvitationBrowseNodeId('');
-                  setMeetingParticipantPreview([]);
-                  setMeetingInvitePreview([]);
-                  setShowAttendanceTransferModal(false);
-                  setShowInvitationTransferModal(false);
-                }}
+                onPress={() =>
+                  setMeetingForm((prev) => ({
+                    ...prev,
+                    attachments: prev.attachments.filter((_, i) => i !== idx),
+                  }))
+                }
               >
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.saveBtn, creatingMeeting && styles.saveBtnDisabled]} disabled={creatingMeeting} onPress={() => void handleSubmitMeeting()}>
-                <Text style={styles.saveText}>
-                  {creatingMeeting ? 'Saving...' : editingMeetingId ? 'Update Meeting' : 'Create Meeting'}
-                </Text>
+                <Text style={styles.removeText}>Remove</Text>
               </TouchableOpacity>
             </View>
-          </ScrollView>
+          ))}
         </View>
-      </Modal>
+      </StandardModal>
 
-      <Modal
+      <StandardModal
         visible={showAttendanceTransferModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowAttendanceTransferModal(false)}
+        onClose={() => setShowAttendanceTransferModal(false)}
+        title="Manage Attendance"
+        footer={
+          <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowAttendanceTransferModal(false)}>
+            <Text style={styles.btnTextDark}>Done</Text>
+          </TouchableOpacity>
+        }
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Manage Attendance</Text>
-            <Text style={styles.sectionLabel}>Node</Text>
-            <View style={styles.optionRow}>
-              {assignableNodes.map((node) => (
-                <TouchableOpacity
-                  key={`transfer-node-${node.id}`}
-                  style={[styles.optionChip, currentAttendanceNodeId === String(node.id) && styles.optionChipActive]}
-                  onPress={() => void handleChangeAttendanceBrowseNode(String(node.id))}
-                >
-                  <Text style={[styles.optionChipText, currentAttendanceNodeId === String(node.id) && styles.optionChipTextActive]}>
-                    {node.name}
+        <Text style={styles.sectionLabel}>Node</Text>
+        <View style={styles.optionRow}>
+          {assignableNodes.map((node) => (
+            <TouchableOpacity
+              key={`transfer-node-${node.id}`}
+              style={[styles.optionChip, currentAttendanceNodeId === String(node.id) && styles.optionChipActive]}
+              onPress={() => void handleChangeAttendanceBrowseNode(String(node.id))}
+            >
+              <Text style={[styles.optionChipText, currentAttendanceNodeId === String(node.id) && styles.optionChipTextActive]}>
+                {node.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={styles.sectionLabel}>Search guest</Text>
+        <View style={styles.searchRow}>
+          <TextInput
+            style={[styles.input, styles.searchInput]}
+            value={meetingGuestQuery}
+            onChangeText={setMeetingGuestQuery}
+            placeholder="Mobile or email"
+          />
+          <TouchableOpacity style={styles.searchBtn} onPress={() => void handleSearchMeetingGuests()} disabled={meetingGuestSearching}>
+            <Text style={styles.searchBtnText}>{meetingGuestSearching ? '...' : 'Search'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.sectionLabel}>Create guest</Text>
+        <TextInput
+          style={styles.input}
+          value={meetingForm.newGuestName}
+          onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, newGuestName: value }))}
+          placeholder="Guest name"
+        />
+        <View style={styles.searchRow}>
+          <TextInput
+            style={[styles.input, styles.searchInput]}
+            value={meetingForm.newGuestMobile}
+            onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, newGuestMobile: value }))}
+            placeholder="Guest mobile"
+            keyboardType="phone-pad"
+          />
+          <TextInput
+            style={[styles.input, styles.searchInput]}
+            value={meetingForm.newGuestEmail}
+            onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, newGuestEmail: value }))}
+            placeholder="Guest email"
+            autoCapitalize="none"
+          />
+        </View>
+        <TouchableOpacity style={styles.secondaryAction} onPress={() => void handleCreateMeetingGuest()}>
+          <Text style={styles.secondaryActionText}>Create and select guest</Text>
+        </TouchableOpacity>
+
+        <View style={styles.transferRow}>
+          <View style={styles.transferColumn}>
+            <Text style={styles.transferTitle}>Available</Text>
+            <ScrollView style={styles.transferList}>
+              {meetingTransferAvailableItems.map((item) => (
+                <TouchableOpacity key={`available-${item.key}`} style={styles.transferItem} onPress={() => handleAddTransferAttendee(item)}>
+                  <Text style={styles.transferItemName} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Text style={styles.transferItemMeta} numberOfLines={1}>
+                    {item.subtitle || item.attendeeType}
                   </Text>
                 </TouchableOpacity>
               ))}
-            </View>
+              {meetingTransferAvailableItems.length === 0 ? <Text style={styles.modalSub}>No available attendees</Text> : null}
+            </ScrollView>
+          </View>
 
-            <Text style={styles.sectionLabel}>Search guest</Text>
-            <View style={styles.searchRow}>
-              <TextInput
-                style={[styles.input, styles.searchInput]}
-                value={meetingGuestQuery}
-                onChangeText={setMeetingGuestQuery}
-                placeholder="Mobile or email"
-              />
-              <TouchableOpacity style={styles.searchBtn} onPress={() => void handleSearchMeetingGuests()} disabled={meetingGuestSearching}>
-                <Text style={styles.searchBtnText}>{meetingGuestSearching ? '...' : 'Search'}</Text>
+          <View style={styles.transferColumn}>
+            <Text style={styles.transferTitle}>Selected</Text>
+            <ScrollView style={styles.transferList}>
+              {meetingTransferSelectedItems.map((item) => (
+                <TouchableOpacity key={`selected-${item.key}`} style={styles.transferItemSelected} onPress={() => handleRemoveTransferAttendee(item)}>
+                  <Text style={styles.transferItemName} numberOfLines={1}>
+                    {item.subtitle ? `${item.name} (${item.subtitle})` : item.name}
+                  </Text>
+                  <Text style={styles.transferItemMeta} numberOfLines={1}>
+                    {item.subtitle || item.attendeeType}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              {meetingTransferSelectedItems.length === 0 ? <Text style={styles.modalSub}>No selected attendees</Text> : null}
+            </ScrollView>
+          </View>
+        </View>
+      </StandardModal>
+
+      <StandardModal
+        visible={showMeetingAttachmentModal}
+        onClose={() => setShowMeetingAttachmentModal(false)}
+        title={meetingAttachmentTitle || 'Meeting Attachments'}
+        footer={
+          <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowMeetingAttachmentModal(false)}>
+            <Text style={styles.btnTextDark}>Close</Text>
+          </TouchableOpacity>
+        }
+      >
+        <ScrollView style={styles.attachmentPreviewList}>
+          {meetingAttachmentItems.map((item, idx) => (
+            <View key={`meeting-preview-attachment-${idx}`} style={styles.attachmentPreviewItem}>
+              {String(item.type || '').toLowerCase().startsWith('image') && item.url ? (
+                <Image source={{ uri: item.url }} style={styles.attachmentThumb} resizeMode="cover" />
+              ) : null}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.attachmentText} numberOfLines={1}>
+                  {item.name || item.url}
+                </Text>
+                <Text style={styles.modalSub}>{item.type || 'attachment'}</Text>
+              </View>
+              <TouchableOpacity style={styles.rowActionBtn} onPress={() => void handleOpenAttachmentUrl(item.url)}>
+                <Text style={styles.rowActionText}>Open</Text>
               </TouchableOpacity>
             </View>
+          ))}
+          {meetingAttachmentItems.length === 0 ? <Text style={styles.modalSub}>No attachments found</Text> : null}
+        </ScrollView>
+      </StandardModal>
 
-            <Text style={styles.sectionLabel}>Create guest</Text>
-            <TextInput
-              style={styles.input}
-              value={meetingForm.newGuestName}
-              onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, newGuestName: value }))}
-              placeholder="Guest name"
-            />
-            <View style={styles.searchRow}>
-              <TextInput
-                style={[styles.input, styles.searchInput]}
-                value={meetingForm.newGuestMobile}
-                onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, newGuestMobile: value }))}
-                placeholder="Guest mobile"
-                keyboardType="phone-pad"
-              />
-              <TextInput
-                style={[styles.input, styles.searchInput]}
-                value={meetingForm.newGuestEmail}
-                onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, newGuestEmail: value }))}
-                placeholder="Guest email"
-                autoCapitalize="none"
-              />
-            </View>
-            <TouchableOpacity style={styles.secondaryAction} onPress={() => void handleCreateMeetingGuest()}>
-              <Text style={styles.secondaryActionText}>Create and select guest</Text>
-            </TouchableOpacity>
-
-            <View style={styles.transferRow}>
-              <View style={styles.transferColumn}>
-                <Text style={styles.transferTitle}>Available</Text>
-                <ScrollView style={styles.transferList}>
-                  {meetingTransferAvailableItems.map((item) => (
-                    <TouchableOpacity key={`available-${item.key}`} style={styles.transferItem} onPress={() => handleAddTransferAttendee(item)}>
-                      <Text style={styles.transferItemName} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <Text style={styles.transferItemMeta} numberOfLines={1}>
-                        {item.subtitle || item.attendeeType}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                  {meetingTransferAvailableItems.length === 0 ? <Text style={styles.modalSub}>No available attendees</Text> : null}
-                </ScrollView>
-              </View>
-
-              <View style={styles.transferColumn}>
-                <Text style={styles.transferTitle}>Selected</Text>
-                <ScrollView style={styles.transferList}>
-                  {meetingTransferSelectedItems.map((item) => (
-                    <TouchableOpacity key={`selected-${item.key}`} style={styles.transferItemSelected} onPress={() => handleRemoveTransferAttendee(item)}>
-                      <Text style={styles.transferItemName} numberOfLines={1}>
-                        {item.subtitle ? `${item.name} (${item.subtitle})` : item.name}
-                      </Text>
-                      <Text style={styles.transferItemMeta} numberOfLines={1}>
-                        {item.subtitle || item.attendeeType}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                  {meetingTransferSelectedItems.length === 0 ? <Text style={styles.modalSub}>No selected attendees</Text> : null}
-                </ScrollView>
-              </View>
-            </View>
-
-            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowAttendanceTransferModal(false)}>
-              <Text style={styles.closeText}>Done</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={showMeetingAttachmentModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowMeetingAttachmentModal(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{meetingAttachmentTitle || 'Meeting Attachments'}</Text>
-            <ScrollView style={styles.attachmentPreviewList}>
-              {meetingAttachmentItems.map((item, idx) => (
-                <View key={`meeting-preview-attachment-${idx}`} style={styles.attachmentPreviewItem}>
-                  {String(item.type || '').toLowerCase().startsWith('image') && item.url ? (
-                    <Image source={{ uri: item.url }} style={styles.attachmentThumb} resizeMode="cover" />
-                  ) : null}
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.attachmentText} numberOfLines={1}>
-                      {item.name || item.url}
-                    </Text>
-                    <Text style={styles.modalSub}>{item.type || 'attachment'}</Text>
-                  </View>
-                  <TouchableOpacity style={styles.rowActionBtn} onPress={() => void handleOpenAttachmentUrl(item.url)}>
-                    <Text style={styles.rowActionText}>Open</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-              {meetingAttachmentItems.length === 0 ? <Text style={styles.modalSub}>No attachments found</Text> : null}
-            </ScrollView>
-            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowMeetingAttachmentModal(false)}>
-              <Text style={styles.closeText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
+      <StandardModal
         visible={showInvitationTransferModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowInvitationTransferModal(false)}
+        onClose={() => setShowInvitationTransferModal(false)}
+        title="Manage Invited Members"
+        footer={
+          <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowInvitationTransferModal(false)}>
+            <Text style={styles.btnTextDark}>Done</Text>
+          </TouchableOpacity>
+        }
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Manage Invited Members</Text>
-            <Text style={styles.sectionLabel}>Node</Text>
-            <View style={styles.optionRow}>
-              {assignableNodes.map((node) => (
-                <TouchableOpacity
-                  key={`invite-node-${node.id}`}
-                  style={[styles.optionChip, currentInvitationNodeId === String(node.id) && styles.optionChipActive]}
-                  onPress={() => void handleChangeInvitationBrowseNode(String(node.id))}
-                >
-                  <Text style={[styles.optionChipText, currentInvitationNodeId === String(node.id) && styles.optionChipTextActive]}>
-                    {node.name}
+        <Text style={styles.sectionLabel}>Node</Text>
+        <View style={styles.optionRow}>
+          {assignableNodes.map((node) => (
+            <TouchableOpacity
+              key={`invite-node-${node.id}`}
+              style={[styles.optionChip, currentInvitationNodeId === String(node.id) && styles.optionChipActive]}
+              onPress={() => void handleChangeInvitationBrowseNode(String(node.id))}
+            >
+              <Text style={[styles.optionChipText, currentInvitationNodeId === String(node.id) && styles.optionChipTextActive]}>
+                {node.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={styles.transferRow}>
+          <View style={styles.transferColumn}>
+            <Text style={styles.transferTitle}>Available Members</Text>
+            <ScrollView style={styles.transferList}>
+              {meetingInviteAvailableItems.map((item) => (
+                <TouchableOpacity key={`invite-available-${item.key}`} style={styles.transferItem} onPress={() => handleAddInviteMember(item)}>
+                  <Text style={styles.transferItemName} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Text style={styles.transferItemMeta} numberOfLines={1}>
+                    {item.subtitle || 'member'}
                   </Text>
                 </TouchableOpacity>
               ))}
-            </View>
+              {meetingInviteAvailableItems.length === 0 ? <Text style={styles.modalSub}>No available members</Text> : null}
+            </ScrollView>
+          </View>
 
-            <View style={styles.transferRow}>
-              <View style={styles.transferColumn}>
-                <Text style={styles.transferTitle}>Available Members</Text>
-                <ScrollView style={styles.transferList}>
-                  {meetingInviteAvailableItems.map((item) => (
-                    <TouchableOpacity key={`invite-available-${item.key}`} style={styles.transferItem} onPress={() => handleAddInviteMember(item)}>
-                      <Text style={styles.transferItemName} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <Text style={styles.transferItemMeta} numberOfLines={1}>
-                        {item.subtitle || 'member'}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                  {meetingInviteAvailableItems.length === 0 ? <Text style={styles.modalSub}>No available members</Text> : null}
-                </ScrollView>
-              </View>
-
-              <View style={styles.transferColumn}>
-                <Text style={styles.transferTitle}>Invited Members</Text>
-                <ScrollView style={styles.transferList}>
-                  {meetingInviteSelectedItems.map((item) => (
-                    <TouchableOpacity key={`invite-selected-${item.key}`} style={styles.transferItemSelected} onPress={() => handleRemoveInviteMember(item)}>
-                      <Text style={styles.transferItemName} numberOfLines={1}>
-                        {item.subtitle ? `${item.name} (${item.subtitle})` : item.name}
-                      </Text>
-                      <Text style={styles.transferItemMeta} numberOfLines={1}>
-                        {item.subtitle || 'member'}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                  {meetingInviteSelectedItems.length === 0 ? <Text style={styles.modalSub}>No invited members</Text> : null}
-                </ScrollView>
-              </View>
-            </View>
-
-            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowInvitationTransferModal(false)}>
-              <Text style={styles.closeText}>Done</Text>
-            </TouchableOpacity>
+          <View style={styles.transferColumn}>
+            <Text style={styles.transferTitle}>Invited Members</Text>
+            <ScrollView style={styles.transferList}>
+              {meetingInviteSelectedItems.map((item) => (
+                <TouchableOpacity key={`invite-selected-${item.key}`} style={styles.transferItemSelected} onPress={() => handleRemoveInviteMember(item)}>
+                  <Text style={styles.transferItemName} numberOfLines={1}>
+                    {item.subtitle ? `${item.name} (${item.subtitle})` : item.name}
+                  </Text>
+                  <Text style={styles.transferItemMeta} numberOfLines={1}>
+                    {item.subtitle || 'member'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              {meetingInviteSelectedItems.length === 0 ? <Text style={styles.modalSub}>No invited members</Text> : null}
+            </ScrollView>
           </View>
         </View>
-      </Modal>
+      </StandardModal>
 
-      <Modal visible={showTaskModal} transparent animationType="slide" onRequestClose={() => setShowTaskModal(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, styles.memberModalCard]}>
-            <View style={styles.memberModalStickyTabs}>
-              <Text style={styles.modalTitle}>Create Task</Text>
-            </View>
-
-            <ScrollView style={styles.memberModalScroll} contentContainerStyle={styles.memberModalScrollContent}>
+      <StandardModal
+        visible={showTaskModal}
+        onClose={() => setShowTaskModal(false)}
+        title={editingTaskId ? 'Edit Task' : 'Create Task'}
+        subtitle={taskSelectedPathLabel}
+        footer={
+          <>
+            <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowTaskModal(false)}>
+              <Text style={styles.btnTextDark}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.btn, creatingTask && styles.saveBtnDisabled]}
+              disabled={creatingTask}
+              onPress={() => void handleSubmitTask()}
+            >
+              <Text style={styles.btnText}>{creatingTask ? 'Saving...' : editingTaskId ? 'Update Task' : 'Create Task'}</Text>
+            </TouchableOpacity>
+          </>
+        }
+      >
+        <View style={styles.formBody}>
+          <View style={styles.twoColRow}>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>Task Title *</Text>
               <TextInput
                 style={styles.input}
                 value={taskForm.title}
                 onChangeText={(value) => setTaskForm((prev) => ({ ...prev, title: value }))}
-                placeholder="Task title *"
+                placeholder="Enter task title"
               />
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                multiline
-                value={taskForm.description}
-                onChangeText={(value) => setTaskForm((prev) => ({ ...prev, description: value }))}
-                placeholder="Description"
-              />
-              <View style={styles.twoColRow}>
-                <TextInput
-                  style={[styles.input, styles.twoColField]}
-                  value={taskForm.taskDate}
-                  onChangeText={(value) => setTaskForm((prev) => ({ ...prev, taskDate: value }))}
-                  placeholder="Task date (YYYY-MM-DD)"
-                />
-                <TextInput
-                  style={[styles.input, styles.twoColField]}
-                  value={taskForm.dueDate}
-                  onChangeText={(value) => setTaskForm((prev) => ({ ...prev, dueDate: value }))}
-                  placeholder="Due date (optional)"
-                />
-              </View>
-
-              <Text style={styles.sectionLabel}>Task Categories</Text>
-              <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('task')}>
-                <Text style={taskSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                  {taskSelectedSubcategories.length ? `${taskSelectedSubcategories.length} subcategories selected` : 'Select task subcategories *'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setTaskForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-                <Text style={styles.clearLink}>Clear categories</Text>
-              </TouchableOpacity>
-              {taskSelectedCategories.length ? <Text style={styles.helper}>Categories: {taskSelectedCategories.join(', ')}</Text> : null}
-              {taskSelectedSubcategories.length ? <Text style={styles.helper}>Subcategories: {taskSelectedSubcategories.join(', ')}</Text> : null}
-
-              <Text style={styles.sectionLabel}>Node</Text>
-              <Text style={styles.modalSub}>{taskSelectedPathLabel}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={styles.taskCascaderRow}>
-                  {taskCascadeColumns.map((column) => (
-                    <View key={`task-cascade-${column.depth}`} style={styles.taskCascaderColumn}>
-                      <Text style={styles.taskCascaderTitle}>{column.title}</Text>
-                      <ScrollView style={styles.taskCascaderList} nestedScrollEnabled>
-                        {column.options.map((option) => {
-                          const selected = String(column.selectedNodeId || '') === String(option.nodeId);
-                          return (
-                            <TouchableOpacity
-                              key={`task-cascade-option-${column.depth}-${option.key}`}
-                              style={[styles.taskCascaderItem, selected && styles.taskCascaderItemSelected]}
-                              onPress={() => void handleTaskCascadeSelect(option.nodeId)}
-                            >
-                              <Text style={[styles.taskCascaderItemText, selected && styles.taskCascaderItemTextSelected]} numberOfLines={1}>
-                                {option.label}
-                              </Text>
-                            {option.hasChildren ? (
-                              <Text style={[styles.taskCascaderArrow, selected && styles.taskCascaderArrowSelected]}>›</Text>
-                            ) : null}
-                            </TouchableOpacity>
-                          );
-                        })}
-                        {column.options.length === 0 ? <Text style={styles.modalSub}>No nodes</Text> : null}
-                      </ScrollView>
-                    </View>
-                  ))}
-                </View>
-              </ScrollView>
-              {selectedTaskNodeIsScopeRoot ? (
-                <Text style={styles.errorInline}>Warning: You cannot create task at assigned level. Select a child node below.</Text>
-              ) : null}
-
-              <Text style={styles.sectionLabel}>Status</Text>
-              <View style={styles.optionRow}>
+            </View>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>Status *</Text>
+              <View style={[styles.optionRow, { marginTop: 4 }]}>
                 {['open', 'in_progress', 'completed'].map((status) => (
                   <TouchableOpacity
                     key={status}
                     style={[styles.optionChip, taskForm.status === status && styles.optionChipActive]}
                     onPress={() => setTaskForm((prev) => ({ ...prev, status }))}
                   >
-                    <Text style={[styles.optionChipText, taskForm.status === status && styles.optionChipTextActive]}>{status}</Text>
+                    <Text style={[styles.optionChipText, taskForm.status === status && styles.optionChipTextActive]}>
+                      {status === 'in_progress' ? 'In Progress' : status.charAt(0).toUpperCase() + status.slice(1)}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </View>
-
-              <Text style={styles.sectionLabel}>Assign member</Text>
-              <View style={styles.selectList}>
-                {taskMembers.map((member) => {
-                  const userId = Number(member.user_id || 0);
-                  if (!userId) return null;
-                  const selected = taskForm.assignedUserId === String(userId);
-                  return (
-                    <TouchableOpacity
-                      key={`task-member-${member.id}`}
-                      style={[styles.selectItem, selected && styles.selectItemActive]}
-                      onPress={() => setTaskForm((prev) => ({ ...prev, assignedUserId: selected ? '' : String(userId) }))}
-                    >
-                      <Text style={[styles.selectItemText, selected && styles.selectItemTextActive]}>
-                        {[member.first_name, member.father_name].filter(Boolean).join(' ') || `User #${userId}`}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-                {taskMembers.length === 0 ? <Text style={styles.modalSub}>No node members found</Text> : null}
-              </View>
-
-              <Text style={styles.sectionLabel}>Attachments</Text>
-              <View style={styles.searchRow}>
-                <TextInput
-                  style={[styles.input, styles.searchInput]}
-                  value={taskForm.attachmentInput}
-                  onChangeText={(value) => setTaskForm((prev) => ({ ...prev, attachmentInput: value }))}
-                  placeholder="Document URL"
-                  autoCapitalize="none"
-                />
-                <TouchableOpacity style={styles.searchBtn} onPress={addTaskAttachmentByUrl}>
-                  <Text style={styles.searchBtnText}>Add URL</Text>
-                </TouchableOpacity>
-              </View>
-              <TouchableOpacity
-                style={[styles.secondaryAction, taskUploadingAttachment && styles.saveBtnDisabled]}
-                disabled={taskUploadingAttachment}
-                onPress={() => void handleUploadTaskAttachment()}
-              >
-                <Text style={styles.secondaryActionText}>{taskUploadingAttachment ? 'Uploading...' : 'Upload Photo/Video'}</Text>
-              </TouchableOpacity>
-              <View style={styles.attachmentList}>
-                {taskForm.attachments.map((item, idx) => (
-                  <View key={`task-attachment-${idx}`} style={styles.attachmentItem}>
-                    <Text style={styles.attachmentText} numberOfLines={1}>{item.name || item.url}</Text>
-                    <TouchableOpacity
-                      onPress={() =>
-                        setTaskForm((prev) => ({
-                          ...prev,
-                          attachments: prev.attachments.filter((_, i) => i !== idx),
-                        }))
-                      }
-                    >
-                      <Text style={styles.removeText}>Remove</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
-
-            <View style={[styles.modalActions, styles.memberModalStickyActions]}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowTaskModal(false)}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.saveBtn, creatingTask && styles.saveBtnDisabled]} disabled={creatingTask} onPress={() => void handleSubmitTask()}>
-                <Text style={styles.saveText}>{creatingTask ? 'Saving...' : 'Create Task'}</Text>
-              </TouchableOpacity>
             </View>
           </View>
+
+          <Text style={styles.fieldLabel}>Description</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            multiline
+            value={taskForm.description}
+            onChangeText={(value) => setTaskForm((prev) => ({ ...prev, description: value }))}
+            placeholder="Enter task description"
+          />
+
+          <View style={styles.twoColRow}>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>Task Date (YYYY-MM-DD)</Text>
+              <TextInput
+                style={styles.input}
+                value={taskForm.taskDate}
+                onChangeText={(value) => setTaskForm((prev) => ({ ...prev, taskDate: value }))}
+                placeholder="YYYY-MM-DD"
+              />
+            </View>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>Due Date (Optional)</Text>
+              <TextInput
+                style={styles.input}
+                value={taskForm.dueDate}
+                onChangeText={(value) => setTaskForm((prev) => ({ ...prev, dueDate: value }))}
+                placeholder="YYYY-MM-DD"
+              />
+            </View>
+          </View>
+
+          <Text style={styles.fieldLabel}>Task Categories *</Text>
+          <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('task')}>
+            <Text style={taskSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
+              {taskSelectedSubcategories.length
+                ? `${taskSelectedSubcategories.length} subcategories selected`
+                : 'Select task subcategories *'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setTaskForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
+            <Text style={styles.clearLink}>Clear categories</Text>
+          </TouchableOpacity>
+          {taskSelectedCategories.length ? (
+            <Text style={styles.helper}>Categories: {taskSelectedCategories.join(', ')}</Text>
+          ) : null}
+          {taskSelectedSubcategories.length ? (
+            <Text style={styles.helper}>Subcategories: {taskSelectedSubcategories.join(', ')}</Text>
+          ) : null}
+
+          <Text style={styles.sectionLabel}>Node Hierarchy</Text>
+          <View style={{ marginBottom: 16 }}>
+            <TreeView
+              levels={taskLevels}
+              breadcrumb={taskSelectedPathLabel}
+              onSelectNode={(levelIndex, node) => void handleTaskSelectNode(levelIndex, node)}
+              showCards={false}
+            />
+          </View>
+          {selectedTaskNodeIsScopeRoot ? (
+            <Text style={styles.errorInline}>Warning: You cannot create task at assigned level. Select a child node below.</Text>
+          ) : null}
+
+          <Text style={styles.sectionLabel}>Assign Members</Text>
+          <Text style={styles.fieldLabel}>Assigned Users ({taskForm.assignedUserIds.length})</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4, marginBottom: 12 }}>
+            {taskForm.assignedUserIds.map((userId) => {
+              const userObj = taskMemberSearchResults.find((u) => u.id === userId);
+              const memObj = taskMembers.find((m) => Number(m.user_id) === userId);
+              const editObj = editingTaskAssignees.find((a) => a.id === userId);
+              const nameStr = userObj
+                ? fullUserName(userObj) || [userObj.first_name, userObj.father_name].filter(Boolean).join(' ')
+                : memObj
+                  ? [memObj.first_name, memObj.father_name].filter(Boolean).join(' ')
+                  : editObj
+                    ? [editObj.name, editObj.father_name].filter(Boolean).join(' ')
+                    : `User #${userId}`;
+              const mobileStr = userObj?.phone || userObj?.email || memObj?.mobile_number || editObj?.mobile_number || '';
+              return (
+                <TouchableOpacity
+                  key={`assigned-${userId}`}
+                  style={[styles.optionChip, styles.optionChipActive, { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12 }]}
+                  onPress={() =>
+                    setTaskForm((prev) => ({
+                      ...prev,
+                      assignedUserIds: prev.assignedUserIds.filter((id) => id !== userId),
+                    }))
+                  }
+                >
+                  <View>
+                    <Text style={[styles.optionChipTextActive, { fontSize: 13 }]}>{nameStr || `User #${userId}`}</Text>
+                    {mobileStr ? <Text style={{ fontSize: 10, color: theme.colors.text.secondary }}>{mobileStr}</Text> : null}
+                  </View>
+                  <Text style={{ color: theme.colors.primary, fontSize: 16, fontWeight: '700', marginLeft: 4 }}>×</Text>
+                </TouchableOpacity>
+              );
+            })}
+            {taskForm.assignedUserIds.length === 0 ? (
+              <Text style={styles.modalSub}>No members assigned. Search users or select below to assign.</Text>
+            ) : null}
+          </View>
+
+          <Text style={styles.fieldLabel}>Search & Select Users (Multi-select)</Text>
+          <View style={styles.searchRow}>
+            <TextInput
+              style={[styles.input, styles.searchInput]}
+              value={taskMemberSearchQuery}
+              onChangeText={setTaskMemberSearchQuery}
+              placeholder="Search user by name or mobile number..."
+              autoCapitalize="none"
+            />
+            {taskMemberSearchQuery.length > 0 ? (
+              <TouchableOpacity
+                style={{ paddingHorizontal: 12, justifyContent: 'center' }}
+                onPress={() => {
+                  setTaskMemberSearchQuery('');
+                  setTaskMemberSearchResults([]);
+                }}
+              >
+                <Text style={{ color: theme.colors.text.disabled, fontSize: 16, fontWeight: 'bold' }}>×</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <View style={styles.dropdownContainer}>
+            <ScrollView style={{ maxHeight: 240 }} nestedScrollEnabled>
+              {taskMemberSearchQuery.trim().length < 3 ? (
+                <>
+                  <View style={{ paddingHorizontal: 12, paddingVertical: 8, backgroundColor: theme.colors.surfaceContainerHigh, borderBottomWidth: 1, borderBottomColor: theme.colors.borderLight }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.text.secondary }}>
+                      NODE MEMBERS ({taskMembers.length}) — Type 3+ chars to search all users
+                    </Text>
+                  </View>
+                  {taskMembers.map((member) => {
+                    const userId = Number(member.user_id || 0);
+                    if (!userId) return null;
+                    const selected = taskForm.assignedUserIds.includes(userId);
+                    const nameStr = [member.first_name, member.father_name].filter(Boolean).join(' ') || `User #${userId}`;
+                    const mobileStr = member.mobile_number || 'No mobile number';
+                    return (
+                      <TouchableOpacity
+                        key={`task-node-member-${member.id}`}
+                        style={[styles.userDropdownItem, selected && styles.userDropdownItemActive]}
+                        onPress={() =>
+                          setTaskForm((prev) => ({
+                            ...prev,
+                            assignedUserIds: selected
+                              ? prev.assignedUserIds.filter((id) => id !== userId)
+                              : [...prev.assignedUserIds, userId],
+                          }))
+                        }
+                      >
+                        <View style={styles.userAvatar}>
+                          <Text style={styles.userAvatarText}>{getInitials(nameStr)}</Text>
+                        </View>
+                        <View style={styles.userInfo}>
+                          <Text style={[styles.userNameText, selected && { color: theme.colors.primary }]}>{nameStr}</Text>
+                          <Text style={styles.userMobileText}>{mobileStr}</Text>
+                        </View>
+                        <View style={[styles.userCheckIcon, selected && styles.userCheckIconActive]}>
+                          {selected ? <Text style={styles.userCheckText}>✓</Text> : null}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  {taskMembers.length === 0 ? (
+                    <Text style={{ padding: 12, color: theme.colors.text.disabled, fontStyle: 'italic', fontSize: 12 }}>
+                      No members in selected node. Type in the search box above to search system users.
+                    </Text>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <View style={{ paddingHorizontal: 12, paddingVertical: 8, backgroundColor: theme.colors.surfaceContainerHigh, borderBottomWidth: 1, borderBottomColor: theme.colors.borderLight }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.text.secondary }}>
+                      {taskMemberSearching ? 'SEARCHING...' : `SEARCH RESULTS (${taskMemberSearchResults.length})`}
+                    </Text>
+                  </View>
+                  {taskMemberSearchResults.map((entry) => {
+                    const selected = taskForm.assignedUserIds.includes(entry.id);
+                    const nameStr = fullUserName(entry) || [entry.first_name, entry.father_name].filter(Boolean).join(' ') || `User #${entry.id}`;
+                    const mobileStr = entry.phone || entry.email || 'No mobile number';
+                    return (
+                      <TouchableOpacity
+                        key={`task-user-search-${entry.id}`}
+                        style={[styles.userDropdownItem, selected && styles.userDropdownItemActive]}
+                        onPress={() =>
+                          setTaskForm((prev) => ({
+                            ...prev,
+                            assignedUserIds: selected
+                              ? prev.assignedUserIds.filter((id) => id !== entry.id)
+                              : [...prev.assignedUserIds, entry.id],
+                          }))
+                        }
+                      >
+                        <View style={styles.userAvatar}>
+                          <Text style={styles.userAvatarText}>{getInitials(nameStr)}</Text>
+                        </View>
+                        <View style={styles.userInfo}>
+                          <Text style={[styles.userNameText, selected && { color: theme.colors.primary }]}>{nameStr}</Text>
+                          <Text style={styles.userMobileText}>{mobileStr}</Text>
+                        </View>
+                        <View style={[styles.userCheckIcon, selected && styles.userCheckIconActive]}>
+                          {selected ? <Text style={styles.userCheckText}>✓</Text> : null}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  {!taskMemberSearching && taskMemberSearchResults.length === 0 ? (
+                    <Text style={{ padding: 12, color: theme.colors.text.disabled, fontStyle: 'italic', fontSize: 12 }}>
+                      No matching users found for "{taskMemberSearchQuery}"
+                    </Text>
+                  ) : null}
+                </>
+              )}
+            </ScrollView>
+          </View>
         </View>
-      </Modal>
-      <Modal
+
+        <Text style={styles.sectionLabel}>Attachments</Text>
+        <View style={styles.searchRow}>
+          <TextInput
+            style={[styles.input, styles.searchInput]}
+            value={taskForm.attachmentInput}
+            onChangeText={(value) => setTaskForm((prev) => ({ ...prev, attachmentInput: value }))}
+            placeholder="Document URL"
+            autoCapitalize="none"
+          />
+          <TouchableOpacity style={styles.searchBtn} onPress={addTaskAttachmentByUrl}>
+            <Text style={styles.searchBtnText}>Add URL</Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity
+          style={[styles.secondaryAction, taskUploadingAttachment && styles.saveBtnDisabled]}
+          disabled={taskUploadingAttachment}
+          onPress={() => void handleUploadTaskAttachment()}
+        >
+          <Text style={styles.secondaryActionText}>{taskUploadingAttachment ? 'Uploading...' : 'Upload Photo/Video'}</Text>
+        </TouchableOpacity>
+        <View style={styles.attachmentList}>
+          {taskForm.attachments.map((item, idx) => (
+            <View key={`task-attachment-${idx}`} style={styles.attachmentItem}>
+              <Text style={styles.attachmentText} numberOfLines={1}>
+                {item.name || item.url}
+              </Text>
+              <TouchableOpacity
+                onPress={() =>
+                  setTaskForm((prev) => ({
+                    ...prev,
+                    attachments: prev.attachments.filter((_, i) => i !== idx),
+                  }))
+                }
+              >
+                <Text style={styles.removeText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+      </StandardModal>
+      <StandardModal
         visible={Boolean(selectedActivityDetails)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSelectedActivityDetails(null)}
+        onClose={() => setSelectedActivityDetails(null)}
+        title="Activity Details"
+        footer={
+          <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setSelectedActivityDetails(null)}>
+            <Text style={styles.btnTextDark}>Close</Text>
+          </TouchableOpacity>
+        }
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Activity Details</Text>
-            <Text style={styles.tableCellTextCompact}>{selectedActivityDetails?.title || '-'}</Text>
-            <Text style={styles.modalSub}>Date: {String(selectedActivityDetails?.created_at || '').slice(0, 19).replace('T', ' ') || '-'}</Text>
-            <Text style={styles.modalSub}>Category: {selectedActivityDetails?.category || '-'}</Text>
-            <Text style={styles.modalSub}>Subcategory: {selectedActivityDetails?.subcategory || '-'}</Text>
-            <Text style={styles.modalSub}>Node: {selectedActivityDetails?.hierarchy_path || selectedActivityDetails?.node_name || '-'}</Text>
+        <View style={styles.activityHero}>
+          <Text style={styles.activityTitle}>{selectedActivityDetails?.title || '-'}</Text>
+          <View style={styles.activityMetaRow}>
+            <MaterialIcons name="event" size={14} color={theme.colors.text.secondary} />
+            <Text style={styles.activityMetaText}>{String(selectedActivityDetails?.created_at || '').slice(0, 10) || '-'}</Text>
+          </View>
+        </View>
+
+        <View style={styles.infoCard}>
+          <View style={styles.infoRow}>
+            <View style={styles.infoCol}>
+              <Text style={styles.infoLabel}>Category</Text>
+              <Text style={styles.infoValue}>{selectedActivityDetails?.category || '-'}</Text>
+            </View>
+            <View style={styles.infoCol}>
+              <Text style={styles.infoLabel}>Subcategory</Text>
+              <Text style={styles.infoValue}>{selectedActivityDetails?.subcategory || '-'}</Text>
+            </View>
+          </View>
+          <View style={styles.infoDivider} />
+          <View style={styles.infoCol}>
+            <Text style={styles.infoLabel}>Node / Location</Text>
+            <Text style={styles.infoValue}>{selectedActivityDetails?.hierarchy_path || selectedActivityDetails?.node_name || '-'}</Text>
+          </View>
+          <View style={styles.infoDivider} />
+          <View style={styles.infoCol}>
+            <Text style={styles.infoLabel}>Submitted By</Text>
             <View style={styles.byCellWrap}>
               {selectedActivityDetails?.submitted_by_avatar ? (
                 <Image source={{ uri: selectedActivityDetails.submitted_by_avatar }} style={styles.byAvatar} />
@@ -3732,30 +4021,37 @@ export default function KaryakariniModuleScreen() {
                   <Text style={styles.byAvatarFallbackText}>{getInitials(selectedActivityDetails?.submitted_by_name || '')}</Text>
                 </View>
               )}
-              <Text style={styles.modalSub}>By: {selectedActivityDetails?.submitted_by_name || '-'}</Text>
+              <Text style={styles.infoValue}>{selectedActivityDetails?.submitted_by_name || '-'}</Text>
             </View>
-            <Text style={styles.sectionLabel}>Description</Text>
-            <Text style={styles.modalSub}>{selectedActivityDetails?.description || '-'}</Text>
-            <Text style={styles.sectionLabel}>Attachments</Text>
-            {Array.isArray(selectedActivityDetails?.attachments) && selectedActivityDetails.attachments.length > 0 ? (
-              selectedActivityDetails.attachments.map((attachment, index) => (
-                <TouchableOpacity
-                  key={`activity-details-attachment-${index}`}
-                  style={styles.rowActionBtn}
-                  onPress={() => void handleOpenAttachmentUrl(attachment?.url)}
-                >
-                  <Text style={styles.rowActionText}>{attachment?.name || `Attachment ${index + 1}`}</Text>
-                </TouchableOpacity>
-              ))
-            ) : (
-              <Text style={styles.modalSub}>No attachments</Text>
-            )}
-            <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedActivityDetails(null)}>
-              <Text style={styles.closeText}>Close</Text>
-            </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+
+        <Text style={styles.sectionLabel}>Description</Text>
+        <View style={styles.descriptionBox}>
+          <Text style={styles.descriptionText}>{selectedActivityDetails?.description || 'No description provided.'}</Text>
+        </View>
+
+        <Text style={styles.sectionLabel}>Attachments</Text>
+        <View style={styles.attachmentPreviewList}>
+          {Array.isArray(selectedActivityDetails?.attachments) && selectedActivityDetails.attachments.length > 0 ? (
+            selectedActivityDetails.attachments.map((attachment, index) => (
+              <TouchableOpacity
+                key={`activity-details-attachment-${index}`}
+                style={styles.attachmentPreviewItem}
+                onPress={() => void handleOpenAttachmentUrl(attachment?.url)}
+              >
+                <View style={styles.attachmentThumb}>
+                  <MaterialIcons name="insert-drive-file" size={24} color={theme.colors.primary} />
+                </View>
+                <Text style={styles.attachmentText} numberOfLines={1}>{attachment?.name || `Attachment ${index + 1}`}</Text>
+                <MaterialIcons name="open-in-new" size={18} color={theme.colors.text.disabled} />
+              </TouchableOpacity>
+            ))
+          ) : (
+            <Text style={styles.modalSub}>No attachments available</Text>
+          )}
+        </View>
+      </StandardModal>
 
       <Modal visible={padPickerVisible} transparent animationType="fade" onRequestClose={() => setPadPickerVisible(false)}>
         <View style={styles.modalBackdrop}>
@@ -3856,6 +4152,42 @@ export default function KaryakariniModuleScreen() {
           </View>
         </View>
       </Modal>
+
+      <StandardModal
+        visible={showAssigneesModal}
+        onClose={() => setShowAssigneesModal(false)}
+        title="Assigned Karyakartas"
+        subtitle={selectedTaskForAssignees?.title || '-'}
+        footer={
+          <TouchableOpacity style={[styles.btn, styles.btnLight, { flex: 1 }]} onPress={() => setShowAssigneesModal(false)}>
+            <Text style={styles.btnTextDark}>Close</Text>
+          </TouchableOpacity>
+        }
+      >
+        <ScrollView style={{ maxHeight: 350 }}>
+          <View style={{ gap: 12, paddingVertical: 8 }}>
+            {selectedTaskForAssignees?.assignees?.map((assignee, index) => {
+              const nameStr = [assignee.name, assignee.father_name].filter(Boolean).join(' ') || `User #${assignee.id}`;
+              return (
+                <View key={`modal-assignee-${assignee.id}-${index}`} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: theme.colors.surfaceContainer, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.borderLight }}>
+                  <View style={[styles.userAvatar, { width: 36, height: 36, borderRadius: 18 }]}>
+                    <Text style={styles.userAvatarText}>{getInitials(nameStr)}</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: theme.colors.text.primary }}>{nameStr}</Text>
+                    {assignee.mobile_number ? (
+                      <Text style={{ fontSize: 12, color: theme.colors.text.secondary, marginTop: 2 }}>📞 {assignee.mobile_number}</Text>
+                    ) : null}
+                  </View>
+                </View>
+              );
+            })}
+            {(!selectedTaskForAssignees?.assignees || selectedTaskForAssignees.assignees.length === 0) ? (
+              <Text style={{ color: theme.colors.text.disabled, fontStyle: 'italic', padding: 12, textAlign: 'center' }}>No users assigned to this task.</Text>
+            ) : null}
+          </View>
+        </ScrollView>
+      </StandardModal>
 
     </View>
   );
@@ -4006,94 +4338,132 @@ const styles = StyleSheet.create({
   },
   tableWrap: {
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 10,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
   },
   tableHeader: {
     flexDirection: 'row',
-    backgroundColor: theme.colors.surfaceContainerHigh,
+    backgroundColor: '#F8FAFC',
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
+    borderBottomColor: '#E2E8F0',
   },
   tableHeaderCell: {
-    paddingHorizontal: 8,
-    paddingVertical: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
     fontSize: 12,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
+    fontWeight: '800',
+    color: '#475569',
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
+    textAlign: 'left',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   tableRow: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.borderLight,
+    borderBottomColor: '#F1F5F9',
+  },
+  tableRowEven: {
+    backgroundColor: '#FBFCFD',
   },
   tableCell: {
-    paddingHorizontal: 8,
-    paddingVertical: 9,
-    fontSize: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 13,
     color: theme.colors.text.primary,
+    borderRightWidth: 1,
+    borderRightColor: '#F1F5F9',
+    justifyContent: 'center',
   },
   tableEmpty: {
-    paddingVertical: 14,
+    paddingVertical: 32,
     alignItems: 'center',
+    backgroundColor: '#fff',
   },
   tableMeta: {
     fontSize: 12,
     color: theme.colors.text.secondary,
     fontWeight: '600',
+    marginTop: 8,
+    textAlign: 'right',
   },
   colDate: {
-    width: 110,
+    width: 100,
   },
   colTitle: {
-    width: 220,
+    width: 200,
   },
   colNode: {
-    width: 230,
+    width: 200,
   },
   colCount: {
-    width: 110,
+    width: 90,
+    textAlign: 'center',
   },
   colAction: {
-    width: 110,
+    width: 90,
+    borderRightWidth: 0,
+    alignItems: 'center',
   },
   colBy: {
-    width: 190,
+    width: 180,
   },
   colAssignee: {
-    width: 170,
+    width: 160,
   },
   colStatus: {
-    width: 130,
+    width: 100,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#FEF3C7',
+    alignSelf: 'flex-start',
+  },
+  statusBadgeCompleted: {
+    backgroundColor: '#DCFCE7',
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#92400E',
+    textTransform: 'uppercase',
+  },
+  statusBadgeTextCompleted: {
+    color: '#166534',
   },
   tableCellTextCompact: {
     color: theme.colors.text.primary,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
   },
   tableCellSubText: {
     color: theme.colors.text.secondary,
-    fontSize: 10,
+    fontSize: 11,
     marginTop: 2,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   linkText: {
     color: theme.colors.primary,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
   rowActionBtn: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: theme.colors.primary,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
     alignSelf: 'flex-start',
   },
   rowActionText: {
     color: theme.colors.primary,
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '800',
   },
   byCellWrap: {
     flexDirection: 'row',
@@ -4239,12 +4609,54 @@ const styles = StyleSheet.create({
   twoColRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
   },
   twoColField: {
     flexGrow: 1,
     flexBasis: '48%',
     minWidth: 140,
+    gap: 6,
+  },
+  inputCompact: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 8,
+    backgroundColor: theme.colors.background,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontSize: 12,
+    color: theme.colors.text.primary,
+  },
+  filterGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'flex-end',
+    marginBottom: 12,
+    backgroundColor: '#F8FAFC',
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  filterCol: {
+    flex: 1,
+    minWidth: 100,
+    gap: 4,
+  },
+  filterApplyBtn: {
+    backgroundColor: theme.colors.primary,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    height: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  filterApplyText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12,
   },
   searchRow: {
     flexDirection: 'row',
@@ -4415,6 +4827,71 @@ const styles = StyleSheet.create({
   optionChipTextActive: {
     color: theme.colors.primary,
   },
+  dropdownContainer: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 10,
+    backgroundColor: theme.colors.surface,
+    maxHeight: 240,
+    marginTop: 6,
+    overflow: 'hidden',
+  },
+  userDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.borderLight,
+  },
+  userDropdownItemActive: {
+    backgroundColor: theme.colors.primarySoft,
+  },
+  userAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: theme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userAvatarText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  userInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  userNameText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  userMobileText: {
+    fontSize: 12,
+    color: theme.colors.text.secondary,
+    marginTop: 2,
+  },
+  userCheckIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  userCheckIconActive: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  userCheckText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '700',
+  },
   modalActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -4441,6 +4918,33 @@ const styles = StyleSheet.create({
   },
   cancelText: {
     color: theme.colors.text.secondary,
+    fontWeight: '700',
+  },
+  btn: {
+    flexGrow: 1,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: theme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  btnLight: {
+    backgroundColor: theme.colors.surfaceContainerHigh,
+    borderWidth: 1,
+    borderColor: theme.colors.borderLight,
+  },
+  btnDisabled: {
+    opacity: 0.5,
+  },
+  btnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  btnTextDark: {
+    color: theme.colors.text.primary,
+    fontSize: 14,
     fontWeight: '700',
   },
   saveBtn: {
@@ -4684,5 +5188,135 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 8,
     backgroundColor: theme.colors.surfaceContainerHigh,
+  },
+  activityHero: {
+    marginBottom: 16,
+    gap: 4,
+  },
+  activityTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: theme.colors.text.primary,
+  },
+  activityMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  activityMetaText: {
+    fontSize: 13,
+    color: theme.colors.text.secondary,
+    fontWeight: '600',
+  },
+  infoCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 16,
+    gap: 12,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  infoCol: {
+    flex: 1,
+    gap: 2,
+  },
+  infoLabel: {
+    fontSize: 11,
+    color: theme.colors.text.secondary,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  infoValue: {
+    fontSize: 14,
+    color: theme.colors.text.primary,
+    fontWeight: '700',
+  },
+  infoDivider: {
+    height: 1,
+    backgroundColor: '#E2E8F0',
+  },
+  descriptionBox: {
+    backgroundColor: theme.colors.background,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.borderLight,
+    marginTop: 6,
+    marginBottom: 16,
+  },
+  descriptionText: {
+    fontSize: 14,
+    color: theme.colors.text.primary,
+    lineHeight: 20,
+    fontWeight: '500',
+  },
+  assignCardContent: {
+    gap: 12,
+  },
+  optionRowCompact: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 4,
+  },
+  optionChipSmall: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.background,
+  },
+  optionChipTextSmall: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.colors.text.secondary,
+  },
+  assignmentMemberSection: {
+    marginTop: 4,
+    gap: 6,
+  },
+  memberSelectItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  memberMiniAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: theme.colors.surfaceContainerHigh,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberMiniAvatarText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: theme.colors.text.secondary,
+  },
+  loadingWrapper: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: theme.colors.text.secondary,
+    marginLeft: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  formBody: {
+    gap: 14,
+  },
+  photoBtnGroup: {
+    flex: 1,
+    gap: 8,
   },
 });

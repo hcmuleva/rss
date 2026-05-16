@@ -1577,6 +1577,8 @@ class KaryakariniModel {
        WHERE (
          COALESCE(to_jsonb(u) ->> 'email', '') ILIKE $1
          OR COALESCE(to_jsonb(u) ->> 'phone', to_jsonb(u) ->> 'mobile_number', to_jsonb(u) ->> 'mobile', '') ILIKE $1
+         OR COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name', '') ILIKE $1
+         OR COALESCE(to_jsonb(u) ->> 'father_name', to_jsonb(u) ->> 'last_name', '') ILIKE $1
        )
        ORDER BY u.id DESC
        LIMIT $2`,
@@ -2944,17 +2946,11 @@ class KaryakariniModel {
       const normalizedAssignedUserId = Number(assignedUserId);
       if (normalizedAssignedUserId > 0) {
         const assignedUserCheck = await client.query(
-          `SELECT 1
-           FROM karyakarini_members
-           WHERE node_id = $1
-             AND version_id = $2
-             AND is_active = true
-             AND user_id = $3
-           LIMIT 1`,
-          [nodeId, versionId, normalizedAssignedUserId]
+          `SELECT 1 FROM users WHERE id = $1 LIMIT 1`,
+          [normalizedAssignedUserId]
         );
         if (!assignedUserCheck.rows[0]) {
-          throw new Error('Assigned user is not mapped to selected node');
+          throw new Error('Assigned user not found');
         }
       }
 
@@ -3013,6 +3009,169 @@ class KaryakariniModel {
 
       await client.query('COMMIT');
       return task;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  static async updateTask({
+    taskId,
+    versionId,
+    nodeId,
+    title,
+    description,
+    taskDate,
+    dueDate,
+    status = 'open',
+    assignedUserId,
+    assignedUserIds = [],
+    categories = [],
+    subcategories = [],
+    locationHierarchy = {},
+    attachments = [],
+    updatedBy,
+  }) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const safeTaskId = Number(taskId);
+      const existingRes = await client.query(
+        `SELECT id, node_id, version_id, title, task_date, created_by
+         FROM karyakarini_tasks
+         WHERE id = $1 AND version_id = $2 AND is_active = true
+         LIMIT 1`,
+        [safeTaskId, versionId]
+      );
+      if (!existingRes.rows[0]) {
+        throw new Error('Task not found');
+      }
+      const origTask = existingRes.rows[0];
+      const origTitle = origTask.title;
+      const origTaskDate = origTask.task_date;
+
+      const normalizedHierarchy = this.normalizeTaskHierarchy(locationHierarchy);
+      const normalizedCategories = this.normalizeMemberLabelList(categories);
+      const normalizedSubcategories = this.normalizeMemberLabelList(subcategories);
+
+      let targetUserIds = [...new Set((Array.isArray(assignedUserIds) ? assignedUserIds : []).map(Number).filter(v => v > 0))];
+      if (targetUserIds.length === 0 && Number(assignedUserId) > 0) {
+        targetUserIds = [Number(assignedUserId)];
+      }
+      if (targetUserIds.length === 0) {
+        targetUserIds = [null];
+      }
+
+      // First user ID goes to the primary task row
+      const primaryUserId = targetUserIds[0];
+
+      const updatedRes = await client.query(
+        `UPDATE karyakarini_tasks
+         SET node_id = $1,
+             title = $2,
+             description = $3,
+             task_date = $4,
+             due_date = $5,
+             status = $6,
+             hierarchy_l1 = $7, hierarchy_l2 = $8, hierarchy_l3 = $9, hierarchy_l4 = $10, hierarchy_l5 = $11, hierarchy_l5_sublevels = $12::jsonb,
+             task_categories = $13::jsonb,
+             task_subcategories = $14::jsonb,
+             assigned_user_id = $15,
+             updated_at = NOW()
+         WHERE id = $16 AND version_id = $17
+         RETURNING id, node_id, version_id, title, description, task_date, due_date, status, assigned_user_id, created_by`,
+        [
+          nodeId || origTask.node_id,
+          String(title || '').trim(),
+          String(description || '').trim() || null,
+          taskDate || origTask.task_date,
+          dueDate || null,
+          String(status || 'open').trim().toLowerCase() || 'open',
+          normalizedHierarchy.l1,
+          normalizedHierarchy.l2,
+          normalizedHierarchy.l3,
+          normalizedHierarchy.l4,
+          normalizedHierarchy.l5,
+          JSON.stringify(normalizedHierarchy.l5Sublevels || []),
+          JSON.stringify(normalizedCategories),
+          JSON.stringify(normalizedSubcategories),
+          primaryUserId > 0 ? primaryUserId : null,
+          safeTaskId,
+          versionId,
+        ]
+      );
+      const primaryTask = updatedRes.rows[0];
+
+      // Now, delete any old extra rows for this task group that are not the primary safeTaskId
+      await client.query(
+        `DELETE FROM karyakarini_tasks
+         WHERE node_id = $1
+           AND version_id = $2
+           AND title = $3
+           AND task_date = $4
+           AND id != $5`,
+        [origTask.node_id, versionId, origTitle, origTaskDate, safeTaskId]
+      );
+
+      // For any remaining user IDs in targetUserIds, insert extra task rows
+      for (let i = 1; i < targetUserIds.length; i++) {
+        const uId = targetUserIds[i];
+        if (!uId) continue;
+        const insertedExtra = await client.query(
+          `INSERT INTO karyakarini_tasks (
+             node_id, version_id, title, description, task_date, due_date, status,
+             hierarchy_l1, hierarchy_l2, hierarchy_l3, hierarchy_l4, hierarchy_l5, hierarchy_l5_sublevels,
+             task_categories, task_subcategories,
+             assigned_user_id, created_by
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17)
+           RETURNING id`,
+          [
+            primaryTask.node_id, primaryTask.version_id, primaryTask.title, primaryTask.description, primaryTask.task_date, primaryTask.due_date, primaryTask.status,
+            normalizedHierarchy.l1, normalizedHierarchy.l2, normalizedHierarchy.l3, normalizedHierarchy.l4, normalizedHierarchy.l5, JSON.stringify(normalizedHierarchy.l5Sublevels || []),
+            JSON.stringify(normalizedCategories), JSON.stringify(normalizedSubcategories),
+            uId > 0 ? uId : null,
+            primaryTask.created_by || updatedBy || null
+          ]
+        );
+        const newExtraId = insertedExtra.rows[0].id;
+        // Copy any attachments from primary task to extra task
+        await client.query(
+          `INSERT INTO karyakarini_task_attachments (task_id, attachment_url, attachment_type, file_name, uploaded_by)
+           SELECT $1, attachment_url, attachment_type, file_name, uploaded_by
+           FROM karyakarini_task_attachments
+           WHERE task_id = $2`,
+          [newExtraId, safeTaskId]
+        );
+      }
+
+      // Handle new attachments on primary task if any
+      for (const att of Array.isArray(attachments) ? attachments : []) {
+        const u = String(att?.url || att?.attachment_url || '').trim();
+        if (!u) continue;
+        const attCheck = await client.query(
+          `SELECT id FROM karyakarini_task_attachments WHERE task_id = $1 AND attachment_url = $2`,
+          [safeTaskId, u]
+        );
+        if (attCheck.rows.length === 0) {
+          await client.query(
+            `INSERT INTO karyakarini_task_attachments (task_id, attachment_url, attachment_type, file_name, uploaded_by)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [
+              safeTaskId,
+              u,
+              String(att?.type || att?.attachment_type || '').trim() || null,
+              String(att?.name || att?.file_name || '').trim() || null,
+              updatedBy || null,
+            ]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+      return primaryTask;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -3114,6 +3273,7 @@ class KaryakariniModel {
          t.assigned_user_id,
          COALESCE(to_jsonb(au) ->> 'first_name', to_jsonb(au) ->> 'name') AS assigned_first_name,
          COALESCE(to_jsonb(au) ->> 'father_name', to_jsonb(au) ->> 'last_name') AS assigned_father_name,
+         COALESCE(to_jsonb(au) ->> 'phone', to_jsonb(au) ->> 'mobile_number', to_jsonb(au) ->> 'mobile') AS assigned_mobile_number,
          COALESCE(to_jsonb(cu) ->> 'first_name', to_jsonb(cu) ->> 'name', 'System') AS created_by_name,
          COALESCE(atc.attachment_count, 0)::int AS attachment_count,
          t.created_by,
@@ -3213,6 +3373,7 @@ class KaryakariniModel {
          t.assigned_user_id,
          COALESCE(to_jsonb(au) ->> 'first_name', to_jsonb(au) ->> 'name') AS assigned_first_name,
          COALESCE(to_jsonb(au) ->> 'father_name', to_jsonb(au) ->> 'last_name') AS assigned_father_name,
+         COALESCE(to_jsonb(au) ->> 'phone', to_jsonb(au) ->> 'mobile_number', to_jsonb(au) ->> 'mobile') AS assigned_mobile_number,
          COALESCE(to_jsonb(cu) ->> 'first_name', to_jsonb(cu) ->> 'name', 'System') AS created_by_name,
          COALESCE(atc.attachment_count, 0)::int AS attachment_count,
          t.created_by,
