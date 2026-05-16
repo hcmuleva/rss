@@ -302,6 +302,9 @@ class KaryakariniModel {
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
+    await pool.query(`ALTER TABLE karyakarini_category_activities ADD COLUMN IF NOT EXISTS male_count INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE karyakarini_category_activities ADD COLUMN IF NOT EXISTS female_count INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE karyakarini_category_activities ADD COLUMN IF NOT EXISTS children_count INTEGER DEFAULT 0`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS karyakarini_activity_assignments (
         id BIGSERIAL PRIMARY KEY,
@@ -3419,6 +3422,15 @@ class KaryakariniModel {
          COALESCE(task_subcategories, '[]'::jsonb) AS task_subcategories,
          assigned_user_id,
          created_by,
+         (
+           SELECT COALESCE(jsonb_agg(jsonb_build_object(
+             'url', ta.attachment_url,
+             'type', ta.attachment_type,
+             'name', ta.file_name
+           )), '[]'::jsonb)
+           FROM karyakarini_task_attachments ta
+           WHERE ta.task_id = karyakarini_tasks.id
+         ) AS attachments,
          is_active
        FROM karyakarini_tasks
        WHERE id = $1
@@ -3786,8 +3798,19 @@ class KaryakariniModel {
         );
       }
 
-      // Handle new attachments on primary task if any
-      for (const att of Array.isArray(attachments) ? attachments : []) {
+      // Handle attachments sync on primary task
+      const incomingAtts = Array.isArray(attachments) ? attachments : [];
+      const incomingUrls = incomingAtts.map(a => String(a?.url || a?.attachment_url || '').trim()).filter(Boolean);
+      if (incomingUrls.length > 0) {
+        await client.query(
+          `DELETE FROM karyakarini_task_attachments WHERE task_id = $1 AND NOT (attachment_url = ANY($2::text[]))`,
+          [safeTaskId, incomingUrls]
+        );
+      } else {
+        await client.query(`DELETE FROM karyakarini_task_attachments WHERE task_id = $1`, [safeTaskId]);
+      }
+
+      for (const att of incomingAtts) {
         const u = String(att?.url || att?.attachment_url || '').trim();
         if (!u) continue;
         const attCheck = await client.query(
@@ -3918,6 +3941,7 @@ class KaryakariniModel {
          COALESCE(to_jsonb(au) ->> 'phone', to_jsonb(au) ->> 'mobile_number', to_jsonb(au) ->> 'mobile') AS assigned_mobile_number,
          COALESCE(to_jsonb(cu) ->> 'first_name', to_jsonb(cu) ->> 'name', 'System') AS created_by_name,
          COALESCE(atc.attachment_count, 0)::int AS attachment_count,
+         COALESCE(atc.attachments, '[]'::jsonb) AS attachments,
          t.created_by,
          t.created_at,
          t.updated_at
@@ -3927,7 +3951,13 @@ class KaryakariniModel {
        LEFT JOIN users au ON au.id = t.assigned_user_id
        LEFT JOIN users cu ON cu.id = t.created_by
        LEFT JOIN LATERAL (
-         SELECT COUNT(*) AS attachment_count
+         SELECT 
+           COUNT(*) AS attachment_count,
+           jsonb_agg(jsonb_build_object(
+             'url', ta.attachment_url,
+             'type', ta.attachment_type,
+             'name', ta.file_name
+           )) FILTER (WHERE ta.attachment_url IS NOT NULL) AS attachments
          FROM karyakarini_task_attachments ta
          WHERE ta.task_id = t.id
        ) atc ON true
@@ -3966,18 +3996,27 @@ class KaryakariniModel {
     const hasStatusFilter = normalizedStatuses.length > 0;
 
     const countResult = await pool.query(
-      `SELECT COUNT(*)::int AS total
+      `WITH RECURSIVE user_assigned_nodes AS (
+         SELECT m.node_id AS id, m.node_id AS root_node_id, m.subcategories, m.subcategory
+         FROM karyakarini_members m
+         WHERE m.user_id = $2
+           AND m.version_id = $1
+           AND m.is_active = true
+         UNION ALL
+         SELECT c.id, u.root_node_id, u.subcategories, u.subcategory
+         FROM karyakarini_nodes c
+         JOIN user_assigned_nodes u ON c.parent_id = u.id
+         WHERE c.version_id = $1
+       )
+       SELECT COUNT(*)::int AS total
        FROM karyakarini_tasks t
        WHERE t.version_id = $1
          AND t.is_active = true
          AND (
            EXISTS (
              SELECT 1
-             FROM karyakarini_members m
-             WHERE m.user_id = $2
-               AND m.version_id = $1
-               AND m.node_id = t.node_id
-               AND m.is_active = true
+             FROM user_assigned_nodes un
+             WHERE un.id = t.node_id
                AND EXISTS (
                  SELECT 1
                  FROM jsonb_array_elements_text(COALESCE(t.task_subcategories, '[]'::jsonb)) AS ts(value)
@@ -3985,12 +4024,12 @@ class KaryakariniModel {
                    SELECT 1
                    FROM jsonb_array_elements_text(
                      CASE
-                       WHEN m.subcategories IS NOT NULL
-                         AND jsonb_typeof(m.subcategories) = 'array'
-                         AND jsonb_array_length(m.subcategories) > 0
-                         THEN m.subcategories
-                       WHEN NULLIF(trim(COALESCE(m.subcategory, '')), '') IS NOT NULL
-                         THEN jsonb_build_array(trim(m.subcategory))
+                       WHEN un.subcategories IS NOT NULL
+                         AND jsonb_typeof(un.subcategories) = 'array'
+                         AND jsonb_array_length(un.subcategories) > 0
+                         THEN un.subcategories
+                       WHEN NULLIF(trim(COALESCE(un.subcategory, '')), '') IS NOT NULL
+                         THEN jsonb_build_array(trim(un.subcategory))
                        ELSE '[]'::jsonb
                      END
                    ) AS ms(value)
@@ -4016,6 +4055,18 @@ class KaryakariniModel {
          SELECT c.id, c.parent_id, c.name, c.level, c.version_id, np.path || ' > ' || c.name AS path
          FROM karyakarini_nodes c
          JOIN node_paths np ON c.parent_id = np.id
+         WHERE c.version_id = $1
+       ),
+       user_assigned_nodes AS (
+         SELECT m.node_id AS id, m.node_id AS root_node_id, m.subcategories, m.subcategory
+         FROM karyakarini_members m
+         WHERE m.user_id = $2
+           AND m.version_id = $1
+           AND m.is_active = true
+         UNION ALL
+         SELECT c.id, u.root_node_id, u.subcategories, u.subcategory
+         FROM karyakarini_nodes c
+         JOIN user_assigned_nodes u ON c.parent_id = u.id
          WHERE c.version_id = $1
        )
        SELECT
@@ -4046,6 +4097,7 @@ class KaryakariniModel {
          COALESCE(to_jsonb(au) ->> 'phone', to_jsonb(au) ->> 'mobile_number', to_jsonb(au) ->> 'mobile') AS assigned_mobile_number,
          COALESCE(to_jsonb(cu) ->> 'first_name', to_jsonb(cu) ->> 'name', 'System') AS created_by_name,
          COALESCE(atc.attachment_count, 0)::int AS attachment_count,
+         COALESCE(atc.attachments, '[]'::jsonb) AS attachments,
          t.created_by,
          t.created_at,
          t.updated_at
@@ -4055,7 +4107,13 @@ class KaryakariniModel {
        LEFT JOIN users au ON au.id = t.assigned_user_id
        LEFT JOIN users cu ON cu.id = t.created_by
        LEFT JOIN LATERAL (
-         SELECT COUNT(*) AS attachment_count
+         SELECT 
+           COUNT(*) AS attachment_count,
+           jsonb_agg(jsonb_build_object(
+             'url', ta.attachment_url,
+             'type', ta.attachment_type,
+             'name', ta.file_name
+           )) FILTER (WHERE ta.attachment_url IS NOT NULL) AS attachments
          FROM karyakarini_task_attachments ta
          WHERE ta.task_id = t.id
        ) atc ON true
@@ -4064,11 +4122,8 @@ class KaryakariniModel {
          AND (
            EXISTS (
              SELECT 1
-             FROM karyakarini_members m
-             WHERE m.user_id = $2
-               AND m.version_id = $1
-               AND m.node_id = t.node_id
-               AND m.is_active = true
+             FROM user_assigned_nodes un
+             WHERE un.id = t.node_id
                AND EXISTS (
                  SELECT 1
                  FROM jsonb_array_elements_text(COALESCE(t.task_subcategories, '[]'::jsonb)) AS ts(value)
@@ -4076,12 +4131,12 @@ class KaryakariniModel {
                    SELECT 1
                    FROM jsonb_array_elements_text(
                      CASE
-                       WHEN m.subcategories IS NOT NULL
-                         AND jsonb_typeof(m.subcategories) = 'array'
-                         AND jsonb_array_length(m.subcategories) > 0
-                         THEN m.subcategories
-                       WHEN NULLIF(trim(COALESCE(m.subcategory, '')), '') IS NOT NULL
-                         THEN jsonb_build_array(trim(m.subcategory))
+                       WHEN un.subcategories IS NOT NULL
+                         AND jsonb_typeof(un.subcategories) = 'array'
+                         AND jsonb_array_length(un.subcategories) > 0
+                         THEN un.subcategories
+                       WHEN NULLIF(trim(COALESCE(un.subcategory, '')), '') IS NOT NULL
+                         THEN jsonb_build_array(trim(un.subcategory))
                        ELSE '[]'::jsonb
                      END
                    ) AS ms(value)
@@ -4564,13 +4619,16 @@ class KaryakariniModel {
     title,
     description = null,
     attachments = [],
+    maleCount = 0,
+    femaleCount = 0,
+    childrenCount = 0,
   }) {
     const result = await pool.query(
       `INSERT INTO karyakarini_category_activities (
-         version_id, node_id, submitted_by, category, subcategory, title, description, attachments
+         version_id, node_id, submitted_by, category, subcategory, title, description, attachments, male_count, female_count, children_count
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-       RETURNING id, version_id, node_id, submitted_by, category, subcategory, title, description, attachments, created_at, updated_at`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)
+       RETURNING id, version_id, node_id, submitted_by, category, subcategory, title, description, attachments, male_count, female_count, children_count, created_at, updated_at`,
       [
         Number(versionId),
         Number(nodeId),
@@ -4580,6 +4638,9 @@ class KaryakariniModel {
         String(title || '').trim(),
         String(description || '').trim() || null,
         JSON.stringify(Array.isArray(attachments) ? attachments : []),
+        Number(maleCount) || 0,
+        Number(femaleCount) || 0,
+        Number(childrenCount) || 0,
       ]
     );
     return result.rows[0] || null;
@@ -4667,6 +4728,9 @@ class KaryakariniModel {
          a.title,
          a.description,
          COALESCE(a.attachments, '[]'::jsonb) AS attachments,
+         a.male_count,
+         a.female_count,
+         a.children_count,
          a.created_at,
          a.updated_at
        FROM karyakarini_category_activities a

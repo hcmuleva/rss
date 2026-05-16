@@ -5,15 +5,19 @@ import {
   Image,
   Linking,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { MaterialIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { karyakariniClient } from '../../api/client';
@@ -74,14 +78,19 @@ const CATEGORY_SUBCATEGORY_OPTIONS: { category: string; subcategories: string[] 
   {
     category: 'संस्कृति प्रमुख',
     subcategories: [
-      'साधु संत,महंत',
+      'साधु संत',
+      'महंत',
       'मठ/मन्दिर के ट्रस्टी',
       'पुजारी पुरोहित',
-      'भगत,बड़वा,',
+      'भगत',
+      'बड़वा',
       'तडवी पटेल',
       'कथाकार प्रवचनकार',
-      'तांत्रिक,मांत्रिक, ज्योतिष',
-      'भजनमण्डली, सुन्दरकाण्ड,',
+      'तांत्रिक',
+      'मांत्रिक',
+      'ज्योतिष',
+      'भजनमण्डली',
+      'सुन्दरकाण्ड',
       'धार्मिक संगठन',
     ],
   },
@@ -99,7 +108,7 @@ const CATEGORY_SUBCATEGORY_OPTIONS: { category: string; subcategories: string[] 
   },
   {
     category: 'परियोजना प्रमुख',
-    subcategories: ['चिन्हित परियोजना सुची', 'क्रियान्वित परियोजना , प्रमुख, टोली'],
+    subcategories: ['चिन्हित परियोजना सुची', 'क्रियान्वित परियोजना', 'प्रमुख', 'टोली'],
   },
   {
     category: 'मातृशक्ति T-8',
@@ -109,7 +118,8 @@ const CATEGORY_SUBCATEGORY_OPTIONS: { category: string; subcategories: string[] 
       'शैक्षणिक क्षैत्र',
       'राजनैतिक क्षेत्र',
       'धार्मिक संस्था नवपंथ',
-      'प्रवचन, कथाकार',
+      'प्रवचन',
+      'कथाकार',
       'शासकीय सेवा',
       'परावर्तित महीला',
     ],
@@ -175,7 +185,7 @@ const deriveCategoriesFromSubcategories = (subcategories: string[]) => {
   return [...categories];
 };
 
-type KaryakariniTab = 'tree' | 'members' | 'activities' | 'roles';
+type KaryakariniTab = 'tree' | 'members' | 'meetings' | 'tasks' | 'activities' | 'roles';
 
 const toDateInput = (value?: string | null) => {
   if (!value) return new Date().toISOString().slice(0, 10);
@@ -235,7 +245,16 @@ export default function KaryakariniModuleScreen() {
   const [error, setError] = useState<string | null>(null);
   const [versions, setVersions] = useState<KaryakariniVersion[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
+  const { width } = useWindowDimensions();
+  const isMobile = width < 768;
   const [activeTab, setActiveTab] = useState<KaryakariniTab>('tree');
+
+  useEffect(() => {
+    if (isMobile && (activeTab === 'meetings' || activeTab === 'tasks' || activeTab === 'roles')) {
+      setActiveTab('tree');
+    }
+  }, [isMobile, activeTab]);
+
   const [levels, setLevels] = useState<TreeLevelState[]>([]);
   const [assignableNodes, setAssignableNodes] = useState<KaryakariniAssignableNode[]>([]);
   const [assignableNodesLoading, setAssignableNodesLoading] = useState(false);
@@ -286,7 +305,7 @@ export default function KaryakariniModuleScreen() {
   const [memberModalTab, setMemberModalTab] = useState<'create' | 'assign'>('create');
   const [padPickerVisible, setPadPickerVisible] = useState(false);
   const [padbharTransferVisible, setPadbharTransferVisible] = useState(false);
-  const [padbharTransferMode, setPadbharTransferMode] = useState<'create' | 'assign' | 'edit' | 'task'>('create');
+  const [padbharTransferMode, setPadbharTransferMode] = useState<'create' | 'assign' | 'edit' | 'task' | 'activity'>('create');
   const [transferExpandedCategories, setTransferExpandedCategories] = useState<string[]>([]);
   const [transferDraftSubcategories, setTransferDraftSubcategories] = useState<string[]>([]);
   const [padOptions, setPadOptions] = useState<string[]>([]);
@@ -372,6 +391,9 @@ export default function KaryakariniModuleScreen() {
   const [taskUploadingAttachment, setTaskUploadingAttachment] = useState(false);
   const [showAssigneesModal, setShowAssigneesModal] = useState(false);
   const [selectedTaskForAssignees, setSelectedTaskForAssignees] = useState<KaryakariniTask | null>(null);
+  const [showTaskAttachmentModal, setShowTaskAttachmentModal] = useState(false);
+  const [taskAttachmentTitle, setTaskAttachmentTitle] = useState('');
+  const [taskAttachmentItems, setTaskAttachmentItems] = useState<KaryakariniAttachment[]>([]);
   const [taskForm, setTaskForm] = useState({
     title: '',
     description: '',
@@ -398,9 +420,47 @@ export default function KaryakariniModuleScreen() {
   const [taskMemberSearching, setTaskMemberSearching] = useState(false);
   const [taskHierarchyFilterL1, setTaskHierarchyFilterL1] = useState('');
 
+  const [showActivityModal, setShowActivityModal] = useState(false);
+  const [submittingActivity, setSubmittingActivity] = useState(false);
+  const [activityLevels, setActivityLevels] = useState<TreeLevelState[]>([]);
+  const [activityForm, setActivityForm] = useState({
+    title: '',
+    description: '',
+    category: '',
+    subcategory: '',
+    nodeId: '',
+    includePopulation: false,
+    maleCount: '',
+    femaleCount: '',
+    childrenCount: '',
+    attachmentInput: '',
+    attachments: [] as KaryakariniAttachment[],
+  });
+  const [uploadingActivityAttachment, setUploadingActivityAttachment] = useState(false);
+
   const [scopeRows, setScopeRows] = useState<{ node_id: number; node_level: string; node_name: string }[]>([]);
   const [selectedRoleLevel, setSelectedRoleLevel] = useState('');
   const [selectedRoleNodeId, setSelectedRoleNodeId] = useState('');
+  const [roleLevels, setRoleLevels] = useState<TreeLevelState[]>([]);
+  const roleBreadcrumb = useMemo(() => {
+    const nodes = roleLevels
+      .map((level) => {
+        if (!level.selectedNodeId) return null;
+        return level.nodes.find((n) => n.id === level.selectedNodeId);
+      })
+      .filter(Boolean) as KaryakariniNode[];
+    return nodes.length > 0 ? nodes.map((n) => n.name).join(' > ') : 'Root';
+  }, [roleLevels]);
+  const [memberLevels, setMemberLevels] = useState<TreeLevelState[]>([]);
+  const memberBreadcrumb = useMemo(() => {
+    const nodes = memberLevels
+      .map((level) => {
+        if (!level.selectedNodeId) return null;
+        return level.nodes.find((n) => n.id === level.selectedNodeId);
+      })
+      .filter(Boolean) as KaryakariniNode[];
+    return nodes.length > 0 ? nodes.map((n) => n.name).join(' > ') : 'Root';
+  }, [memberLevels]);
   const [roleMembers, setRoleMembers] = useState<KaryakariniMember[]>([]);
   const [selectedRoleUserId, setSelectedRoleUserId] = useState('');
   const [assigningRole, setAssigningRole] = useState(false);
@@ -423,6 +483,15 @@ export default function KaryakariniModuleScreen() {
     if (path) return path;
     return taskSelectedNode?.name || 'Select node';
   }, [taskSelectedNode]);
+  const activitySelectedNode = useMemo(
+    () => assignableNodes.find((node) => String(node.id) === String(activityForm.nodeId)) || null,
+    [assignableNodes, activityForm.nodeId]
+  );
+  const activitySelectedPathLabel = useMemo(() => {
+    const path = String(activitySelectedNode?.hierarchy_path || '').trim();
+    if (path) return path;
+    return activitySelectedNode?.name || 'Select node';
+  }, [activitySelectedNode]);
   const scopeRootNodeIds = useMemo(() => {
     const assignableSet = new Set(assignableNodes.map((entry) => Number(entry.id)).filter((id) => id > 0));
     return new Set(
@@ -485,41 +554,8 @@ export default function KaryakariniModuleScreen() {
   const editSelectedCategories = useMemo(() => parseLabelList(editMemberForm.category), [editMemberForm.category]);
   const taskSelectedSubcategories = useMemo(() => parseLabelList(taskForm.subcategory), [taskForm.subcategory]);
   const taskSelectedCategories = useMemo(() => parseLabelList(taskForm.category), [taskForm.category]);
-
-  const roleLevelOptions = useMemo(() => {
-    const availableLevels = new Set(
-      assignableNodes
-        .map((node) => String(node.level || '').trim().toLowerCase())
-        .filter((level) => NODE_LEVEL_ORDER.includes(level))
-    );
-    return NODE_LEVEL_OPTIONS.filter((option) => availableLevels.has(option.value));
-  }, [assignableNodes]);
-
-  const roleNodesByLevel = useMemo(
-    () => assignableNodes.filter((node) => String(node.level || '').toLowerCase() === selectedRoleLevel),
-    [assignableNodes, selectedRoleLevel]
-  );
-
-  const selectedRoleNode = useMemo(
-    () => assignableNodes.find((node) => String(node.id) === selectedRoleNodeId) || null,
-    [assignableNodes, selectedRoleNodeId]
-  );
-
-  const descendantRoleNodes = useMemo(() => {
-    if (!selectedRoleNode?.hierarchy_path) return [];
-    const selectedPath = String(selectedRoleNode.hierarchy_path);
-    return assignableNodes
-      .filter((node) => {
-        const path = String(node.hierarchy_path || '');
-        return path.startsWith(`${selectedPath} > `);
-      })
-      .sort((a, b) => String(a.hierarchy_path || '').localeCompare(String(b.hierarchy_path || '')));
-  }, [assignableNodes, selectedRoleNode]);
-
-  const memberBrowseNode = useMemo(
-    () => assignableNodes.find((node) => String(node.id) === String(memberBrowseNodeId)) || null,
-    [assignableNodes, memberBrowseNodeId]
-  );
+  const activitySelectedSubcategories = useMemo(() => parseLabelList(activityForm.subcategory), [activityForm.subcategory]);
+  const activitySelectedCategories = useMemo(() => parseLabelList(activityForm.category), [activityForm.category]);
 
   const groupedMembersForTab = useMemo(() => {
     const locationMap = new Map<
@@ -912,6 +948,66 @@ export default function KaryakariniModuleScreen() {
     } as KaryakariniAttachment;
   }, []);
 
+  const pickAndUploadActivityAttachment = useCallback(async () => {
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        multiple: false,
+        copyToCacheDirectory: true,
+        type: [
+          'image/*',
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'text/plain',
+        ],
+      });
+      if (picked.canceled || !picked.assets?.[0]) return;
+      const asset = picked.assets[0];
+      const fileSize = Number(asset.size || 0);
+      if (fileSize > 30 * 1024 * 1024) {
+        Alert.alert('File too large', 'Please upload file up to 30MB only.');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('folder', 'karyakarini');
+      formData.append('category', 'category-activity');
+      const assetFile = (asset as any)?.file;
+      if (assetFile) {
+        formData.append('file', assetFile);
+      } else {
+        formData.append(
+          'file',
+          {
+            uri: asset.uri,
+            name: asset.name || `activity-${Date.now()}`,
+            type: asset.mimeType || 'application/octet-stream',
+          } as any
+        );
+      }
+      setUploadingActivityAttachment(true);
+      const response = await karyakariniClient.post('/karyakarini/upload/attachment', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const payload = response?.data?.data || {};
+      const url = String(payload.url || '').trim();
+      if (!url) return;
+      setActivityForm((prev) => ({
+        ...prev,
+        attachments: [
+          ...prev.attachments,
+          { url, type: String(payload.fileType || '').trim() || undefined, name: String(payload.fileName || '').trim() || undefined },
+        ],
+      }));
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.message || 'Failed to upload attachment');
+    } finally {
+      setUploadingActivityAttachment(false);
+    }
+  }, []);
+
   const uploadMemberPhotoFromSource = useCallback(
     async (source: 'camera' | 'gallery') => {
       try {
@@ -1047,6 +1143,50 @@ export default function KaryakariniModuleScreen() {
     [currentUserRole, fetchNodes]
   );
 
+  const loadRestrictedTrees = useCallback(
+    async (versionId: number, scopedNodesList: KaryakariniAssignableNode[]) => {
+      const isScopedTree = currentUserRole !== 'superadmin' && scopedNodesList.length > 0;
+      let rootNodes: KaryakariniNode[] = [];
+
+      if (isScopedTree) {
+        const scopedSet = new Set(scopedNodesList.map((node) => Number(node.id)).filter((id) => id > 0));
+        const scopeRoots = scopedNodesList.filter((node) => !scopedSet.has(Number(node.parent_id || 0)));
+        const scopeRootSet = new Set(scopeRoots.map((node) => Number(node.id)).filter((id) => id > 0));
+
+        const childRoots = scopedNodesList.filter((node) => scopeRootSet.has(Number(node.parent_id || 0)));
+        const initialNodes = childRoots.length ? childRoots : [];
+
+        const childCountByParent = new Map<number, number>();
+        scopedNodesList.forEach((node) => {
+          const parentId = Number(node.parent_id || 0);
+          childCountByParent.set(parentId, Number(childCountByParent.get(parentId) || 0) + 1);
+        });
+
+        rootNodes = initialNodes.map((node) => ({
+          id: Number(node.id),
+          name: node.name,
+          level: node.level,
+          parent_id: node.parent_id ?? null,
+          version_id: node.version_id,
+          can_assign_member: (node as any).can_assign_member,
+          can_manage_hierarchy: (node as any).can_manage_hierarchy,
+          members_count: (node as any).members_count || 0,
+          has_children: (childCountByParent.get(Number(node.id)) || 0) > 0,
+        }));
+      } else {
+        rootNodes = await fetchNodes(versionId, null);
+      }
+
+      setRoleLevels([{ parentNode: null, nodes: rootNodes, selectedNodeId: null }]);
+      setMemberLevels([{ parentNode: null, nodes: rootNodes, selectedNodeId: null }]);
+      setSelectedRoleNodeId('');
+      setRoleMembers([]);
+      setMemberBrowseNodeId('');
+      setMembersNode(null);
+    },
+    [currentUserRole, fetchNodes]
+  );
+
   const loadVersionsAndTree = useCallback(
     async (preferredVersionId?: number | null, preserveSelectionIds: number[] = []) => {
       setError(null);
@@ -1077,6 +1217,7 @@ export default function KaryakariniModuleScreen() {
         ? preserveSelectionIds
         : await resolveDefaultSelectionPathIds(targetVersionId, scopedNodes);
       await loadTree(targetVersionId, initialPathIds, scopedNodes);
+      await loadRestrictedTrees(targetVersionId, scopedNodes);
     },
     [
       loadAssignableNodes,
@@ -1121,6 +1262,75 @@ export default function KaryakariniModuleScreen() {
     [selectedVersionId]
   );
 
+  const handleRoleNodeSelect = useCallback(
+    async (levelIndex: number, node: KaryakariniNode) => {
+      if (!selectedVersionId) return;
+      const trimmed = roleLevels.slice(0, levelIndex + 1).map((level, idx) =>
+        idx === levelIndex ? { ...level, selectedNodeId: node.id } : level
+      );
+      setRoleLevels(trimmed);
+      setSelectedRoleNodeId(String(node.id));
+
+      try {
+        setLoadingRoleMembers(true);
+        const [children, membersRes] = await Promise.all([
+          fetchNodes(selectedVersionId, node.id),
+          karyakariniClient.get('/karyakarini/nodes/members', {
+            params: { nodeId: node.id, versionId: selectedVersionId },
+          }),
+        ]);
+        if (children.length > 0) {
+          setRoleLevels([
+            ...trimmed,
+            { parentNode: node, nodes: children, selectedNodeId: null },
+          ]);
+        }
+        const rows = (membersRes?.data?.data?.members || []) as KaryakariniMember[];
+        setRoleMembers(rows);
+        setSelectedRoleUserId((prev) => {
+          if (rows.some((member) => String(member.user_id || '') === prev)) return prev;
+          const firstUserId = rows.find((member) => Number(member.user_id || 0) > 0)?.user_id;
+          return firstUserId ? String(firstUserId) : '';
+        });
+      } catch (err: any) {
+        Alert.alert('Error', err?.response?.data?.message || 'Failed to load data');
+        setRoleMembers([]);
+        setSelectedRoleUserId('');
+      } finally {
+        setLoadingRoleMembers(false);
+      }
+    },
+    [fetchNodes, roleLevels, selectedVersionId]
+  );
+
+  const handleMemberNodeSelect = useCallback(
+    async (levelIndex: number, node: KaryakariniNode) => {
+      if (!selectedVersionId) return;
+      const trimmed = memberLevels.slice(0, levelIndex + 1).map((level, idx) =>
+        idx === levelIndex ? { ...level, selectedNodeId: node.id } : level
+      );
+      setMemberLevels(trimmed);
+      setMemberBrowseNodeId(String(node.id));
+      setMembersNode(node);
+
+      // Trigger member load without awaiting
+      void loadMembers(node, 1);
+
+      try {
+        const children = await fetchNodes(selectedVersionId, node.id);
+        if (children.length > 0) {
+          setMemberLevels([
+            ...trimmed,
+            { parentNode: node, nodes: children, selectedNodeId: null },
+          ]);
+        }
+      } catch (err: any) {
+        Alert.alert('Error', err?.response?.data?.message || 'Failed to load child nodes');
+      }
+    },
+    [fetchNodes, memberLevels, selectedVersionId, loadMembers]
+  );
+
   useEffect(() => {
     const boot = async () => {
       try {
@@ -1140,8 +1350,8 @@ export default function KaryakariniModuleScreen() {
       setRefreshing(true);
       const selectedIds = selectedPathNodes.map((node) => node.id);
       await loadVersionsAndTree(selectedVersionId, selectedIds);
-      if (activeTab === 'members' && memberBrowseNode) {
-        await loadMembers(memberBrowseNode as any, membersPagination.page || 1);
+      if (activeTab === 'members' && membersNode) {
+        await loadMembers(membersNode, membersPagination.page || 1);
       }
       if (membersVisible && membersNode) {
         await loadMembers(membersNode, membersPagination.page || 1);
@@ -1154,7 +1364,6 @@ export default function KaryakariniModuleScreen() {
   }, [
     loadMembers,
     loadVersionsAndTree,
-    memberBrowseNode,
     membersNode,
     membersPagination.page,
     membersVisible,
@@ -1188,69 +1397,11 @@ export default function KaryakariniModuleScreen() {
   );
 
   useEffect(() => {
-    if (!assignableNodes.length) {
-      setMemberBrowseNodeId('');
-      return;
+    if (activeTab !== 'members' || !memberBrowseNodeId) return;
+    if (membersNode && String(membersNode.id) === memberBrowseNodeId) {
+      void loadMembers(membersNode, membersPagination.page || 1);
     }
-    if (assignableNodes.some((node) => String(node.id) === String(memberBrowseNodeId))) return;
-    setMemberBrowseNodeId(String(assignableNodes[0].id));
-  }, [assignableNodes, memberBrowseNodeId]);
-
-  useEffect(() => {
-    if (activeTab !== 'members' || !memberBrowseNode) return;
-    setMembersNode(memberBrowseNode as any);
-    void loadMembers(memberBrowseNode as any, 1);
-  }, [activeTab, loadMembers, memberBrowseNode]);
-
-  useEffect(() => {
-    if (!roleLevelOptions.length) {
-      setSelectedRoleLevel('');
-      return;
-    }
-    if (roleLevelOptions.some((entry) => entry.value === selectedRoleLevel)) return;
-    setSelectedRoleLevel(roleLevelOptions[0].value);
-  }, [roleLevelOptions, selectedRoleLevel]);
-
-  useEffect(() => {
-    if (!roleNodesByLevel.length) {
-      setSelectedRoleNodeId('');
-      return;
-    }
-    if (roleNodesByLevel.some((node) => String(node.id) === selectedRoleNodeId)) return;
-    setSelectedRoleNodeId(String(roleNodesByLevel[0].id));
-  }, [roleNodesByLevel, selectedRoleNodeId]);
-
-  useEffect(() => {
-    const loadRoleMembers = async () => {
-      if (!selectedVersionId || !selectedRoleNodeId) {
-        setRoleMembers([]);
-        setSelectedRoleUserId('');
-        return;
-      }
-      try {
-        setLoadingRoleMembers(true);
-        const response = await karyakariniClient.get('/karyakarini/nodes/members', {
-          params: {
-            nodeId: Number(selectedRoleNodeId),
-            versionId: selectedVersionId,
-          },
-        });
-        const rows = (response?.data?.data?.members || []) as KaryakariniMember[];
-        setRoleMembers(rows);
-        setSelectedRoleUserId((prev) => {
-          if (rows.some((member) => String(member.user_id || '') === prev)) return prev;
-          const firstUserId = rows.find((member) => Number(member.user_id || 0) > 0)?.user_id;
-          return firstUserId ? String(firstUserId) : '';
-        });
-      } catch {
-        setRoleMembers([]);
-        setSelectedRoleUserId('');
-      } finally {
-        setLoadingRoleMembers(false);
-      }
-    };
-    void loadRoleMembers();
-  }, [selectedRoleNodeId, selectedVersionId]);
+  }, [activeTab, loadMembers, memberBrowseNodeId, membersNode, membersPagination.page]);
 
   const handleSelectNode = useCallback(
     async (levelIndex: number, node: KaryakariniNode) => {
@@ -1368,9 +1519,9 @@ export default function KaryakariniModuleScreen() {
       name: '',
       password: '',
       fatherOrHusbandName: '',
-      pad: padOptions[0] || DEFAULT_PAD_OPTIONS[0],
-      category: CATEGORY_SUBCATEGORY_OPTIONS[0]?.category || '',
-      subcategory: CATEGORY_SUBCATEGORY_OPTIONS[0]?.subcategories?.[0] || '',
+      pad: '',
+      category: '',
+      subcategory: '',
       userRole: 'user',
       state: '',
       district: '',
@@ -1380,9 +1531,9 @@ export default function KaryakariniModuleScreen() {
       avatar: '',
     });
     setAssignForm({
-      pad: padOptions[0] || DEFAULT_PAD_OPTIONS[0],
-      category: CATEGORY_SUBCATEGORY_OPTIONS[0]?.category || '',
-      subcategory: CATEGORY_SUBCATEGORY_OPTIONS[0]?.subcategories?.[0] || '',
+      pad: '',
+      category: '',
+      subcategory: '',
       userRole: 'user',
     });
     setPincodeLookupMessage(null);
@@ -1391,7 +1542,7 @@ export default function KaryakariniModuleScreen() {
       void loadPadOptions(selectedVersionId);
     }
     setShowAddMemberModal(true);
-  }, [loadPadOptions, padOptions, selectedVersionId]);
+  }, [loadPadOptions, selectedVersionId]);
 
   const handleOpenAddNode = useCallback((node: KaryakariniNode) => {
     const childOptions = getAllowedNodeLevels(node.level, 'child');
@@ -1500,7 +1651,7 @@ export default function KaryakariniModuleScreen() {
     [lastAutoFilledPincode, lookupAddressByPincode, pincodeLookupLoading]
   );
 
-  const handleOpenPadbharTransfer = useCallback((mode?: 'create' | 'assign' | 'edit' | 'task') => {
+  const handleOpenPadbharTransfer = useCallback((mode?: 'create' | 'assign' | 'edit' | 'task' | 'activity') => {
     const resolvedMode = mode || (memberModalTab === 'assign' ? 'assign' : 'create');
     const initial = parseLabelList(
       resolvedMode === 'assign'
@@ -1509,13 +1660,15 @@ export default function KaryakariniModuleScreen() {
           ? editMemberForm.subcategory
           : resolvedMode === 'task'
             ? taskForm.subcategory
-            : memberForm.subcategory
+            : resolvedMode === 'activity'
+              ? activityForm.subcategory
+              : memberForm.subcategory
     );
     setPadbharTransferMode(resolvedMode);
     setTransferDraftSubcategories(initial);
     setTransferExpandedCategories(CATEGORY_SUBCATEGORY_OPTIONS.map((entry) => entry.category));
     setPadbharTransferVisible(true);
-  }, [assignForm.subcategory, editMemberForm.subcategory, memberForm.subcategory, memberModalTab, taskForm.subcategory]);
+  }, [activityForm.subcategory, assignForm.subcategory, editMemberForm.subcategory, memberForm.subcategory, memberModalTab, taskForm.subcategory]);
 
   const toggleTransferCategory = useCallback((category: string) => {
     setTransferExpandedCategories((prev) =>
@@ -1553,6 +1706,12 @@ export default function KaryakariniModuleScreen() {
       }));
     } else if (padbharTransferMode === 'task') {
       setTaskForm((prev) => ({
+        ...prev,
+        category: nextCategories.join(', '),
+        subcategory: nextSubcategories.join(', '),
+      }));
+    } else if (padbharTransferMode === 'activity') {
+      setActivityForm((prev) => ({
         ...prev,
         category: nextCategories.join(', '),
         subcategory: nextSubcategories.join(', '),
@@ -1890,6 +2049,17 @@ export default function KaryakariniModuleScreen() {
     [fetchMeetingDetails]
   );
 
+  const handleViewTaskAttachments = useCallback(
+    (taskId: number, taskTitle?: string) => {
+      const task = taskRows.find((t) => Number(t.id) === taskId);
+      if (!task) return;
+      setTaskAttachmentTitle(taskTitle || task.title || 'Task Attachments');
+      setTaskAttachmentItems(Array.isArray(task.attachments) ? task.attachments : []);
+      setShowTaskAttachmentModal(true);
+    },
+    [taskRows]
+  );
+
   const handleAddTransferAttendee = useCallback((item: TransferAttendee) => {
     setMeetingForm((prev) => {
       if (item.attendeeType === 'member') {
@@ -2063,7 +2233,7 @@ export default function KaryakariniModuleScreen() {
       assignedUserId: assignedIds.length > 0 ? String(assignedIds[0]) : '',
       assignedUserIds: assignedIds,
       attachmentInput: '',
-      attachments: [],
+      attachments: Array.isArray(taskRow.attachments) ? [...taskRow.attachments] : [],
     });
 
     const nodeId = Number(taskRow.node_id || 0);
@@ -2105,6 +2275,87 @@ export default function KaryakariniModuleScreen() {
     },
     [fetchNodes, loadNodeMembersForForm, selectedVersionId, taskLevels]
   );
+
+  const handleOpenCreateActivity = useCallback(() => {
+    setActivityForm({
+      title: '',
+      description: '',
+      category: '',
+      subcategory: '',
+      nodeId: '',
+      includePopulation: false,
+      maleCount: '',
+      femaleCount: '',
+      childrenCount: '',
+      attachmentInput: '',
+      attachments: [] as KaryakariniAttachment[],
+    });
+    setActivityLevels(levels.length > 0 ? [{ ...levels[0], selectedNodeId: null }] : []);
+    setShowActivityModal(true);
+  }, [levels]);
+
+  const handleActivitySelectNode = useCallback(
+    async (levelIndex: number, node: KaryakariniNode) => {
+      if (!selectedVersionId) return;
+
+      const trimmed = activityLevels.slice(0, levelIndex + 1).map((level, idx) =>
+        idx === levelIndex ? { ...level, selectedNodeId: node.id } : level
+      );
+      setActivityLevels(trimmed);
+      setActivityForm((prev) => ({ ...prev, nodeId: String(node.id) }));
+
+      try {
+        const children = await fetchNodes(selectedVersionId, node.id);
+        if (!children.length) return;
+        setActivityLevels([
+          ...trimmed,
+          {
+            parentNode: node,
+            nodes: children,
+            selectedNodeId: null,
+          },
+        ]);
+      } catch (err: any) {
+        Alert.alert('Error', err?.response?.data?.message || 'Failed to load child nodes');
+      }
+    },
+    [fetchNodes, selectedVersionId, activityLevels]
+  );
+
+  const handleSubmitActivity = useCallback(async () => {
+    if (!selectedVersionId) return;
+    const safeNodeId = Number(activityForm.nodeId || 0);
+    const safeTitle = String(activityForm.title || '').trim();
+    const safeSubcategory = String(activityForm.subcategory || '').trim();
+    if (safeNodeId <= 0 || !safeTitle || !safeSubcategory) {
+      Alert.alert('Validation', 'Please select a node in the hierarchy, and provide Title and Subcategory.');
+      return;
+    }
+
+    try {
+      setSubmittingActivity(true);
+      await karyakariniClient.post('/karyakarini/my/category-activities', {
+        versionId: selectedVersionId,
+        nodeId: safeNodeId,
+        category: activityForm.category ? activityForm.category.trim() : null,
+        subcategory: safeSubcategory,
+        title: safeTitle,
+        description: activityForm.description ? activityForm.description.trim() : null,
+        attachments: activityForm.attachments,
+        maleCount: activityForm.includePopulation ? Number(activityForm.maleCount) || 0 : 0,
+        femaleCount: activityForm.includePopulation ? Number(activityForm.femaleCount) || 0 : 0,
+        childrenCount: activityForm.includePopulation ? Number(activityForm.childrenCount) || 0 : 0,
+      });
+
+      Alert.alert('Success', 'Activity submitted successfully.');
+      setShowActivityModal(false);
+      await loadCategoryActivities(1);
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.message || 'Failed to submit activity.');
+    } finally {
+      setSubmittingActivity(false);
+    }
+  }, [activityForm, loadCategoryActivities, selectedVersionId]);
 
   const handleSearchTaskMembers = useCallback(async (queryOverride?: string) => {
     const q = (queryOverride !== undefined ? queryOverride : taskMemberSearchQuery).trim();
@@ -2164,6 +2415,16 @@ export default function KaryakariniModuleScreen() {
       attachments: [...prev.attachments, { url, type: 'document', name: url.split('/').pop() || 'attachment' }],
     }));
   }, [taskForm.attachmentInput]);
+
+  const addActivityAttachmentByUrl = useCallback(() => {
+    const url = activityForm.attachmentInput.trim();
+    if (!url) return;
+    setActivityForm((prev) => ({
+      ...prev,
+      attachmentInput: '',
+      attachments: [...prev.attachments, { url, type: 'document', name: url.split('/').pop() || 'attachment' }],
+    }));
+  }, [activityForm.attachmentInput]);
 
   const handleUploadMeetingAttachment = useCallback(async () => {
     try {
@@ -2420,6 +2681,48 @@ export default function KaryakariniModuleScreen() {
     }
   }, []);
 
+  const handleDownloadAttachment = useCallback(async (url?: string | null, fileName?: string | null) => {
+    const safeUrl = String(url || '').trim();
+    if (!safeUrl) return;
+    try {
+      if (Platform.OS === 'web') {
+        try {
+          const response = await fetch(safeUrl);
+          const blob = await response.blob();
+          const blobUrl = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = fileName || safeUrl.split('/').pop() || 'download';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(blobUrl);
+        } catch {
+          const a = document.createElement('a');
+          a.href = safeUrl;
+          a.download = fileName || safeUrl.split('/').pop() || 'download';
+          a.target = '_blank';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+      } else {
+        const safeFileName = (fileName || safeUrl.split('/').pop() || 'file').replace(/[^a-zA-Z0-9.\-_]/g, '_');
+        const fileUri = `${FileSystem.documentDirectory}${safeFileName}`;
+        const downloadResult = await FileSystem.downloadAsync(safeUrl, fileUri);
+        if (downloadResult.status === 200) {
+          Alert.alert('Download Complete', `File saved to: ${downloadResult.uri}`);
+        } else {
+          Alert.alert('Error', 'Failed to download file');
+          Linking.openURL(safeUrl).catch(() => {});
+        }
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to download file. Opening link directly.');
+      Linking.openURL(safeUrl).catch(() => {});
+    }
+  }, []);
+
   const handleLogout = useCallback(async () => {
     try {
       await logout();
@@ -2478,26 +2781,52 @@ export default function KaryakariniModuleScreen() {
           loading={loading}
         /> */}
 
-        <View style={styles.tabSwitchRow}>
-          <TouchableOpacity
-            style={[styles.tabSwitchBtn, activeTab === 'tree' && styles.tabSwitchBtnActive]}
-            onPress={() => setActiveTab('tree')}
-          >
-            <Text style={[styles.tabSwitchText, activeTab === 'tree' && styles.tabSwitchTextActive]}>Team</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabSwitchBtn, activeTab === 'members' && styles.tabSwitchBtnActive]}
-            onPress={() => setActiveTab('members')}
-          >
-            <Text style={[styles.tabSwitchText, activeTab === 'members' && styles.tabSwitchTextActive]}>Members</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabSwitchBtn, activeTab === 'activities' && styles.tabSwitchBtnActive]}
-            onPress={() => setActiveTab('activities')}
-          >
-            <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>Activities</Text>
-          </TouchableOpacity>
-        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+          <View style={styles.tabSwitchRow}>
+            <TouchableOpacity
+              style={[styles.tabSwitchBtn, activeTab === 'tree' && styles.tabSwitchBtnActive]}
+              onPress={() => setActiveTab('tree')}
+            >
+              <Text style={[styles.tabSwitchText, activeTab === 'tree' && styles.tabSwitchTextActive]}>Team</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tabSwitchBtn, activeTab === 'members' && styles.tabSwitchBtnActive]}
+              onPress={() => setActiveTab('members')}
+            >
+              <Text style={[styles.tabSwitchText, activeTab === 'members' && styles.tabSwitchTextActive]}>Members</Text>
+            </TouchableOpacity>
+            {!isMobile ? (
+              <TouchableOpacity
+                style={[styles.tabSwitchBtn, activeTab === 'meetings' && styles.tabSwitchBtnActive]}
+                onPress={() => setActiveTab('meetings')}
+              >
+                <Text style={[styles.tabSwitchText, activeTab === 'meetings' && styles.tabSwitchTextActive]}>Meetings</Text>
+              </TouchableOpacity>
+            ) : null}
+            {!isMobile ? (
+              <TouchableOpacity
+                style={[styles.tabSwitchBtn, activeTab === 'tasks' && styles.tabSwitchBtnActive]}
+                onPress={() => setActiveTab('tasks')}
+              >
+                <Text style={[styles.tabSwitchText, activeTab === 'tasks' && styles.tabSwitchTextActive]}>Tasks</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              style={[styles.tabSwitchBtn, activeTab === 'activities' && styles.tabSwitchBtnActive]}
+              onPress={() => setActiveTab('activities')}
+            >
+              <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>Activities</Text>
+            </TouchableOpacity>
+            {!isMobile ? (
+              <TouchableOpacity
+                style={[styles.tabSwitchBtn, activeTab === 'roles' && styles.tabSwitchBtnActive]}
+                onPress={() => setActiveTab('roles')}
+              >
+                <Text style={[styles.tabSwitchText, activeTab === 'roles' && styles.tabSwitchTextActive]}>Roles</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </ScrollView>
 
         {activeTab === 'tree' ? (
           <TreeView
@@ -2602,39 +2931,143 @@ export default function KaryakariniModuleScreen() {
           </View>
         ) : null}
 
+        {activeTab === 'tasks' ? (
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Tasks</Text>
+              <TouchableOpacity
+                style={styles.primaryAction}
+                onPress={() => void handleOpenTaskModal()}
+                disabled={!canManageActivities || assignableNodesLoading}
+              >
+                <Text style={styles.primaryActionText}>Create Task</Text>
+              </TouchableOpacity>
+            </View>
+            {!canManageActivities ? <Text style={styles.modalSub}>No node scope assigned for this user</Text> : null}
+            {taskHierarchyFilterOptions.length > 0 ? (
+              <>
+                <Text style={styles.sectionLabel}>Filter by L1</Text>
+                <View style={styles.optionRow}>
+                  <TouchableOpacity
+                    style={[styles.optionChip, !taskHierarchyFilterL1 && styles.optionChipActive]}
+                    onPress={() => setTaskHierarchyFilterL1('')}
+                  >
+                    <Text style={[styles.optionChipText, !taskHierarchyFilterL1 && styles.optionChipTextActive]}>All</Text>
+                  </TouchableOpacity>
+                  {taskHierarchyFilterOptions.map((entry) => (
+                    <TouchableOpacity
+                      key={`task-filter-l1-${entry}`}
+                      style={[styles.optionChip, taskHierarchyFilterL1 === entry && styles.optionChipActive]}
+                      onPress={() => setTaskHierarchyFilterL1(entry)}
+                    >
+                      <Text style={[styles.optionChipText, taskHierarchyFilterL1 === entry && styles.optionChipTextActive]}>{entry}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            ) : null}
+            <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableWrap}>
+              <View>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.tableHeaderCell, styles.colDate]}>Date</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colTitle]}>Title</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colNode]}>Node</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colAssignee]}>Assignee</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colStatus]}>Status</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colCount]}>Attachments</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colAction]}>Action</Text>
+                </View>
+                {tasksLoading ? (
+                  <View style={styles.tableEmpty}>
+                    <Text style={styles.helper}>Loading tasks...</Text>
+                  </View>
+                ) : filteredTaskRows.length === 0 ? (
+                  <View style={styles.tableEmpty}>
+                    <Text style={styles.helper}>No tasks found</Text>
+                  </View>
+                ) : (
+                  filteredTaskRows.map((row, index) => (
+                    <View key={`task-${row.id}`} style={[styles.tableRow, index % 2 === 1 && styles.tableRowEven]}>
+                      <Text style={[styles.tableCell, styles.colDate]}>{row.task_date || '-'}</Text>
+                      <View style={[styles.tableCell, styles.colTitle]}>
+                        <Text style={styles.tableCellTextCompact} numberOfLines={2}>{row.title}</Text>
+                        {summarizeTaskHierarchy(row) ? (
+                          <Text style={styles.tableCellSubText} numberOfLines={1}>
+                            {summarizeTaskHierarchy(row)}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <Text style={[styles.tableCell, styles.colNode]} numberOfLines={2}>{row.hierarchy_path || row.node_name || '-'}</Text>
+                      <View style={[styles.tableCell, styles.colAssignee, { justifyContent: 'center' }]}>
+                        {row.assignees && row.assignees.length > 0 ? (
+                          <TouchableOpacity
+                            onPress={() => {
+                              setSelectedTaskForAssignees(row);
+                              setShowAssigneesModal(true);
+                            }}
+                          >
+                            <Text style={styles.linkText} numberOfLines={2}>
+                              👥 {summarizeAssignedUser(row)}
+                            </Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <Text style={styles.tableCellTextCompact} numberOfLines={2}>
+                            {summarizeAssignedUser(row)}
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={[styles.tableCell, styles.colStatus]}>{String(row.status || 'open')}</Text>
+                      <View style={[styles.tableCell, styles.colCount, { alignItems: 'center' }]}>
+                        {Array.isArray(row.attachments) && row.attachments.length > 0 ? (
+                          <TouchableOpacity onPress={() => handleViewTaskAttachments(Number(row.id), row.title)}>
+                            <Text style={styles.linkText}>📎 {row.attachments.length}</Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <Text style={styles.tableCellTextCompact}>0</Text>
+                        )}
+                      </View>
+                      <View style={[styles.tableCell, styles.colAction]}>
+                        <TouchableOpacity
+                          style={styles.rowActionBtn}
+                          onPress={() => void handleOpenTaskEdit(row)}
+                        >
+                          <Text style={styles.rowActionText}>Edit</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            </ScrollView>
+            <Text style={styles.tableMeta}>
+              Page {taskPagination.page} / {Math.max(1, taskPagination.totalPages || 1)} • Total {taskPagination.total}
+            </Text>
+          </View>
+        ) : null}
+
         {activeTab === 'members' ? (
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Members</Text>
             </View>
             {!canManageActivities ? <Text style={styles.modalSub}>No node scope assigned for this user</Text> : null}
-            {assignableNodes.length > 0 ? (
+            {memberLevels.length > 0 ? (
               <>
                 <Text style={styles.sectionLabel}>Filter by Node</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
-                  {assignableNodes.map((node) => {
-                    const selected = String(node.id) === String(memberBrowseNodeId);
-                    return (
-                      <TouchableOpacity
-                        key={`member-node-filter-${node.id}`}
-                        style={[styles.optionChip, selected && styles.optionChipActive]}
-                        onPress={() => {
-                          setMemberBrowseNodeId(String(node.id));
-                          void loadMembers(node as any, 1);
-                          setMembersNode(node as any);
-                        }}
-                      >
-                        <Text style={[styles.optionChipText, selected && styles.optionChipTextActive]}>
-                          {node.hierarchy_path || node.name}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
+                <TreeView
+                  levels={memberLevels}
+                  breadcrumb={memberBreadcrumb}
+                  onSelectNode={(levelIndex, node) => void handleMemberNodeSelect(levelIndex, node)}
+                  onOpenMembers={() => {}} // Not needed for members view itself
+                />
               </>
             ) : null}
 
-            {membersLoading ? (
+            {!memberBrowseNodeId ? (
+              <View style={styles.tableEmpty}>
+                <Text style={styles.helper}>Select a node above to view members</Text>
+              </View>
+            ) : membersLoading ? (
               <View style={styles.tableEmpty}>
                 <Text style={styles.helper}>Loading members...</Text>
               </View>
@@ -2709,15 +3142,15 @@ export default function KaryakariniModuleScreen() {
             <View style={[styles.optionRow, { justifyContent: 'flex-end' }]}>
               <TouchableOpacity
                 style={[styles.rowActionBtn, membersLoading || membersPagination.page <= 1 ? styles.saveBtnDisabled : null]}
-                disabled={membersLoading || membersPagination.page <= 1 || !memberBrowseNode}
-                onPress={() => memberBrowseNode && void loadMembers(memberBrowseNode as any, Math.max(1, (membersPagination.page || 1) - 1))}
+                disabled={membersLoading || membersPagination.page <= 1 || !membersNode}
+                onPress={() => membersNode && void loadMembers(membersNode, Math.max(1, (membersPagination.page || 1) - 1))}
               >
                 <Text style={styles.rowActionText}>Prev</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.rowActionBtn, membersLoading || membersPagination.page >= Math.max(1, membersPagination.totalPages || 1) ? styles.saveBtnDisabled : null]}
-                disabled={membersLoading || membersPagination.page >= Math.max(1, membersPagination.totalPages || 1) || !memberBrowseNode}
-                onPress={() => memberBrowseNode && void loadMembers(memberBrowseNode as any, (membersPagination.page || 1) + 1)}
+                disabled={membersLoading || membersPagination.page >= Math.max(1, membersPagination.totalPages || 1) || !membersNode}
+                onPress={() => membersNode && void loadMembers(membersNode, (membersPagination.page || 1) + 1)}
               >
                 <Text style={styles.rowActionText}>Next</Text>
               </TouchableOpacity>
@@ -2729,7 +3162,7 @@ export default function KaryakariniModuleScreen() {
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Category Activities</Text>
-              <TouchableOpacity style={styles.rowActionBtn} onPress={() => router.push('/karyakarini-admin-activities' as any)}>
+              <TouchableOpacity style={styles.rowActionBtn} onPress={() => void handleOpenCreateActivity()}>
                 <Text style={styles.rowActionText}>गतिविधि असाइन करें</Text>
               </TouchableOpacity>
             </View>
@@ -2798,6 +3231,11 @@ export default function KaryakariniModuleScreen() {
                       <View style={[styles.tableCell, styles.colTitle]}>
                         <Text style={styles.tableCellTextCompact} numberOfLines={2}>{row.title}</Text>
                         {row.description ? <Text style={styles.tableCellSubText} numberOfLines={2}>{row.description}</Text> : null}
+                        {(row.male_count || row.female_count || row.children_count) ? (
+                          <Text style={[styles.tableCellSubText, { color: theme.colors.primary, fontWeight: '600', marginTop: 4 }]}>
+                            👥 Total Population: {(Number(row.male_count || 0) + Number(row.female_count || 0) + Number(row.children_count || 0))} (M: {row.male_count || 0}, F: {row.female_count || 0}, C: {row.children_count || 0})
+                          </Text>
+                        ) : null}
                       </View>
                       <Text style={[styles.tableCell, styles.colNode]} numberOfLines={2}>{row.hierarchy_path || row.node_name || '-'}</Text>
                       <Text style={[styles.tableCell, styles.colStatus]} numberOfLines={2}>{row.category || '-'}</Text>
@@ -2835,45 +3273,17 @@ export default function KaryakariniModuleScreen() {
             </View>
             {!canManageActivities ? (
               <Text style={styles.modalSub}>No node scope assigned for this user</Text>
-            ) : roleLevelOptions.length === 0 ? (
+            ) : roleLevels.length === 0 ? (
               <Text style={styles.modalSub}>No lower node levels available for role assignment</Text>
             ) : (
               <View style={styles.assignCardContent}>
-                <View style={styles.twoColRow}>
-                  <View style={styles.twoColField}>
-                    <Text style={styles.sectionLabel}>Node Level</Text>
-                    <View style={styles.optionRowCompact}>
-                      {roleLevelOptions.map((level) => (
-                        <TouchableOpacity
-                          key={`role-level-${level.value}`}
-                          style={[styles.optionChipSmall, selectedRoleLevel === level.value && styles.optionChipActive]}
-                          onPress={() => setSelectedRoleLevel(level.value)}
-                        >
-                          <Text style={[styles.optionChipTextSmall, selectedRoleLevel === level.value && styles.optionChipTextActive]}>
-                            {level.label}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-
-                  <View style={styles.twoColField}>
-                    <Text style={styles.sectionLabel}>Select Node</Text>
-                    <View style={styles.optionRowCompact}>
-                      {roleNodesByLevel.map((node) => (
-                        <TouchableOpacity
-                          key={`role-node-${node.id}`}
-                          style={[styles.optionChipSmall, selectedRoleNodeId === String(node.id) && styles.optionChipActive]}
-                          onPress={() => setSelectedRoleNodeId(String(node.id))}
-                        >
-                          <Text style={[styles.optionChipTextSmall, selectedRoleNodeId === String(node.id) && styles.optionChipTextActive]}>
-                            {node.name}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                </View>
+                <Text style={styles.sectionLabel}>Select Hierarchy Node</Text>
+                <TreeView
+                  levels={roleLevels}
+                  breadcrumb={roleBreadcrumb}
+                  onSelectNode={(levelIndex, node) => void handleRoleNodeSelect(levelIndex, node)}
+                  onOpenMembers={() => {}}
+                />
 
                 <View style={styles.assignmentMemberSection}>
                   <Text style={styles.sectionLabel}>Select Member to Promote</Text>
@@ -3747,12 +4157,53 @@ export default function KaryakariniModuleScreen() {
                 </Text>
                 <Text style={styles.modalSub}>{item.type || 'attachment'}</Text>
               </View>
-              <TouchableOpacity style={styles.rowActionBtn} onPress={() => void handleOpenAttachmentUrl(item.url)}>
-                <Text style={styles.rowActionText}>Open</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity style={styles.rowActionBtn} onPress={() => void handleOpenAttachmentUrl(item.url)}>
+                  <Text style={styles.rowActionText}>Open</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.rowActionBtn, { backgroundColor: theme.colors.primary }]} onPress={() => void handleDownloadAttachment(item.url, item.name)}>
+                  <Text style={[styles.rowActionText, { color: '#fff' }]}>Download</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ))}
           {meetingAttachmentItems.length === 0 ? <Text style={styles.modalSub}>No attachments found</Text> : null}
+        </ScrollView>
+      </StandardModal>
+
+      <StandardModal
+        visible={showTaskAttachmentModal}
+        onClose={() => setShowTaskAttachmentModal(false)}
+        title={taskAttachmentTitle || 'Task Attachments'}
+        footer={
+          <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowTaskAttachmentModal(false)}>
+            <Text style={styles.btnTextDark}>Close</Text>
+          </TouchableOpacity>
+        }
+      >
+        <ScrollView style={styles.attachmentPreviewList}>
+          {taskAttachmentItems.map((item, idx) => (
+            <View key={`task-preview-attachment-${idx}`} style={styles.attachmentPreviewItem}>
+              {String(item.type || '').toLowerCase().startsWith('image') && item.url ? (
+                <Image source={{ uri: item.url }} style={styles.attachmentThumb} resizeMode="cover" />
+              ) : null}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.attachmentText} numberOfLines={1}>
+                  {item.name || item.url.split('/').pop() || item.url}
+                </Text>
+                <Text style={styles.modalSub}>{item.type || 'attachment'}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity style={styles.rowActionBtn} onPress={() => void handleOpenAttachmentUrl(item.url)}>
+                  <Text style={styles.rowActionText}>Open</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.rowActionBtn, { backgroundColor: theme.colors.primary }]} onPress={() => void handleDownloadAttachment(item.url, item.name)}>
+                  <Text style={[styles.rowActionText, { color: '#fff' }]}>Download</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+          {taskAttachmentItems.length === 0 ? <Text style={styles.modalSub}>No attachments found</Text> : null}
         </ScrollView>
       </StandardModal>
 
@@ -3814,6 +4265,162 @@ export default function KaryakariniModuleScreen() {
               ))}
               {meetingInviteSelectedItems.length === 0 ? <Text style={styles.modalSub}>No invited members</Text> : null}
             </ScrollView>
+          </View>
+        </View>
+      </StandardModal>
+
+      <StandardModal
+        visible={showActivityModal}
+        onClose={() => setShowActivityModal(false)}
+        title="गतिविधि असाइन करें (Assign Activity)"
+        subtitle={activitySelectedPathLabel}
+        footer={
+          <>
+            <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowActivityModal(false)}>
+              <Text style={styles.btnTextDark}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.btn, submittingActivity && styles.saveBtnDisabled]}
+              disabled={submittingActivity}
+              onPress={() => void handleSubmitActivity()}
+            >
+              <Text style={styles.btnText}>{submittingActivity ? 'Saving...' : 'Submit Activity'}</Text>
+            </TouchableOpacity>
+          </>
+        }
+      >
+        <View style={styles.formBody}>
+          <Text style={styles.sectionLabel}>Node Hierarchy (Select Location Level) *</Text>
+          <View style={{ marginBottom: 16 }}>
+            <TreeView
+              levels={activityLevels}
+              breadcrumb={activitySelectedPathLabel}
+              onSelectNode={(levelIndex, node) => void handleActivitySelectNode(levelIndex, node)}
+              showCards={false}
+            />
+          </View>
+
+          <Text style={styles.fieldLabel}>Activity Categories *</Text>
+          <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('activity')}>
+            <Text style={activitySelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
+              {activitySelectedSubcategories.length
+                ? `${activitySelectedSubcategories.length} subcategories selected`
+                : 'Select activity subcategories *'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setActivityForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
+            <Text style={styles.clearLink}>Clear categories</Text>
+          </TouchableOpacity>
+          {activitySelectedCategories.length ? (
+            <Text style={styles.helper}>Categories: {activitySelectedCategories.join(', ')}</Text>
+          ) : null}
+          {activitySelectedSubcategories.length ? (
+            <Text style={styles.helper}>Subcategories: {activitySelectedSubcategories.join(', ')}</Text>
+          ) : null}
+
+          <Text style={styles.fieldLabel}>Activity Title *</Text>
+          <TextInput
+            style={styles.input}
+            value={activityForm.title}
+            onChangeText={(value) => setActivityForm((prev) => ({ ...prev, title: value }))}
+            placeholder="Enter activity title"
+          />
+
+          <Text style={styles.fieldLabel}>Description</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            multiline
+            value={activityForm.description}
+            onChangeText={(value) => setActivityForm((prev) => ({ ...prev, description: value }))}
+            placeholder="Enter activity details and outcomes"
+          />
+
+          <View style={{ marginTop: 12, marginBottom: 8, padding: 12, backgroundColor: theme.colors.surfaceContainerHighest, borderRadius: 12 }}>
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+              onPress={() => setActivityForm((prev) => ({ ...prev, includePopulation: !prev.includePopulation }))}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <MaterialIcons name="people-outline" size={20} color={theme.colors.primary} />
+                <Text style={{ fontSize: 14, fontWeight: '700', color: theme.colors.text.primary }}>Demographic Population Count</Text>
+              </View>
+              <MaterialIcons name={activityForm.includePopulation ? 'check-box' : 'check-box-outline-blank'} size={24} color={theme.colors.primary} />
+            </TouchableOpacity>
+
+            {activityForm.includePopulation ? (
+              <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Purush (Male)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={activityForm.maleCount}
+                    onChangeText={(value) => setActivityForm((prev) => ({ ...prev, maleCount: value.replace(/[^0-9]/g, '') }))}
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Mahila (Female)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={activityForm.femaleCount}
+                    onChangeText={(value) => setActivityForm((prev) => ({ ...prev, femaleCount: value.replace(/[^0-9]/g, '') }))}
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Bache (Children)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={activityForm.childrenCount}
+                    onChangeText={(value) => setActivityForm((prev) => ({ ...prev, childrenCount: value.replace(/[^0-9]/g, '') }))}
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+            ) : null}
+          </View>
+
+          <Text style={styles.sectionLabel}>Attachments</Text>
+          <View style={styles.searchRow}>
+            <TextInput
+              style={[styles.input, styles.searchInput]}
+              value={activityForm.attachmentInput}
+              onChangeText={(value) => setActivityForm((prev) => ({ ...prev, attachmentInput: value }))}
+              placeholder="Document URL"
+              autoCapitalize="none"
+            />
+            <TouchableOpacity style={styles.searchBtn} onPress={addActivityAttachmentByUrl}>
+              <Text style={styles.searchBtnText}>Add URL</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity
+            style={[styles.secondaryAction, uploadingActivityAttachment && styles.saveBtnDisabled]}
+            disabled={uploadingActivityAttachment}
+            onPress={() => void pickAndUploadActivityAttachment()}
+          >
+            <Text style={styles.secondaryActionText}>{uploadingActivityAttachment ? 'Uploading...' : 'Upload File (PDF, DOCX, XLSX, Images)'}</Text>
+          </TouchableOpacity>
+          <View style={styles.attachmentList}>
+            {activityForm.attachments.map((item, idx) => (
+              <View key={`activity-attachment-${idx}`} style={styles.attachmentItem}>
+                <Text style={styles.attachmentText} numberOfLines={1}>
+                  {item.name || item.url}
+                </Text>
+                <TouchableOpacity
+                  onPress={() =>
+                    setActivityForm((prev) => ({
+                      ...prev,
+                      attachments: prev.attachments.filter((_, i) => i !== idx),
+                    }))
+                  }
+                >
+                  <Text style={styles.removeText}>Remove</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
           </View>
         </View>
       </StandardModal>
@@ -4190,6 +4797,28 @@ export default function KaryakariniModuleScreen() {
               <Text style={styles.infoValue}>{selectedActivityDetails?.submitted_by_name || '-'}</Text>
             </View>
           </View>
+          {Boolean(selectedActivityDetails?.male_count || selectedActivityDetails?.female_count || selectedActivityDetails?.children_count) && (
+            <>
+              <View style={styles.infoDivider} />
+              <View style={styles.infoCol}>
+                <Text style={styles.infoLabel}>Demographic Population Counts</Text>
+                <View style={{ flexDirection: 'row', gap: 16, marginTop: 8 }}>
+                  <View style={{ flex: 1, backgroundColor: theme.colors.surfaceContainerHighest, padding: 10, borderRadius: 10, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 11, color: theme.colors.text.secondary, fontWeight: '600' }}>Purush (Male)</Text>
+                    <Text style={{ fontSize: 18, color: theme.colors.primary, fontWeight: '700', marginTop: 4 }}>{selectedActivityDetails?.male_count || 0}</Text>
+                  </View>
+                  <View style={{ flex: 1, backgroundColor: theme.colors.surfaceContainerHighest, padding: 10, borderRadius: 10, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 11, color: theme.colors.text.secondary, fontWeight: '600' }}>Mahila (Female)</Text>
+                    <Text style={{ fontSize: 18, color: theme.colors.primary, fontWeight: '700', marginTop: 4 }}>{selectedActivityDetails?.female_count || 0}</Text>
+                  </View>
+                  <View style={{ flex: 1, backgroundColor: theme.colors.surfaceContainerHighest, padding: 10, borderRadius: 10, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 11, color: theme.colors.text.secondary, fontWeight: '600' }}>Bache (Children)</Text>
+                    <Text style={{ fontSize: 18, color: theme.colors.primary, fontWeight: '700', marginTop: 4 }}>{selectedActivityDetails?.children_count || 0}</Text>
+                  </View>
+                </View>
+              </View>
+            </>
+          )}
         </View>
 
         <Text style={styles.sectionLabel}>Description</Text>
@@ -4201,17 +4830,21 @@ export default function KaryakariniModuleScreen() {
         <View style={styles.attachmentPreviewList}>
           {Array.isArray(selectedActivityDetails?.attachments) && selectedActivityDetails.attachments.length > 0 ? (
             selectedActivityDetails.attachments.map((attachment, index) => (
-              <TouchableOpacity
+              <View
                 key={`activity-details-attachment-${index}`}
                 style={styles.attachmentPreviewItem}
-                onPress={() => void handleOpenAttachmentUrl(attachment?.url)}
               >
                 <View style={styles.attachmentThumb}>
                   <MaterialIcons name="insert-drive-file" size={24} color={theme.colors.primary} />
                 </View>
-                <Text style={styles.attachmentText} numberOfLines={1}>{attachment?.name || `Attachment ${index + 1}`}</Text>
-                <MaterialIcons name="open-in-new" size={18} color={theme.colors.text.disabled} />
-              </TouchableOpacity>
+                <Text style={[styles.attachmentText, { flex: 1 }]} numberOfLines={1}>{attachment?.name || `Attachment ${index + 1}`}</Text>
+                <TouchableOpacity style={{ padding: 4 }} onPress={() => void handleOpenAttachmentUrl(attachment?.url)}>
+                  <MaterialIcons name="open-in-new" size={20} color={theme.colors.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity style={{ padding: 4 }} onPress={() => void handleDownloadAttachment(attachment?.url, attachment?.name)}>
+                  <MaterialIcons name="file-download" size={20} color={theme.colors.primary} />
+                </TouchableOpacity>
+              </View>
             ))
           ) : (
             <Text style={styles.modalSub}>No attachments available</Text>
@@ -4252,7 +4885,7 @@ export default function KaryakariniModuleScreen() {
       <Modal visible={padbharTransferVisible} transparent animationType="slide" onRequestClose={() => setPadbharTransferVisible(false)}>
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCard, styles.memberModalCard]}>
-            <Text style={styles.modalTitle}>{padbharTransferMode === 'task' ? 'Select Task Subcategories' : 'Assign Padbhar'}</Text>
+            <Text style={styles.modalTitle}>{padbharTransferMode === 'task' ? 'Select Task Subcategories' : padbharTransferMode === 'activity' ? 'Select Activity Subcategories' : 'Assign Padbhar'}</Text>
             <Text style={styles.modalSub}>Transfer subcategories from left to right</Text>
             <View style={styles.transferContainer}>
               <View style={styles.transferPanel}>
@@ -4418,28 +5051,38 @@ const styles = StyleSheet.create({
   },
   tabSwitchRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
   },
   tabSwitchBtn: {
-    flex: 1,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 10,
-    paddingVertical: 8,
+    borderColor: theme.colors.borderLight,
+    borderRadius: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
     alignItems: 'center',
-    backgroundColor: theme.colors.surface,
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surfaceContainerLowest,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   tabSwitchBtnActive: {
     borderColor: theme.colors.primary,
-    backgroundColor: theme.colors.primarySoft,
+    backgroundColor: theme.colors.primary,
+    shadowOpacity: 0.15,
+    elevation: 3,
   },
   tabSwitchText: {
     color: theme.colors.text.secondary,
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: 13,
   },
   tabSwitchTextActive: {
-    color: theme.colors.primary,
+    color: '#ffffff',
   },
   sectionCard: {
     borderWidth: 1,

@@ -222,6 +222,7 @@ export default function KaryakariniModuleScreen() {
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<KaryakariniTab>('tree');
   const [levels, setLevels] = useState<TreeLevelState[]>([]);
+  const [roleLevels, setRoleLevels] = useState<TreeLevelState[]>([]);
   const [assignableNodes, setAssignableNodes] = useState<KaryakariniAssignableNode[]>([]);
   const [assignableNodesLoading, setAssignableNodesLoading] = useState(false);
 
@@ -411,6 +412,21 @@ export default function KaryakariniModuleScreen() {
     () => currentUserRole !== 'superadmin' && scopeRootNodeIds.has(Number(taskForm.nodeId || 0)),
     [currentUserRole, scopeRootNodeIds, taskForm.nodeId]
   );
+  const selectedRolePathNodes = useMemo(() => {
+    const nodes: KaryakariniNode[] = [];
+    roleLevels.forEach((level) => {
+      const selected = level.nodes.find((node) => node.id === level.selectedNodeId);
+      if (selected) nodes.push(selected);
+    });
+    return nodes;
+  }, [roleLevels]);
+
+  const roleBreadcrumb = useMemo(() => {
+    if (!selectedRolePathNodes.length) return 'Rashtriya';
+    return selectedRolePathNodes.map((node) => node.name).join(' > ');
+  }, [selectedRolePathNodes]);
+
+
   const taskCascadeColumns = useMemo<TaskCascadeColumn[]>(() => {
     const parsedNodes = assignableNodes
       .map((node) => {
@@ -535,35 +551,11 @@ export default function KaryakariniModuleScreen() {
   const taskSelectedSubcategories = useMemo(() => parseLabelList(taskForm.subcategory), [taskForm.subcategory]);
   const taskSelectedCategories = useMemo(() => parseLabelList(taskForm.category), [taskForm.category]);
 
-  const roleLevelOptions = useMemo(() => {
-    const availableLevels = new Set(
-      assignableNodes
-        .map((node) => String(node.level || '').trim().toLowerCase())
-        .filter((level) => NODE_LEVEL_ORDER.includes(level))
-    );
-    return NODE_LEVEL_OPTIONS.filter((option) => availableLevels.has(option.value));
-  }, [assignableNodes]);
-
-  const roleNodesByLevel = useMemo(
-    () => assignableNodes.filter((node) => String(node.level || '').toLowerCase() === selectedRoleLevel),
-    [assignableNodes, selectedRoleLevel]
-  );
-
   const selectedRoleNode = useMemo(
     () => assignableNodes.find((node) => String(node.id) === selectedRoleNodeId) || null,
     [assignableNodes, selectedRoleNodeId]
   );
 
-  const descendantRoleNodes = useMemo(() => {
-    if (!selectedRoleNode?.hierarchy_path) return [];
-    const selectedPath = String(selectedRoleNode.hierarchy_path);
-    return assignableNodes
-      .filter((node) => {
-        const path = String(node.hierarchy_path || '');
-        return path.startsWith(`${selectedPath} > `);
-      })
-      .sort((a, b) => String(a.hierarchy_path || '').localeCompare(String(b.hierarchy_path || '')));
-  }, [assignableNodes, selectedRoleNode]);
 
   const meetingMemberTransferItems = useMemo<TransferAttendee[]>(
     () =>
@@ -1056,6 +1048,49 @@ export default function KaryakariniModuleScreen() {
     [currentUserRole, fetchNodes]
   );
 
+  const loadRoleTree = useCallback(
+    async (versionId: number, scopedNodesOverride?: KaryakariniAssignableNode[]) => {
+      const scopedNodes = scopedNodesOverride || [];
+      const isScopedTree = currentUserRole !== 'superadmin' && scopedNodes.length > 0;
+
+      let rootNodes: KaryakariniNode[] = [];
+      if (isScopedTree) {
+        const scopedSet = new Set(scopedNodes.map((node) => Number(node.id)).filter((id) => id > 0));
+        const scopeRoots = scopedNodes.filter((node) => !scopedSet.has(Number(node.parent_id || 0)));
+        const scopeRootSet = new Set(scopeRoots.map((node) => Number(node.id)).filter((id) => id > 0));
+
+        // The roots for the Role tree should be the nodes whose parent IS in scopeRoots
+        const childRoots = scopedNodes.filter((node) => scopeRootSet.has(Number(node.parent_id || 0)));
+        const initialNodes = childRoots.length ? childRoots : [];
+
+        const childCountByParent = new Map<number, number>();
+        scopedNodes.forEach((node) => {
+          const parentId = Number(node.parent_id || 0);
+          childCountByParent.set(parentId, Number(childCountByParent.get(parentId) || 0) + 1);
+        });
+
+        rootNodes = initialNodes.map((node) => ({
+          id: Number(node.id),
+          name: node.name,
+          level: node.level,
+          parent_id: node.parent_id ?? null,
+          version_id: node.version_id,
+          can_assign_member: (node as any).can_assign_member,
+          can_manage_hierarchy: (node as any).can_manage_hierarchy,
+          members_count: (node as any).members_count || 0,
+          has_children: (childCountByParent.get(Number(node.id)) || 0) > 0,
+        }));
+      } else {
+        rootNodes = await fetchNodes(versionId, null);
+      }
+
+      setRoleLevels([{ parentNode: null, nodes: rootNodes, selectedNodeId: null }]);
+      setSelectedRoleNodeId('');
+      setRoleMembers([]);
+    },
+    [currentUserRole, fetchNodes]
+  );
+
   const loadVersionsAndTree = useCallback(
     async (preferredVersionId?: number | null, preserveSelectionIds: number[] = []) => {
       setError(null);
@@ -1086,6 +1121,7 @@ export default function KaryakariniModuleScreen() {
         ? preserveSelectionIds
         : await resolveDefaultSelectionPathIds(targetVersionId, scopedNodes);
       await loadTree(targetVersionId, initialPathIds, scopedNodes);
+      await loadRoleTree(targetVersionId, scopedNodes);
     },
     [
       loadAssignableNodes,
@@ -1096,6 +1132,7 @@ export default function KaryakariniModuleScreen() {
       loadScopes,
       loadTasks,
       loadTree,
+      loadRoleTree,
       resolveDefaultSelectionPathIds,
     ]
   );
@@ -1192,24 +1229,6 @@ export default function KaryakariniModuleScreen() {
   );
 
   useEffect(() => {
-    if (!roleLevelOptions.length) {
-      setSelectedRoleLevel('');
-      return;
-    }
-    if (roleLevelOptions.some((entry) => entry.value === selectedRoleLevel)) return;
-    setSelectedRoleLevel(roleLevelOptions[0].value);
-  }, [roleLevelOptions, selectedRoleLevel]);
-
-  useEffect(() => {
-    if (!roleNodesByLevel.length) {
-      setSelectedRoleNodeId('');
-      return;
-    }
-    if (roleNodesByLevel.some((node) => String(node.id) === selectedRoleNodeId)) return;
-    setSelectedRoleNodeId(String(roleNodesByLevel[0].id));
-  }, [roleNodesByLevel, selectedRoleNodeId]);
-
-  useEffect(() => {
     const loadRoleMembers = async () => {
       if (!selectedVersionId || !selectedRoleNodeId) {
         setRoleMembers([]);
@@ -1266,6 +1285,34 @@ export default function KaryakariniModuleScreen() {
       }
     },
     [fetchNodes, levels, selectedVersionId]
+  );
+
+  const handleRoleNodeSelect = useCallback(
+    async (levelIndex: number, node: KaryakariniNode) => {
+      if (!selectedVersionId) return;
+
+      const trimmed = roleLevels.slice(0, levelIndex + 1).map((level, idx) =>
+        idx === levelIndex ? { ...level, selectedNodeId: node.id } : level
+      );
+      setRoleLevels(trimmed);
+      setSelectedRoleNodeId(String(node.id));
+
+      try {
+        const children = await fetchNodes(selectedVersionId, node.id);
+        if (!children.length) return;
+        setRoleLevels([
+          ...trimmed,
+          {
+            parentNode: node,
+            nodes: children,
+            selectedNodeId: null,
+          },
+        ]);
+      } catch (err: any) {
+        Alert.alert('Error', err?.response?.data?.message || 'Failed to load child nodes');
+      }
+    },
+    [fetchNodes, roleLevels, selectedVersionId]
   );
 
   const handleOpenMembers = useCallback(
@@ -2613,39 +2660,17 @@ export default function KaryakariniModuleScreen() {
             </View>
             {!canManageActivities ? (
               <Text style={styles.modalSub}>No node scope assigned for this user</Text>
-            ) : roleLevelOptions.length === 0 ? (
+            ) : roleLevels.length === 0 ? (
               <Text style={styles.modalSub}>No lower node levels available for role assignment</Text>
             ) : (
               <>
-                <Text style={styles.sectionLabel}>Node Level</Text>
-                <View style={styles.optionRow}>
-                  {roleLevelOptions.map((level) => (
-                    <TouchableOpacity
-                      key={`role-level-${level.value}`}
-                      style={[styles.optionChip, selectedRoleLevel === level.value && styles.optionChipActive]}
-                      onPress={() => setSelectedRoleLevel(level.value)}
-                    >
-                      <Text style={[styles.optionChipText, selectedRoleLevel === level.value && styles.optionChipTextActive]}>
-                        {level.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Text style={styles.sectionLabel}>Node</Text>
-                <View style={styles.optionRow}>
-                  {roleNodesByLevel.map((node) => (
-                    <TouchableOpacity
-                      key={`role-node-${node.id}`}
-                      style={[styles.optionChip, selectedRoleNodeId === String(node.id) && styles.optionChipActive]}
-                      onPress={() => setSelectedRoleNodeId(String(node.id))}
-                    >
-                      <Text style={[styles.optionChipText, selectedRoleNodeId === String(node.id) && styles.optionChipTextActive]}>
-                        {node.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                <Text style={styles.sectionLabel}>Select Hierarchy Node</Text>
+                <TreeView
+                  levels={roleLevels}
+                  breadcrumb={roleBreadcrumb}
+                  onSelectNode={(levelIndex, node) => void handleRoleNodeSelect(levelIndex, node)}
+                  onOpenMembers={() => {}} // Not needed for role assignment view
+                />
 
                 <Text style={styles.sectionLabel}>Select Member</Text>
                 <View style={styles.selectList}>

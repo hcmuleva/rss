@@ -54,6 +54,10 @@ export default function KaryakariniCategoryActivityScreen() {
     subcategory: initialSubcategory,
     title: '',
     description: '',
+    includePopulation: false,
+    maleCount: '',
+    femaleCount: '',
+    childrenCount: '',
     attachments: [] as KaryakariniAttachment[],
   });
 
@@ -140,6 +144,10 @@ export default function KaryakariniCategoryActivityScreen() {
       subcategory: initialSubcategory || prev.subcategory,
       title: '',
       description: '',
+      includePopulation: false,
+      maleCount: '',
+      femaleCount: '',
+      childrenCount: '',
       attachments: [],
     }));
   }, [form.category, initialCategory, initialSubcategory]);
@@ -218,6 +226,9 @@ export default function KaryakariniCategoryActivityScreen() {
         title: form.title.trim(),
         description: form.description.trim() || null,
         attachments: form.attachments,
+        maleCount: form.includePopulation ? Number(form.maleCount) || 0 : 0,
+        femaleCount: form.includePopulation ? Number(form.femaleCount) || 0 : 0,
+        childrenCount: form.includePopulation ? Number(form.childrenCount) || 0 : 0,
       });
       Alert.alert('Success', 'Category activity submitted');
       setShowCreateModal(false);
@@ -225,6 +236,10 @@ export default function KaryakariniCategoryActivityScreen() {
         ...prev,
         title: '',
         description: '',
+        includePopulation: false,
+        maleCount: '',
+        femaleCount: '',
+        childrenCount: '',
         attachments: [],
       }));
       await loadActivities(versionId, 1);
@@ -305,6 +320,11 @@ export default function KaryakariniCategoryActivityScreen() {
                 <View style={[styles.tableCell, styles.colTitle]}>
                   <Text style={styles.cellTitle} numberOfLines={2}>{entry.title}</Text>
                   {entry.description ? <Text style={styles.cellSub} numberOfLines={2}>{entry.description}</Text> : null}
+                  {(entry.male_count || entry.female_count || entry.children_count) ? (
+                    <Text style={[styles.cellSub, { color: theme.colors.primary, fontWeight: '600', marginTop: 4 }]}>
+                      👥 Total Population: {(Number(entry.male_count || 0) + Number(entry.female_count || 0) + Number(entry.children_count || 0))} (M: {entry.male_count || 0}, F: {entry.female_count || 0}, C: {entry.children_count || 0})
+                    </Text>
+                  ) : null}
                 </View>
                 <Text style={[styles.tableCell, styles.colCategory]} numberOfLines={2}>{entry.category || '-'}</Text>
                 <Text style={[styles.tableCell, styles.colSubcategory]} numberOfLines={2}>{entry.subcategory || '-'}</Text>
@@ -427,6 +447,54 @@ export default function KaryakariniCategoryActivityScreen() {
               onChangeText={(value) => setForm((prev) => ({ ...prev, description: value }))}
             />
 
+            <View style={{ marginTop: 12, marginBottom: 12, padding: 12, backgroundColor: theme.colors.surfaceContainerHigh, borderRadius: 12 }}>
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+                onPress={() => setForm((prev) => ({ ...prev, includePopulation: !prev.includePopulation }))}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <MaterialIcons name="people-outline" size={20} color={theme.colors.primary} />
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: theme.colors.text.primary }}>Demographic Population Count</Text>
+                </View>
+                <MaterialIcons name={form.includePopulation ? 'check-box' : 'check-box-outline-blank'} size={24} color={theme.colors.primary} />
+              </TouchableOpacity>
+
+              {form.includePopulation ? (
+                <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Purush (Male)</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={form.maleCount}
+                      onChangeText={(value) => setForm((prev) => ({ ...prev, maleCount: value.replace(/[^0-9]/g, '') }))}
+                      placeholder="0"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Mahila (Female)</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={form.femaleCount}
+                      onChangeText={(value) => setForm((prev) => ({ ...prev, femaleCount: value.replace(/[^0-9]/g, '') }))}
+                      placeholder="0"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Bache (Children)</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={form.childrenCount}
+                      onChangeText={(value) => setForm((prev) => ({ ...prev, childrenCount: value.replace(/[^0-9]/g, '') }))}
+                      placeholder="0"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
+              ) : null}
+            </View>
+
             <Text style={styles.label}>Attachments</Text>
             <TouchableOpacity style={[styles.btn, uploading && styles.btnDisabled]} disabled={uploading} onPress={() => void uploadAttachment()}>
               <Text style={styles.btnText}>{uploading ? 'Uploading...' : 'Upload from device (max 30MB)'}</Text>
@@ -471,6 +539,16 @@ export default function KaryakariniCategoryActivityScreen() {
               )}
               <Text style={styles.detailLine}>Created By: {detailsItem?.submitted_by_name || '-'}</Text>
             </View>
+            {Boolean(detailsItem?.male_count || detailsItem?.female_count || detailsItem?.children_count) && (
+              <View style={{ marginTop: 8, marginBottom: 8, padding: 12, backgroundColor: theme.colors.surfaceContainerHighest, borderRadius: 10 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.colors.primary, marginBottom: 6 }}>Demographic Population Counts</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ fontSize: 12, color: theme.colors.text.secondary }}>Purush (Male): <Text style={{ fontWeight: '700', color: theme.colors.text.primary }}>{detailsItem?.male_count || 0}</Text></Text>
+                  <Text style={{ fontSize: 12, color: theme.colors.text.secondary }}>Mahila (Female): <Text style={{ fontWeight: '700', color: theme.colors.text.primary }}>{detailsItem?.female_count || 0}</Text></Text>
+                  <Text style={{ fontSize: 12, color: theme.colors.text.secondary }}>Bache (Children): <Text style={{ fontWeight: '700', color: theme.colors.text.primary }}>{detailsItem?.children_count || 0}</Text></Text>
+                </View>
+              </View>
+            )}
             <Text style={styles.detailLabel}>Description</Text>
             <Text style={styles.detailText}>{detailsItem?.description || '-'}</Text>
             <Text style={styles.detailLabel}>Attachments</Text>
