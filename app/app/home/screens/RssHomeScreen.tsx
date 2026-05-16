@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { router } from 'expo-router';
 import { authClient, karyakariniClient } from '../../api/client';
 import { useProfile } from '../../core/context/ProfileContext';
@@ -10,6 +10,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 
 type Announcement = { id: number; title: string; message: string; category: string };
 type CategoryCard = { key: string; category: string; subcategory: string; count: number; lastActivityAt: number };
+type MyTask = { id: number; title: string; task_date?: string; due_date?: string; status?: string };
 const parseLabelList = (value?: string | string[] | null) => {
   if (Array.isArray(value)) return [...new Set(value.map((entry) => String(entry || '').trim()).filter(Boolean))];
   const raw = String(value || '').trim();
@@ -24,12 +25,14 @@ export default function RssHomeScreen() {
   const [karyakariniCount, setKaryakariniCount] = useState(0);
   const [categoryCards, setCategoryCards] = useState<CategoryCard[]>([]);
   const [totalCategoryCount, setTotalCategoryCount] = useState(0);
+  const [assignedTasks, setAssignedTasks] = useState<MyTask[]>([]);
 
   const load = useCallback(async () => {
     if (!user) {
       setAnnouncements([]);
       setKaryakariniCount(0);
       setCategoryCards([]);
+      setAssignedTasks([]);
       setLoading(false);
       return;
     }
@@ -62,6 +65,13 @@ export default function RssHomeScreen() {
       const invitations = ((invitationRes as any)?.data?.data?.invitations || []) as any[];
 
       setKaryakariniCount(Number(teams.length || 0));
+      setAssignedTasks(tasks.slice(0, 5).map((task) => ({
+        id: Number(task.id),
+        title: String(task.title || 'Task'),
+        task_date: task.task_date,
+        due_date: task.due_date,
+        status: task.status,
+      })));
 
       const categoryMap = new Map<string, CategoryCard>();
       const addOrUpdate = (cat: string, sub: string, timestamp: number, isDirectItem: boolean) => {
@@ -125,6 +135,7 @@ export default function RssHomeScreen() {
       setKaryakariniCount(0);
       setCategoryCards([]);
       setTotalCategoryCount(0);
+      setAssignedTasks([]);
     } finally {
       setLoading(false);
     }
@@ -176,6 +187,31 @@ export default function RssHomeScreen() {
             <Text style={styles.shortcutTitle}>Notifications</Text>
             <Text style={styles.shortcutMeta}>Stay Updated</Text>
           </TouchableOpacity>
+        </View>
+
+        <View style={styles.sectionWrap}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>My Tasks</Text>
+            <TouchableOpacity onPress={() => router.push({ pathname: '/karyakarini-member' as any, params: { tab: 'tasks' } } as any)}>
+              <Text style={{ color: theme.colors.primary, fontWeight: '700', fontSize: 12 }}>View All</Text>
+            </TouchableOpacity>
+          </View>
+          {assignedTasks.length === 0 ? (
+            <Text style={styles.emptyText}>No assigned tasks</Text>
+          ) : (
+            assignedTasks.map((task) => (
+              <TouchableOpacity
+                key={`home-task-${task.id}`}
+                style={styles.announcementCard}
+                onPress={() => router.push({ pathname: '/karyakarini-member' as any, params: { tab: 'tasks' } } as any)}
+              >
+                <Text style={styles.announcementTitle} numberOfLines={1}>{task.title}</Text>
+                <Text style={styles.announcementText}>
+                  Task: {String(task.task_date || '-').slice(0, 10)} • Due: {String(task.due_date || '-').slice(0, 10)}
+                </Text>
+              </TouchableOpacity>
+            ))
+          )}
         </View>
 
         {categoryCards.length > 0 ? (

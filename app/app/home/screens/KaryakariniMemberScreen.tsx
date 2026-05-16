@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ScreenHeader } from '../../core/components/ScreenHeader';
@@ -10,16 +10,30 @@ import { karyakariniClient } from '../../api/client';
 import { theme } from '../../theme';
 import { MaterialIcons } from '@expo/vector-icons';
 import type {
+  KaryakariniActivityAssignment,
+  KaryakariniActivitySubmission,
+  KaryakariniAttachment,
   KaryakariniInvitation,
   KaryakariniMyTeam,
-  KaryakariniSentInvitationSummary,
   KaryakariniTask,
   KaryakariniVersion,
 } from '../../services/karyakarini-module/types';
 
-type MemberTab = 'myteams' | 'messages' | 'tasks';
-type MessageTab = 'received' | 'sent';
+type MemberTab = 'tasks' | 'myteams' | 'activities';
 const TASK_STATUS_OPTIONS = ['open', 'in_progress', 'completed', 'blocked', 'cancelled'] as const;
+type AssignmentCard = {
+  key: string;
+  nodeId: number;
+  path: string;
+  nodeName?: string;
+  nodeLevel?: string;
+  category: string;
+  subcategory: string;
+  pad: string;
+  lastActivityAt: number;
+  count: number;
+  source: 'team' | 'task' | 'invitation';
+};
 
 const toDateText = (value?: string | null) => {
   if (!value) return '-';
@@ -44,25 +58,51 @@ const parseLabelList = (value?: string | string[] | null) => {
   return [...new Set(raw.split(',').map((entry) => entry.trim()).filter(Boolean))];
 };
 
+const sanitizeCountInput = (value: string) => String(value || '').replace(/[^\d]/g, '').slice(0, 5);
+const readCountValue = (value: string) => Math.max(0, Number(String(value || '').replace(/[^\d]/g, '')) || 0);
+
 export default function KaryakariniMemberScreen() {
   const { tab } = useLocalSearchParams<{ tab?: string }>();
   const { user, logout } = useProfile();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [respondingInvitationId, setRespondingInvitationId] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<MemberTab>('myteams');
-  const [messageTab, setMessageTab] = useState<MessageTab>('received');
+  const [activeTab, setActiveTab] = useState<MemberTab>('tasks');
   const [versionId, setVersionId] = useState<number | null>(null);
   const [teams, setTeams] = useState<KaryakariniMyTeam[]>([]);
   const [invitations, setInvitations] = useState<KaryakariniInvitation[]>([]);
-  const [sentSummaries, setSentSummaries] = useState<KaryakariniSentInvitationSummary[]>([]);
   const [tasks, setTasks] = useState<KaryakariniTask[]>([]);
-  const [selectedCategoryKeys, setSelectedCategoryKeys] = useState<string[]>(['all']);
+  const [activityAssignments, setActivityAssignments] = useState<KaryakariniActivityAssignment[]>([]);
+  const [activitySubmissions, setActivitySubmissions] = useState<KaryakariniActivitySubmission[]>([]);
+  const [showActivityModal, setShowActivityModal] = useState(false);
+  const [savingActivity, setSavingActivity] = useState(false);
+  const [activityUploadingAttachment, setActivityUploadingAttachment] = useState(false);
+  const [activityForm, setActivityForm] = useState({
+    assignmentId: '',
+    description: '',
+    includePopulation: false,
+    maleCount: '0',
+    femaleCount: '0',
+    childrenCount: '0',
+    attachmentInput: '',
+    attachments: [] as KaryakariniAttachment[],
+  });
+  const [selectedCategoryKey, setSelectedCategoryKey] = useState<string>('all');
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editingTask, setEditingTask] = useState<KaryakariniTask | null>(null);
-  const [taskDraftStatus, setTaskDraftStatus] = useState<string>('open');
-  const [taskDraftAttachments, setTaskDraftAttachments] = useState<{ url: string; type?: string; name?: string }[]>([]);
-  const [taskAttachmentInput, setTaskAttachmentInput] = useState('');
+  const [taskContext, setTaskContext] = useState<AssignmentCard | null>(null);
+  const [taskForm, setTaskForm] = useState({
+    title: '',
+    description: '',
+    taskDate: new Date().toISOString().slice(0, 10),
+    dueDate: '',
+    status: 'open',
+    includePopulation: false,
+    maleCount: '0',
+    femaleCount: '0',
+    childrenCount: '0',
+    attachmentInput: '',
+    attachments: [] as KaryakariniAttachment[],
+  });
   const [taskUploadingAttachment, setTaskUploadingAttachment] = useState(false);
   const [savingTask, setSavingTask] = useState(false);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
@@ -77,30 +117,29 @@ export default function KaryakariniMemberScreen() {
     if (!selectedVersionId) {
       setTeams([]);
       setInvitations([]);
-      setSentSummaries([]);
       setTasks([]);
+      setActivityAssignments([]);
+      setActivitySubmissions([]);
       return;
     }
 
-    const [teamsRes, invitationRes, sentRes, taskRes, unreadRes] = await Promise.all([
+    const [teamsRes, invitationRes, taskRes, unreadRes, assignmentRes, submissionRes] = await Promise.all([
       karyakariniClient.get('/karyakarini/my/teams', { params: { versionId: selectedVersionId } }),
       karyakariniClient.get('/karyakarini/my/invitations', { params: { versionId: selectedVersionId, limit: 100 } }),
-      karyakariniClient.get('/karyakarini/my/invitations/sent-summary', { params: { versionId: selectedVersionId, limit: 100 } }),
       karyakariniClient.get('/karyakarini/my/tasks', { params: { versionId: selectedVersionId, limit: 100 } }),
       karyakariniClient.get('/karyakarini/my/notifications/unread-count', { params: { versionId: selectedVersionId } }),
+      karyakariniClient.get('/karyakarini/my/activity-assignments', { params: { versionId: selectedVersionId, limit: 100 } }),
+      karyakariniClient.get('/karyakarini/my/activity-submissions', { params: { versionId: selectedVersionId, limit: 100 } }),
     ]);
 
     const loadedTeams = (teamsRes?.data?.data?.teams || []) as KaryakariniMyTeam[];
     const loadedTasks = (taskRes?.data?.data?.tasks || []) as KaryakariniTask[];
     setTeams(loadedTeams);
     setInvitations((invitationRes?.data?.data?.invitations || []) as KaryakariniInvitation[]);
-    setSentSummaries((sentRes?.data?.data?.sent || []) as KaryakariniSentInvitationSummary[]);
     setTasks(loadedTasks);
+    setActivityAssignments((assignmentRes?.data?.data?.assignments || []) as KaryakariniActivityAssignment[]);
+    setActivitySubmissions((submissionRes?.data?.data?.submissions || []) as KaryakariniActivitySubmission[]);
     setNotificationUnreadCount(Number(unreadRes?.data?.data?.total || 0));
-
-    if (loadedTeams.length === 0 && loadedTasks.length > 0) {
-      setActiveTab('tasks');
-    }
   }, []);
 
   const loadData = useCallback(async () => {
@@ -113,9 +152,11 @@ export default function KaryakariniMemberScreen() {
   }, [loadAll]);
 
   useEffect(() => {
-    if (tab === 'messages' || tab === 'tasks' || tab === 'myteams') {
+    if (tab === 'tasks' || tab === 'myteams' || tab === 'activities') {
       setActiveTab(tab);
+      return;
     }
+    setActiveTab('tasks');
   }, [tab]);
 
   useEffect(() => {
@@ -130,24 +171,6 @@ export default function KaryakariniMemberScreen() {
     void boot();
   }, [loadData]);
 
-  useEffect(() => {
-    if (
-      activeTab !== 'messages' ||
-      messageTab !== 'received' ||
-      !invitations.some((invitation) => !invitation.notification_read_at)
-    ) {
-      return;
-    }
-    const unreadIds = invitations.filter((invitation) => !invitation.notification_read_at).map((invitation) => Number(invitation.id));
-    void karyakariniClient
-      .post('/karyakarini/my/invitations/read', {
-        invitationIds: unreadIds,
-      })
-      .then(() => {
-        setNotificationUnreadCount((prev) => Math.max(0, prev - unreadIds.length));
-      });
-  }, [activeTab, invitations, messageTab]);
-
   const handleRefresh = useCallback(async () => {
     try {
       setRefreshing(true);
@@ -157,28 +180,84 @@ export default function KaryakariniMemberScreen() {
     }
   }, [loadData]);
 
-  const handleRespondInvitation = useCallback(
-    async (invitationId: number, status: 'accepted' | 'rejected' | 'tentative') => {
-      try {
-        setRespondingInvitationId(invitationId);
-        await karyakariniClient.patch(`/karyakarini/my/invitations/${invitationId}/respond`, { status });
-        await loadData();
-      } catch (err: any) {
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to update invitation');
-      } finally {
-        setRespondingInvitationId(null);
-      }
-    },
-    [loadData]
-  );
-
   const handleOpenTaskEditor = useCallback((task: KaryakariniTask) => {
+    const nextContext: AssignmentCard = {
+      key: `task-context-${task.id}`,
+      nodeId: Number(task.node_id || 0),
+      path: String(task.hierarchy_path || task.node_name || '').trim() || '-',
+      nodeName: String(task.node_name || '').trim() || undefined,
+      nodeLevel: String(task.node_level || '').trim() || undefined,
+      category: parseLabelList(task.task_categories)[0] || 'General',
+      subcategory: parseLabelList(task.task_subcategories)[0] || '',
+      pad: 'Task Assignee',
+      lastActivityAt: new Date((task as any).updated_at || (task as any).created_at || task.task_date || 0).getTime(),
+      count: 1,
+      source: 'task',
+    };
+
+    setTaskContext(nextContext);
     setEditingTask(task);
-    setTaskDraftStatus(String(task.status || 'open').toLowerCase() || 'open');
-    setTaskDraftAttachments([]);
-    setTaskAttachmentInput('');
+    setTaskForm({
+      title: String(task.title || '').trim(),
+      description: String(task.description || '').trim(),
+      taskDate: task.task_date || new Date().toISOString().slice(0, 10),
+      dueDate: task.due_date || '',
+      status: String(task.status || 'open').toLowerCase() || 'open',
+      includePopulation: Number(task.male_count || 0) > 0 || Number(task.female_count || 0) > 0 || Number(task.children_count || 0) > 0,
+      maleCount: String(Number(task.male_count || 0)),
+      femaleCount: String(Number(task.female_count || 0)),
+      childrenCount: String(Number(task.children_count || 0)),
+      attachmentInput: '',
+      attachments: [],
+    });
     setShowTaskModal(true);
   }, []);
+
+  const handleOpenTaskCreate = useCallback(() => {
+    if (selectedCategoryKey === 'all') {
+      Alert.alert('Select scope', 'Please select exactly one subcategory card to create a task.');
+      return;
+    }
+    const [nodeIdPart, categoryPart, subcategoryPart] = String(selectedCategoryKey).split('###');
+    const nodeId = Number(nodeIdPart || 0);
+    const category = String(categoryPart || '').trim();
+    const subcategory = String(subcategoryPart || '').trim();
+    if (!nodeId || !subcategory) {
+      Alert.alert('Select scope', 'Please select a subcategory card to create a task.');
+      return;
+    }
+    const matchingTeam = teams.find((entry) => Number(entry.node_id || 0) === nodeId) || null;
+    const matchingTask = tasks.find((entry) => Number(entry.node_id || 0) === nodeId) || null;
+
+    setTaskContext({
+      key: selectedCategoryKey,
+      nodeId,
+      path: String(matchingTeam?.hierarchy_path || matchingTask?.hierarchy_path || matchingTeam?.node_name || matchingTask?.node_name || '').trim(),
+      nodeName: String(matchingTeam?.node_name || matchingTask?.node_name || '').trim() || undefined,
+      nodeLevel: String(matchingTeam?.node_level || matchingTask?.node_level || '').trim() || undefined,
+      category: category || 'General',
+      subcategory,
+      pad: 'Task Assignee',
+      lastActivityAt: 0,
+      count: 1,
+      source: 'team',
+    });
+    setEditingTask(null);
+    setTaskForm({
+      title: '',
+      description: '',
+      taskDate: new Date().toISOString().slice(0, 10),
+      dueDate: '',
+      status: 'open',
+      includePopulation: false,
+      maleCount: '0',
+      femaleCount: '0',
+      childrenCount: '0',
+      attachmentInput: '',
+      attachments: [],
+    });
+    setShowTaskModal(true);
+  }, [selectedCategoryKey, tasks, teams]);
 
   const handleUploadTaskAttachment = useCallback(async () => {
     try {
@@ -217,14 +296,17 @@ export default function KaryakariniMemberScreen() {
         Alert.alert('Error', 'Failed to upload attachment');
         return;
       }
-      setTaskDraftAttachments((prev) => [
+      setTaskForm((prev) => ({
         ...prev,
-        {
-          url,
-          type: String(payload.fileType || asset.mimeType || '').trim() || undefined,
-          name: String(payload.fileName || asset.fileName || `task-${Date.now()}`).trim(),
-        },
-      ]);
+        attachments: [
+          ...prev.attachments,
+          {
+            url,
+            type: String(payload.fileType || asset.mimeType || '').trim() || undefined,
+            name: String(payload.fileName || asset.fileName || `task-${Date.now()}`).trim(),
+          },
+        ],
+      }));
     } catch (err: any) {
       Alert.alert('Error', err?.response?.data?.message || 'Failed to upload attachment');
     } finally {
@@ -233,34 +315,169 @@ export default function KaryakariniMemberScreen() {
   }, []);
 
   const handleAddAttachmentLink = useCallback(() => {
-    const url = taskAttachmentInput.trim();
+    const url = taskForm.attachmentInput.trim();
     if (!url) return;
-    setTaskDraftAttachments((prev) => [...prev, { url, type: 'document', name: url.split('/').pop() || 'attachment' }]);
-    setTaskAttachmentInput('');
-  }, [taskAttachmentInput]);
+    setTaskForm((prev) => ({
+      ...prev,
+      attachmentInput: '',
+      attachments: [...prev.attachments, { url, type: 'document', name: url.split('/').pop() || 'attachment' }],
+    }));
+  }, [taskForm.attachmentInput]);
 
   const handleSaveTask = useCallback(async () => {
-    if (!editingTask || !versionId) return;
+    if (!versionId || !taskContext) return;
+    if (!taskForm.title.trim()) {
+      Alert.alert('Required', 'Task title is required');
+      return;
+    }
+
     try {
       setSavingTask(true);
-      const response = await karyakariniClient.patch(`/karyakarini/my/tasks/${editingTask.id}/status`, {
+      const payload = {
         versionId,
-        status: taskDraftStatus,
-        attachments: taskDraftAttachments,
-      });
-      const updated = (response?.data?.data?.task || null) as KaryakariniTask | null;
-      setTasks((prev) => prev.map((entry) => (entry.id === editingTask.id ? { ...entry, ...(updated || {}), status: taskDraftStatus } : entry)));
+        nodeId: Number(taskContext.nodeId || 0),
+        title: taskForm.title.trim(),
+        description: taskForm.description.trim() || null,
+        taskDate: taskForm.taskDate,
+        dueDate: taskForm.dueDate.trim() || null,
+        status: taskForm.status,
+        maleCount: taskForm.includePopulation ? Number(taskForm.maleCount || 0) : 0,
+        femaleCount: taskForm.includePopulation ? Number(taskForm.femaleCount || 0) : 0,
+        childrenCount: taskForm.includePopulation ? Number(taskForm.childrenCount || 0) : 0,
+        category: taskContext.category || null,
+        subcategory: taskContext.subcategory || null,
+        categories: taskContext.category ? [taskContext.category] : [],
+        subcategories: taskContext.subcategory ? [taskContext.subcategory] : [],
+        attachments: taskForm.attachments,
+      };
+
+      if (editingTask?.id) {
+        await karyakariniClient.put(`/karyakarini/tasks/${editingTask.id}`, payload);
+      } else {
+        await karyakariniClient.post('/karyakarini/tasks', payload);
+      }
+
+      await loadData();
       setShowTaskModal(false);
       setEditingTask(null);
-      setTaskDraftAttachments([]);
-      setTaskAttachmentInput('');
-      Alert.alert('Success', 'Task updated successfully');
+      setTaskContext(null);
+      setTaskForm({
+        title: '',
+        description: '',
+        taskDate: new Date().toISOString().slice(0, 10),
+        dueDate: '',
+        status: 'open',
+        includePopulation: false,
+        maleCount: '0',
+        femaleCount: '0',
+        childrenCount: '0',
+        attachmentInput: '',
+        attachments: [],
+      });
+      Alert.alert('Success', editingTask?.id ? 'Task updated successfully' : 'Task created successfully');
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to update task');
+      Alert.alert('Error', err?.response?.data?.message || `Failed to ${editingTask?.id ? 'update' : 'create'} task`);
     } finally {
       setSavingTask(false);
     }
-  }, [editingTask, taskDraftAttachments, taskDraftStatus, versionId]);
+  }, [editingTask?.id, loadData, taskContext, taskForm, versionId]);
+
+  const handleUploadActivityAttachment = useCallback(async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission', 'Media library permission is required');
+        return;
+      }
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        quality: 0.8,
+      });
+      if (picked.canceled || !picked.assets?.[0]) return;
+
+      const asset = picked.assets[0];
+      const form = new FormData();
+      form.append('folder', 'karyakarini');
+      form.append('category', 'activity-submission');
+      form.append(
+        'file',
+        {
+          uri: asset.uri,
+          name: asset.fileName || `activity-${Date.now()}`,
+          type: asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg'),
+        } as any
+      );
+      setActivityUploadingAttachment(true);
+      const response = await karyakariniClient.post('/karyakarini/upload/attachment', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const payload = response?.data?.data || {};
+      const url = String(payload.url || '').trim();
+      if (!url) return;
+      setActivityForm((prev) => ({
+        ...prev,
+        attachments: [
+          ...prev.attachments,
+          {
+            url,
+            type: String(payload.fileType || asset.mimeType || '').trim() || undefined,
+            name: String(payload.fileName || asset.fileName || `activity-${Date.now()}`).trim(),
+          },
+        ],
+      }));
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.message || 'Failed to upload attachment');
+    } finally {
+      setActivityUploadingAttachment(false);
+    }
+  }, []);
+
+  const handleAddActivityAttachmentLink = useCallback(() => {
+    const url = activityForm.attachmentInput.trim();
+    if (!url) return;
+    setActivityForm((prev) => ({
+      ...prev,
+      attachmentInput: '',
+      attachments: [...prev.attachments, { url, type: 'document', name: url.split('/').pop() || 'attachment' }],
+    }));
+  }, [activityForm.attachmentInput]);
+
+  const handleSaveActivity = useCallback(async () => {
+    if (!versionId) return;
+    if (!activityForm.assignmentId) {
+      Alert.alert('Required', 'Select assigned activity');
+      return;
+    }
+    try {
+      setSavingActivity(true);
+      await karyakariniClient.post('/karyakarini/my/activity-submissions', {
+        versionId,
+        assignmentId: Number(activityForm.assignmentId),
+        description: activityForm.description.trim() || null,
+        maleCount: activityForm.includePopulation ? Number(activityForm.maleCount || 0) : 0,
+        femaleCount: activityForm.includePopulation ? Number(activityForm.femaleCount || 0) : 0,
+        childrenCount: activityForm.includePopulation ? Number(activityForm.childrenCount || 0) : 0,
+        attachments: activityForm.attachments,
+      });
+      setShowActivityModal(false);
+      setActivityForm((prev) => ({
+        ...prev,
+        description: '',
+        includePopulation: false,
+        maleCount: '0',
+        femaleCount: '0',
+        childrenCount: '0',
+        attachmentInput: '',
+        attachments: [],
+      }));
+      await loadData();
+      Alert.alert('Success', 'Activity submitted successfully');
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.message || 'Failed to submit activity');
+    } finally {
+      setSavingActivity(false);
+    }
+  }, [activityForm, loadData, versionId]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -275,27 +492,37 @@ export default function KaryakariniMemberScreen() {
     router.push('/karyakarini-notifications' as any);
   }, []);
 
-  const pendingInvitations = useMemo(
-    () => invitations.filter((invitation) => String(invitation.invitation_status || '').toLowerCase() === 'pending').length,
-    [invitations]
-  );
-  const assignmentCards = useMemo(() => {
-    const map = new Map<string, { key: string; nodeId: number; path: string; category: string; subcategory: string; pad: string; lastActivityAt: number; count: number }>();
+  const assignmentCards = useMemo<AssignmentCard[]>(() => {
+    const map = new Map<string, AssignmentCard>();
 
-    const addOrUpdate = (nodeId: number, path: string, cat: string, sub: string, pad: string, timestamp: number, isDirect: boolean) => {
+    const addOrUpdate = (
+      nodeId: number,
+      path: string,
+      nodeName: string,
+      nodeLevel: string,
+      cat: string,
+      sub: string,
+      pad: string,
+      timestamp: number,
+      isDirect: boolean,
+      source: AssignmentCard['source']
+    ) => {
       const category = cat.trim() || 'General';
       const subcategory = sub.trim();
       const key = `${nodeId}###${category}###${subcategory}`;
       const existing = map.get(key);
       map.set(key, {
-        key: existing?.key || `${nodeId}-${category}-${subcategory}`,
+        key: existing?.key || key,
         nodeId,
         path: existing?.path || path || `Node #${nodeId}`,
+        nodeName: existing?.nodeName || nodeName || undefined,
+        nodeLevel: existing?.nodeLevel || nodeLevel || undefined,
         category,
         subcategory,
         pad: existing?.pad || pad || 'Member',
         lastActivityAt: Math.max(existing?.lastActivityAt || 0, timestamp),
         count: (existing?.count || 0) + (isDirect ? 1 : 0),
+        source: existing?.source || source,
       });
     };
 
@@ -303,51 +530,45 @@ export default function KaryakariniMemberScreen() {
       const ts = new Date((team as any).updated_at || (team as any).created_at || team.start_date || 0).getTime();
       const nodeId = Number(team.node_id || 0);
       const path = String(team.hierarchy_path || team.node_name || '').trim();
+      const nodeName = String(team.node_name || '').trim();
+      const nodeLevel = String(team.node_level || '').trim();
       const pad = String(team.pad || '').trim();
       const categories = parseLabelList(team.categories && team.categories.length ? team.categories : team.category || '');
       const subcategories = parseLabelList(team.subcategories && team.subcategories.length ? team.subcategories : team.subcategory || '');
 
       if (subcategories.length > 0) {
         subcategories.forEach((sub) => {
-          const cat = categories.find((c) => sub.toLowerCase().includes(c.toLowerCase())) || categories[0] || 'Category';
-          addOrUpdate(nodeId, path, cat, sub, pad, ts, true);
+          const derivedCategories = categories.length ? categories : deriveCategoriesFromSubcategories([sub]);
+          const cat = derivedCategories[0] || 'Category';
+          addOrUpdate(nodeId, path, nodeName, nodeLevel, cat, sub, pad, ts, true, 'team');
         });
-      } else if (categories.length > 0) {
-        categories.forEach((cat) => addOrUpdate(nodeId, path, cat, '', pad, ts, true));
       }
-    });
-
-    tasks.forEach((task) => {
-      const ts = new Date((task as any).updated_at || (task as any).created_at || task.task_date || 0).getTime();
-      const nodeId = Number(task.node_id || 0);
-      const path = String(task.hierarchy_path || task.node_name || '').trim();
-      const cats = parseLabelList(task.task_categories);
-      const subs = parseLabelList(task.task_subcategories);
-
-      if (subs.length > 0) {
-        subs.forEach((sub) => {
-          const cat = cats.find((c) => sub.toLowerCase().includes(c.toLowerCase())) || cats[0] || 'Category';
-          addOrUpdate(nodeId, path, cat, sub, 'Task Assignee', ts, true);
-        });
-      } else if (cats.length > 0) {
-        cats.forEach((cat) => addOrUpdate(nodeId, path, cat, '', 'Task Assignee', ts, true));
-      } else {
-        addOrUpdate(nodeId, path, 'General', '', 'Task Assignee', ts, true);
-      }
-    });
-
-    invitations.forEach((inv) => {
-      const ts = new Date(inv.invited_at || inv.meeting_date || 0).getTime();
-      const nodeId = Number(inv.invited_node_id || 0);
-      const path = String(inv.invited_node_name || inv.meeting_node_name || `Node #${nodeId}`).trim();
-      const cat = String(inv.invited_node_level || inv.meeting_node_level || 'Meetings').trim();
-      addOrUpdate(nodeId, path, cat, '', 'Meeting Attendee', ts, true);
     });
 
     return Array.from(map.values())
-      .filter((c) => c.count > 0 || c.lastActivityAt > 0)
+      .filter((c) => c.count > 0)
       .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-  }, [teams, tasks, invitations]);
+  }, [teams]);
+
+  const subcategoryCards = useMemo(
+    () =>
+      assignmentCards.filter(
+        (entry) => entry.source !== 'invitation' && String(entry.subcategory || '').trim().length > 0
+      ),
+    [assignmentCards]
+  );
+
+  const hasSelectedSubcategory = useMemo(() => {
+    if (selectedCategoryKey === 'all') return false;
+    return subcategoryCards.some((entry) => entry.key === selectedCategoryKey);
+  }, [selectedCategoryKey, subcategoryCards]);
+
+  useEffect(() => {
+    if (selectedCategoryKey === 'all') return;
+    if (!subcategoryCards.some((entry) => entry.key === selectedCategoryKey)) {
+      setSelectedCategoryKey('all');
+    }
+  }, [selectedCategoryKey, subcategoryCards]);
 
   const groupedTasks = useMemo(() => {
     const map = new Map<string, KaryakariniTask>();
@@ -388,11 +609,13 @@ export default function KaryakariniMemberScreen() {
   }, [groupedTasks, user, teams]);
 
   const filteredTasks = useMemo(() => {
-    if (selectedCategoryKeys.includes('all') || selectedCategoryKeys.length === 0) {
+    if (selectedCategoryKey === 'all') {
       return assignedTasks;
     }
-    const selectedAssignments = assignmentCards.filter((c) => selectedCategoryKeys.includes(c.key));
-    if (selectedAssignments.length === 0) return assignedTasks;
+    const selectedAssignment = assignmentCards.find(
+      (c) => c.key === selectedCategoryKey && c.source !== 'invitation'
+    );
+    if (!selectedAssignment) return assignedTasks;
 
     return assignedTasks.filter((task) => {
       const taskCategories = parseLabelList(task.task_categories)
@@ -402,51 +625,55 @@ export default function KaryakariniMemberScreen() {
         .map((entry) => String(entry || '').trim().toLowerCase())
         .filter(Boolean);
 
-      return selectedAssignments.some((assignment) => {
-        const selectedCategory = String(assignment.category || '').trim().toLowerCase();
-        const selectedSubcategory = String(assignment.subcategory || '').trim().toLowerCase();
-        const nodeMatch = Number(task.node_id || 0) === Number(assignment.nodeId || 0);
+      const nodeMatch = Number(task.node_id || 0) === Number(selectedAssignment.nodeId || 0);
+      if (!nodeMatch) return false;
+      const selectedCategory = String(selectedAssignment.category || '').trim().toLowerCase();
+      const selectedSubcategory = String(selectedAssignment.subcategory || '').trim().toLowerCase();
 
-        if (selectedSubcategory && taskSubcategories.includes(selectedSubcategory)) return true;
-        if (selectedCategory && selectedCategory !== 'general' && taskCategories.includes(selectedCategory)) return true;
-        
-        if (taskCategories.length === 0 && nodeMatch && (!selectedCategory || selectedCategory === 'general')) {
-            return true;
-        }
-
-        return false;
-      });
+      if (selectedSubcategory) return taskSubcategories.includes(selectedSubcategory);
+      if (selectedCategory && selectedCategory !== 'general') return taskCategories.includes(selectedCategory);
+      return true;
     });
-  }, [assignedTasks, assignmentCards, selectedCategoryKeys]);
+  }, [assignedTasks, assignmentCards, selectedCategoryKey]);
 
   const tasksByCategory = useMemo(() => {
     const map = new Map<string, KaryakariniTask[]>();
-    
-    const allowedCategories = selectedCategoryKeys.includes('all') || selectedCategoryKeys.length === 0
+
+    const allowedCategory = selectedCategoryKey === 'all'
       ? null
       : assignmentCards
-          .filter((c) => selectedCategoryKeys.includes(c.key))
-          .map((c) => String(c.subcategory || c.category || '').trim().toLowerCase());
+          .filter((c) => c.key === selectedCategoryKey && c.source !== 'invitation')
+          .map((c) => ({
+            nodeId: Number(c.nodeId || 0),
+            sub: String(c.subcategory || '').trim().toLowerCase(),
+            cat: String(c.category || '').trim().toLowerCase(),
+          }))[0] || null;
 
     filteredTasks.forEach((task) => {
-      const parsedCats = parseLabelList(task.task_categories);
-      const cats = parsedCats.length > 0 ? parsedCats : ['General'];
-        
-      cats.forEach((c) => {
-        const catName = String(c || '').trim() || 'General';
-        
-        if (allowedCategories && !allowedCategories.includes(catName.toLowerCase())) {
-          return; 
+      const taskSubs = parseLabelList(task.task_subcategories);
+      const groupNames = taskSubs.length > 0 ? taskSubs : ['General'];
+
+      groupNames.forEach((subName) => {
+        const normalizedSub = String(subName || '').trim().toLowerCase();
+        if (allowedCategory) {
+          const matchedNode = allowedCategory.nodeId === Number(task.node_id || 0);
+          if (!matchedNode) return;
+          if (allowedCategory.sub && allowedCategory.sub !== normalizedSub) return;
+          if (!allowedCategory.sub && allowedCategory.cat) {
+            const taskCats = parseLabelList(task.task_categories).map((cat) => String(cat || '').trim().toLowerCase());
+            if (!taskCats.includes(allowedCategory.cat)) return;
+          }
         }
 
-        if (!map.has(catName)) map.set(catName, []);
-        if (!map.get(catName)!.some((t) => t.id === task.id)) {
-          map.get(catName)!.push(task);
+        const groupKey = String(subName || '').trim() || 'General';
+        if (!map.has(groupKey)) map.set(groupKey, []);
+        if (!map.get(groupKey)!.some((t) => t.id === task.id)) {
+          map.get(groupKey)!.push(task);
         }
       });
     });
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [filteredTasks, selectedCategoryKeys, assignmentCards]);
+  }, [filteredTasks, selectedCategoryKey, assignmentCards]);
 
   if (loading) {
     return (
@@ -468,8 +695,8 @@ export default function KaryakariniMemberScreen() {
       />
 
       <PageHeaderCard
-        title="Karyakarini"
-        subtitle="Team, Meetings & Tasks"
+        title="कार्यकारिणी"
+        subtitle="कार्य, टीम सदस्य और गतिविधियाँ"
         icon={<MaterialIcons name="groups" size={24} color={theme.colors.primary} />}
       />
 
@@ -480,38 +707,18 @@ export default function KaryakariniMemberScreen() {
       >
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-        {assignmentCards.length > 0 ? (
+        {subcategoryCards.length > 0 ? (
           <View style={styles.listWrap}>
-            <Text style={styles.sectionTitle}>Assigned Categories</Text>
+            <Text style={styles.sectionTitle}>सौंपी गई श्रेणियाँ</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.assignmentRow}>
-              <TouchableOpacity
-                style={[styles.assignmentCard, selectedCategoryKeys.includes('all') && styles.assignmentCardActive]}
-                onPress={() => {
-                  setSelectedCategoryKeys(['all']);
-                  setActiveTab('tasks');
-                }}
-              >
-                <Text style={[styles.assignmentCardTitle, selectedCategoryKeys.includes('all') && styles.assignmentCardTitleActive]}>
-                  All Categories
-                </Text>
-                <Text style={styles.assignmentCardMeta}>Show all tasks</Text>
-              </TouchableOpacity>
-
-              {assignmentCards.map((entry) => {
-                const isSelected = !selectedCategoryKeys.includes('all') && selectedCategoryKeys.includes(entry.key);
+              {subcategoryCards.map((entry) => {
+                const isSelected = selectedCategoryKey !== 'all' && selectedCategoryKey === entry.key;
                 return (
                   <TouchableOpacity
                     key={entry.key}
                     style={[styles.assignmentCard, isSelected && styles.assignmentCardActive]}
                     onPress={() => {
-                      let next = selectedCategoryKeys.filter((k) => k !== 'all');
-                      if (next.includes(entry.key)) {
-                        next = next.filter((k) => k !== entry.key);
-                        if (next.length === 0) next = ['all'];
-                      } else {
-                        next = [...next, entry.key];
-                      }
-                      setSelectedCategoryKeys(next);
+                      setSelectedCategoryKey(entry.key);
                       setActiveTab('tasks');
                     }}
                   >
@@ -522,33 +729,35 @@ export default function KaryakariniMemberScreen() {
                     <Text style={styles.assignmentCardMeta}>{entry.pad || '-'}</Text>
                     {entry.lastActivityAt > 0 ? (
                       <Text style={{ fontSize: 10, color: isSelected ? '#fff' : theme.colors.text.disabled, marginTop: 2, fontWeight: '600' }}>
-                        Active: {new Date(entry.lastActivityAt).toLocaleDateString()}
+                        सक्रिय: {new Date(entry.lastActivityAt).toLocaleDateString()}
                       </Text>
                     ) : null}
                   </TouchableOpacity>
                 );
               })}
             </ScrollView>
-            {!selectedCategoryKeys.includes('all') ? (
-              <TouchableOpacity onPress={() => setSelectedCategoryKeys(['all'])}>
-                <Text style={styles.clearLink}>Reset to All Categories</Text>
+            {selectedCategoryKey !== 'all' ? (
+              <TouchableOpacity onPress={() => setSelectedCategoryKey('all')}>
+                <Text style={styles.clearLink}>सभी श्रेणियों पर रीसेट करें</Text>
               </TouchableOpacity>
             ) : null}
           </View>
         ) : null}
 
         <View style={styles.tabSwitchRow}>
-          <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'myteams' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('myteams')}>
-            <Text style={[styles.tabSwitchText, activeTab === 'myteams' && styles.tabSwitchTextActive]}>My Teams</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'messages' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('messages')}>
-            <Text style={[styles.tabSwitchText, activeTab === 'messages' && styles.tabSwitchTextActive]}>
-              Messages {pendingInvitations > 0 ? `(${pendingInvitations})` : ''}
-            </Text>
-          </TouchableOpacity>
           <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'tasks' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('tasks')}>
             <Text style={[styles.tabSwitchText, activeTab === 'tasks' && styles.tabSwitchTextActive]}>
-              Tasks {filteredTasks.length > 0 ? `(${filteredTasks.length})` : ''}
+              कार्य ({filteredTasks.length}){'\n'}Karya
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'myteams' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('myteams')}>
+            <Text style={[styles.tabSwitchText, activeTab === 'myteams' && styles.tabSwitchTextActive]}>
+              टीम प्रबंधन ({teams.length}){'\n'}Team
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'activities' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('activities')}>
+            <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>
+              कार्यक्रम ({activityAssignments.length}){'\n'}Karyakaram
             </Text>
           </TouchableOpacity>
         </View>
@@ -556,12 +765,12 @@ export default function KaryakariniMemberScreen() {
         {activeTab === 'myteams' ? (
           <View style={styles.listWrap}>
             {teams.length === 0 ? (
-              <Text style={styles.helper}>No team assignment found.</Text>
+              <Text style={styles.helper}>कोई टीम असाइनमेंट नहीं मिला।</Text>
             ) : (
               teams.map((team) => (
                 <View key={`team-${team.id}`} style={styles.card}>
                   <Text style={styles.cardTitle}>{team.hierarchy_path || team.node_name || '-'}</Text>
-                  <Text style={styles.cardMeta}>Pad: {team.pad || '-'} • Period: {team.period || '-'}</Text>
+                  <Text style={styles.cardMeta}>पद: {team.pad || '-'} • अवधि: {team.period || '-'}</Text>
                   <Text style={styles.cardMeta}>
                     {toDateText(team.start_date)} to {toDateText(team.end_date)}
                   </Text>
@@ -571,106 +780,23 @@ export default function KaryakariniMemberScreen() {
           </View>
         ) : null}
 
-        {activeTab === 'messages' ? (
-          <View style={styles.listWrap}>
-            <View style={styles.messageTabRow}>
-              <TouchableOpacity
-                style={[styles.messageTabBtn, messageTab === 'received' && styles.messageTabBtnActive]}
-                onPress={() => setMessageTab('received')}
-              >
-                <Text style={[styles.messageTabText, messageTab === 'received' && styles.messageTabTextActive]}>Received</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.messageTabBtn, messageTab === 'sent' && styles.messageTabBtnActive]}
-                onPress={() => setMessageTab('sent')}
-              >
-                <Text style={[styles.messageTabText, messageTab === 'sent' && styles.messageTabTextActive]}>Sent</Text>
-              </TouchableOpacity>
-            </View>
-
-            {messageTab === 'received' ? (
-              invitations.length === 0 ? (
-                <Text style={styles.helper}>No invitations found.</Text>
-              ) : (
-                invitations.map((invitation) => {
-                  const currentStatus = String(invitation.invitation_status || 'pending').toLowerCase();
-                  return (
-                    <View key={`invitation-${invitation.id}`} style={styles.card}>
-                      <View style={styles.cardHeaderRow}>
-                        <Text style={styles.cardTitle}>{invitation.meeting_title || 'Meeting invitation'}</Text>
-                        <Text style={[styles.statusBadge, { color: statusColor(currentStatus) }]}>{currentStatus}</Text>
-                      </View>
-                      <Text style={styles.cardMeta}>
-                        {toDateText(invitation.meeting_date)} • {invitation.meeting_node_level || '-'}-{invitation.meeting_node_name || '-'}
-                      </Text>
-                      <Text style={styles.cardMeta}>Invited by: {invitation.invited_by_name || '-'}</Text>
-                      {currentStatus === 'pending' ? (
-                        <View style={styles.actionRow}>
-                          <TouchableOpacity
-                            style={[styles.actionBtn, styles.acceptBtn]}
-                            disabled={respondingInvitationId === Number(invitation.id)}
-                            onPress={() => void handleRespondInvitation(Number(invitation.id), 'accepted')}
-                          >
-                            <Text style={styles.actionText}>Accept</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.actionBtn, styles.tentativeBtn]}
-                            disabled={respondingInvitationId === Number(invitation.id)}
-                            onPress={() => void handleRespondInvitation(Number(invitation.id), 'tentative')}
-                          >
-                            <Text style={styles.actionText}>Tentative</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.actionBtn, styles.rejectBtn]}
-                            disabled={respondingInvitationId === Number(invitation.id)}
-                            onPress={() => void handleRespondInvitation(Number(invitation.id), 'rejected')}
-                          >
-                            <Text style={styles.actionText}>Reject</Text>
-                          </TouchableOpacity>
-                        </View>
-                      ) : null}
-                    </View>
-                  );
-                })
-              )
-            ) : sentSummaries.length === 0 ? (
-              <Text style={styles.helper}>No sent meeting invitations found.</Text>
-            ) : (
-              <ScrollView horizontal style={styles.tableWrap} showsHorizontalScrollIndicator>
-                <View>
-                  <View style={styles.tableHeader}>
-                    <Text style={[styles.tableHeaderCell, styles.colTitle]}>Meeting</Text>
-                    <Text style={[styles.tableHeaderCell, styles.colDate]}>Date</Text>
-                    <Text style={[styles.tableHeaderCell, styles.colCount]}>Accepted</Text>
-                    <Text style={[styles.tableHeaderCell, styles.colCount]}>Tentative</Text>
-                    <Text style={[styles.tableHeaderCell, styles.colCount]}>Rejected</Text>
-                  </View>
-                  {sentSummaries.map((row) => (
-                    <View key={`sent-${row.meeting_id}`} style={styles.tableRow}>
-                      <Text style={[styles.tableCell, styles.colTitle]} numberOfLines={2}>
-                        {row.title}
-                      </Text>
-                      <Text style={[styles.tableCell, styles.colDate]}>{toDateText(row.meeting_date)}</Text>
-                      <Text style={[styles.tableCell, styles.colCount]}>{Number(row.accepted_count || 0)}</Text>
-                      <Text style={[styles.tableCell, styles.colCount]}>{Number(row.tentative_count || 0)}</Text>
-                      <Text style={[styles.tableCell, styles.colCount]}>{Number(row.rejected_count || 0)}</Text>
-                    </View>
-                  ))}
-                </View>
-              </ScrollView>
-            )}
-          </View>
-        ) : null}
-
         {activeTab === 'tasks' ? (
           <View style={styles.listWrap}>
-            {!selectedCategoryKeys.includes('all') ? (
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.sectionTitle}>Tasks</Text>
+              {hasSelectedSubcategory ? (
+                <TouchableOpacity style={styles.taskEditBtn} onPress={() => handleOpenTaskCreate()}>
+                  <Text style={styles.taskEditBtnText}>Create Task</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            {hasSelectedSubcategory ? (
               <Text style={styles.subHeading}>
-                Filtered by selected categories ({selectedCategoryKeys.length})
+                चुनी गई श्रेणी के अनुसार फ़िल्टर
               </Text>
             ) : null}
             {tasksByCategory.length === 0 ? (
-              <Text style={styles.helper}>No tasks assigned for selected category/location.</Text>
+              <Text style={styles.helper}>चुनी गई श्रेणी/स्थान के लिए कोई कार्य नहीं मिला।</Text>
             ) : (
               tasksByCategory.map(([catName, catTasks]) => (
                 <View key={`task-cat-group-${catName}`} style={{ marginBottom: 20 }}>
@@ -705,15 +831,18 @@ export default function KaryakariniMemberScreen() {
                         </View>
                         {task.assignees && task.assignees.length > 0 ? (
                           <Text style={[styles.cardMeta, { color: theme.colors.primary, fontWeight: '600', marginBottom: 4 }]}>
-                            👥 {task.assignees.length} Assignee{task.assignees.length > 1 ? 's' : ''}: {task.assignees.map((a) => a.name).join(', ')}
+                            👥 {task.assignees.length} असाइनी: {task.assignees.map((a) => a.name).join(', ')}
                           </Text>
                         ) : null}
                         <Text style={styles.cardMeta}>
-                          Task: {toDateText(task.task_date)} • Due: {toDateText(task.due_date)}
+                          कार्य: {toDateText(task.task_date)} • नियत तिथि: {toDateText(task.due_date)}
                         </Text>
-                        <Text style={styles.cardMeta}>Attachments: {Number(task.attachment_count || 0)}</Text>
+                        <Text style={styles.cardMeta}>
+                          जनसंख्या: पुरुष {Number(task.male_count || 0)} • महिला {Number(task.female_count || 0)} • बच्चे {Number(task.children_count || 0)}
+                        </Text>
+                        <Text style={styles.cardMeta}>संलग्नक: {Number(task.attachment_count || 0)}</Text>
                         <TouchableOpacity style={styles.taskEditBtn} onPress={() => handleOpenTaskEditor(task)}>
-                          <Text style={styles.taskEditBtnText}>Edit Task</Text>
+                          <Text style={styles.taskEditBtnText}>कार्य अपडेट करें</Text>
                         </TouchableOpacity>
                       </View>
                     ))}
@@ -723,65 +852,290 @@ export default function KaryakariniMemberScreen() {
             )}
           </View>
         ) : null}
+
+        {activeTab === 'activities' ? (
+          <View style={styles.listWrap}>
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.sectionTitle}>गतिविधि प्रविष्टियाँ</Text>
+              <TouchableOpacity
+                style={styles.taskEditBtn}
+                onPress={() => {
+                  setActivityForm((prev) => ({
+                    ...prev,
+                    assignmentId: prev.assignmentId || String(activityAssignments[0]?.id || ''),
+                    description: '',
+                    includePopulation: false,
+                    maleCount: '0',
+                    femaleCount: '0',
+                    childrenCount: '0',
+                    attachmentInput: '',
+                    attachments: [],
+                  }));
+                  setShowActivityModal(true);
+                }}
+              >
+                <Text style={styles.taskEditBtnText}>गतिविधि बनाएं</Text>
+              </TouchableOpacity>
+            </View>
+
+            {activitySubmissions.length === 0 ? (
+              <Text style={styles.helper}>अभी तक कोई गतिविधि जमा नहीं की गई।</Text>
+            ) : (
+              <ScrollView horizontal style={styles.tableWrap} showsHorizontalScrollIndicator>
+                <View>
+                  <View style={styles.tableHeader}>
+                    <Text style={[styles.tableHeaderCell, styles.colDate]}>तिथि</Text>
+                    <Text style={[styles.tableHeaderCell, styles.colTitle]}>गतिविधि</Text>
+                    <Text style={[styles.tableHeaderCell, styles.colNode]}>विवरण</Text>
+                    <Text style={[styles.tableHeaderCell, styles.colCount]}>पुरुष</Text>
+                    <Text style={[styles.tableHeaderCell, styles.colCount]}>महिला</Text>
+                    <Text style={[styles.tableHeaderCell, styles.colCount]}>बच्चे</Text>
+                    <Text style={[styles.tableHeaderCell, styles.colCount]}>फाइलें</Text>
+                  </View>
+                  {activitySubmissions.map((entry) => (
+                    <View key={`activity-submission-${entry.id}`} style={styles.tableRow}>
+                      <Text style={[styles.tableCell, styles.colDate]}>{String(entry.created_at || '').slice(0, 10) || '-'}</Text>
+                      <Text style={[styles.tableCell, styles.colTitle]} numberOfLines={2}>{entry.activity_name || entry.assigned_activity_name || '-'}</Text>
+                      <Text style={[styles.tableCell, styles.colNode]} numberOfLines={2}>{entry.description || '-'}</Text>
+                      <Text style={[styles.tableCell, styles.colCount]}>{Number(entry.male_count || 0)}</Text>
+                      <Text style={[styles.tableCell, styles.colCount]}>{Number(entry.female_count || 0)}</Text>
+                      <Text style={[styles.tableCell, styles.colCount]}>{Number(entry.children_count || 0)}</Text>
+                      <Text style={[styles.tableCell, styles.colCount]}>{Array.isArray(entry.attachments) ? entry.attachments.length : 0}</Text>
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
+            )}
+          </View>
+        ) : null}
       </ScrollView>
 
       <StandardModal
-        visible={showTaskModal}
-        onClose={() => setShowTaskModal(false)}
-        title="Edit Task"
-        subtitle={editingTask?.title || '-'}
+        visible={showActivityModal}
+        onClose={() => setShowActivityModal(false)}
+        title="गतिविधि बनाएं"
+        subtitle="सौंपी गई गतिविधि जमा करें"
         footer={
           <>
-            <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowTaskModal(false)}>
-              <Text style={styles.btnTextDark}>Cancel</Text>
+            <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowActivityModal(false)}>
+              <Text style={styles.btnTextDark}>रद्द करें</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.btn, savingTask && styles.btnDisabled]} disabled={savingTask} onPress={() => void handleSaveTask()}>
-              <Text style={styles.btnText}>{savingTask ? 'Saving...' : 'Save Task'}</Text>
+            <TouchableOpacity style={[styles.btn, savingActivity && styles.btnDisabled]} disabled={savingActivity} onPress={() => void handleSaveActivity()}>
+              <Text style={styles.btnText}>{savingActivity ? 'सेव हो रहा है...' : 'गतिविधि सेव करें'}</Text>
             </TouchableOpacity>
           </>
         }
       >
-        {editingTask ? (
-          <View style={{ backgroundColor: '#FFF9F7', borderRadius: 16, padding: 14, gap: 8, marginBottom: 12, borderWidth: 1, borderColor: '#FCEFE6' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <MaterialIcons name="event-note" size={16} color={theme.colors.primary} />
-                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.colors.primary }}>DUE DATE: {editingTask.task_date || '-'}</Text>
-              </View>
-              <View style={{ backgroundColor: '#fff', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, borderWidth: 1, borderColor: '#EDDED5' }}>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: theme.colors.text.secondary }}>#{editingTask.node_id}</Text>
-              </View>
-            </View>
+        <Text style={styles.sectionTitle}>गतिविधि नाम</Text>
+        <View style={styles.statusRow}>
+          {activityAssignments.map((entry) => {
+            const selected = String(entry.id) === String(activityForm.assignmentId);
+            return (
+              <TouchableOpacity
+                key={`activity-assignment-${entry.id}`}
+                style={[styles.statusChip, selected && styles.statusChipActive]}
+                onPress={() => setActivityForm((prev) => ({ ...prev, assignmentId: String(entry.id) }))}
+              >
+                <Text style={[styles.statusChipText, selected && styles.statusChipTextActive]}>{entry.activity_name}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
-            <Text style={{ fontSize: 16, fontWeight: '800', color: theme.colors.text.primary }}>{editingTask.title}</Text>
-            {editingTask.description ? (
-              <Text style={{ fontSize: 13, color: theme.colors.text.secondary, lineHeight: 18 }}>{editingTask.description}</Text>
-            ) : null}
+        <Text style={[styles.sectionTitle, { marginTop: 10 }]}>विवरण</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          multiline
+          value={activityForm.description}
+          onChangeText={(value) => setActivityForm((prev) => ({ ...prev, description: value }))}
+          placeholder="की गई गतिविधि का विवरण लिखें"
+        />
 
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-              {parseLabelList(editingTask.task_categories).map((cat, idx) => (
-                <View key={`modal-cat-${idx}`} style={{ backgroundColor: theme.colors.primarySoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: theme.colors.primary }}>{cat}</Text>
-                </View>
-              ))}
-              {parseLabelList(editingTask.task_subcategories).map((sub, idx) => (
-                <View key={`modal-sub-${idx}`} style={{ backgroundColor: '#EFEFEF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: theme.colors.text.secondary }}>{sub}</Text>
+        <TouchableOpacity
+          style={[styles.inlineRow, { marginTop: 10 }]}
+          onPress={() => setActivityForm((prev) => ({ ...prev, includePopulation: !prev.includePopulation }))}
+        >
+          <MaterialIcons
+            name={activityForm.includePopulation ? 'check-box' : 'check-box-outline-blank'}
+            size={20}
+            color={theme.colors.primary}
+          />
+          <Text style={styles.sectionTitle}>जनसंख्या (add-on)</Text>
+        </TouchableOpacity>
+
+        {activityForm.includePopulation ? (
+          <View style={styles.populationSection}>
+            <Text style={styles.populationHint}>यदि संख्या दर्ज नहीं की गई तो 0 माना जाएगा</Text>
+            <View style={styles.counterGrid}>
+              {[
+                { key: 'maleCount', label: 'पुरुष' },
+                { key: 'femaleCount', label: 'महिला' },
+                { key: 'childrenCount', label: 'बच्चे' },
+              ].map((entry) => (
+                <View key={`activity-count-${entry.key}`} style={styles.counterCard}>
+                  <Text style={styles.counterLabel}>{entry.label}</Text>
+                  <View style={styles.counterControls}>
+                    <TouchableOpacity
+                      style={styles.counterBtn}
+                      onPress={() =>
+                        setActivityForm((prev) => {
+                          const current = readCountValue((prev as any)[entry.key]);
+                          return { ...prev, [entry.key]: String(Math.max(0, current - 1)) } as typeof prev;
+                        })
+                      }
+                    >
+                      <Text style={styles.counterBtnText}>−</Text>
+                    </TouchableOpacity>
+                    <TextInput
+                      style={styles.counterInput}
+                      keyboardType="number-pad"
+                      placeholder="0"
+                      value={(activityForm as any)[entry.key]}
+                      onChangeText={(value) =>
+                        setActivityForm((prev) => ({ ...prev, [entry.key]: sanitizeCountInput(value) }) as typeof prev)
+                      }
+                      onBlur={() =>
+                        setActivityForm((prev) => ({
+                          ...prev,
+                          [entry.key]: String(readCountValue((prev as any)[entry.key])),
+                        }) as typeof prev)
+                      }
+                    />
+                    <TouchableOpacity
+                      style={styles.counterBtn}
+                      onPress={() =>
+                        setActivityForm((prev) => {
+                          const current = readCountValue((prev as any)[entry.key]);
+                          return { ...prev, [entry.key]: String(current + 1) } as typeof prev;
+                        })
+                      }
+                    >
+                      <Text style={styles.counterBtnText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               ))}
             </View>
           </View>
         ) : null}
 
-        <Text style={styles.sectionTitle}>Status</Text>
+        <Text style={[styles.sectionTitle, { marginTop: 10 }]}>फोटो/दस्तावेज़ अपलोड करें</Text>
+        <View style={styles.inlineRow}>
+          <TextInput
+            style={[styles.input, styles.inputFlex]}
+            placeholder="संलग्नक URL पेस्ट करें"
+            value={activityForm.attachmentInput}
+            onChangeText={(value) => setActivityForm((prev) => ({ ...prev, attachmentInput: value }))}
+          />
+          <TouchableOpacity style={styles.inlineBtn} onPress={handleAddActivityAttachmentLink}>
+            <Text style={styles.inlineBtnText}>जोड़ें</Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity
+          style={[styles.inlineBtn, styles.uploadBtn, activityUploadingAttachment && styles.btnDisabled, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 8 }]}
+          disabled={activityUploadingAttachment}
+          onPress={() => void handleUploadActivityAttachment()}
+        >
+          <MaterialIcons name="cloud-upload" size={18} color="#fff" />
+          <Text style={styles.inlineBtnText}>{activityUploadingAttachment ? 'अपलोड हो रहा है...' : 'डिवाइस से फाइल अपलोड करें'}</Text>
+        </TouchableOpacity>
+
+        <View style={styles.attachmentList}>
+          {activityForm.attachments.map((entry, idx) => (
+            <View key={`activity-attachment-${idx}`} style={[styles.attachmentItem, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 10, backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#EDDED5' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <MaterialIcons name="insert-drive-file" size={18} color={theme.colors.primary} />
+                <Text style={[styles.attachmentText, { flex: 1 }]} numberOfLines={1}>
+                  {entry.name || entry.url}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setActivityForm((prev) => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== idx) }))} style={{ padding: 4 }}>
+                <MaterialIcons name="close" size={18} color={theme.colors.error} />
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+      </StandardModal>
+
+      <StandardModal
+        visible={showTaskModal}
+        onClose={() => {
+          setShowTaskModal(false);
+          setTaskContext(null);
+          setEditingTask(null);
+        }}
+        title={editingTask ? 'Edit Task' : 'Create Task'}
+        subtitle={taskContext?.subcategory || taskContext?.category || editingTask?.title || '-'}
+        footer={
+          <>
+            <TouchableOpacity
+              style={[styles.btn, styles.btnLight]}
+              onPress={() => {
+                setShowTaskModal(false);
+                setTaskContext(null);
+                setEditingTask(null);
+              }}
+            >
+              <Text style={styles.btnTextDark}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.btn, savingTask && styles.btnDisabled]} disabled={savingTask} onPress={() => void handleSaveTask()}>
+              <Text style={styles.btnText}>{savingTask ? 'Saving...' : editingTask ? 'Update Task' : 'Create Task'}</Text>
+            </TouchableOpacity>
+          </>
+        }
+      >
+        {taskContext ? (
+          <View style={{ backgroundColor: '#FFF9F7', borderRadius: 16, padding: 12, gap: 4, marginBottom: 12, borderWidth: 1, borderColor: '#FCEFE6' }}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: theme.colors.primary }}>
+              Subcategory: {taskContext.subcategory || '-'}
+            </Text>
+            <Text style={styles.cardMeta}>Category: {taskContext.category || '-'}</Text>
+            <Text style={styles.cardMeta}>Node Name: {taskContext.nodeName || taskContext.path || `#${taskContext.nodeId}`}</Text>
+            <Text style={styles.cardMeta}>Level: {taskContext.nodeLevel || '-'}</Text>
+          </View>
+        ) : null}
+
+        <Text style={styles.sectionTitle}>Task Title</Text>
+        <TextInput
+          style={styles.input}
+          value={taskForm.title}
+          onChangeText={(value) => setTaskForm((prev) => ({ ...prev, title: value }))}
+          placeholder="Enter task title"
+        />
+
+        <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Description</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          multiline
+          value={taskForm.description}
+          onChangeText={(value) => setTaskForm((prev) => ({ ...prev, description: value }))}
+          placeholder="Enter task description"
+        />
+
+        <View style={[styles.inlineRow, { marginTop: 10 }]}>
+          <TextInput
+            style={[styles.input, styles.inputFlex]}
+            value={taskForm.taskDate}
+            onChangeText={(value) => setTaskForm((prev) => ({ ...prev, taskDate: value }))}
+            placeholder="Task Date (YYYY-MM-DD)"
+          />
+          <TextInput
+            style={[styles.input, styles.inputFlex]}
+            value={taskForm.dueDate}
+            onChangeText={(value) => setTaskForm((prev) => ({ ...prev, dueDate: value }))}
+            placeholder="Due Date (YYYY-MM-DD)"
+          />
+        </View>
+
+        <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Status</Text>
         <View style={styles.statusRow}>
           {TASK_STATUS_OPTIONS.map((status) => {
-            const active = taskDraftStatus === status;
+            const active = taskForm.status === status;
             return (
               <TouchableOpacity
                 key={`status-${status}`}
                 style={[styles.statusChip, active && styles.statusChipActive, { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 14 }]}
-                onPress={() => setTaskDraftStatus(status)}
+                onPress={() => setTaskForm((prev) => ({ ...prev, status }))}
               >
                 <MaterialIcons
                   name={status === 'completed' ? 'check-circle' : status === 'in_progress' ? 'timelapse' : 'radio-button-unchecked'}
@@ -794,13 +1148,81 @@ export default function KaryakariniMemberScreen() {
           })}
         </View>
 
+        <TouchableOpacity
+          style={[styles.inlineRow, { marginTop: 10 }]}
+          onPress={() => setTaskForm((prev) => ({ ...prev, includePopulation: !prev.includePopulation }))}
+        >
+          <MaterialIcons
+            name={taskForm.includePopulation ? 'check-box' : 'check-box-outline-blank'}
+            size={20}
+            color={theme.colors.primary}
+          />
+          <Text style={styles.sectionTitle}>जनसंख्या (add-on)</Text>
+        </TouchableOpacity>
+
+        {taskForm.includePopulation ? (
+          <View style={styles.populationSection}>
+            <Text style={styles.populationHint}>यदि संख्या दर्ज नहीं की गई तो 0 माना जाएगा</Text>
+            <View style={styles.counterGrid}>
+              {[
+                { key: 'maleCount', label: 'पुरुष' },
+                { key: 'femaleCount', label: 'महिला' },
+                { key: 'childrenCount', label: 'बच्चे' },
+              ].map((entry) => (
+                <View key={`task-count-${entry.key}`} style={styles.counterCard}>
+                  <Text style={styles.counterLabel}>{entry.label}</Text>
+                  <View style={styles.counterControls}>
+                    <TouchableOpacity
+                      style={styles.counterBtn}
+                      onPress={() =>
+                        setTaskForm((prev) => {
+                          const current = readCountValue((prev as any)[entry.key]);
+                          return { ...prev, [entry.key]: String(Math.max(0, current - 1)) };
+                        })
+                      }
+                    >
+                      <Text style={styles.counterBtnText}>−</Text>
+                    </TouchableOpacity>
+                    <TextInput
+                      style={styles.counterInput}
+                      keyboardType="number-pad"
+                      placeholder="0"
+                      value={(taskForm as any)[entry.key]}
+                      onChangeText={(value) =>
+                        setTaskForm((prev) => ({ ...prev, [entry.key]: sanitizeCountInput(value) }))
+                      }
+                      onBlur={() =>
+                        setTaskForm((prev) => ({
+                          ...prev,
+                          [entry.key]: String(readCountValue((prev as any)[entry.key])),
+                        }))
+                      }
+                    />
+                    <TouchableOpacity
+                      style={styles.counterBtn}
+                      onPress={() =>
+                        setTaskForm((prev) => {
+                          const current = readCountValue((prev as any)[entry.key]);
+                          return { ...prev, [entry.key]: String(current + 1) };
+                        })
+                      }
+                    >
+                      <Text style={styles.counterBtnText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
         <Text style={[styles.sectionTitle, { marginTop: 12 }]}>Upload Documents</Text>
         <View style={styles.inlineRow}>
           <TextInput
             style={[styles.input, styles.inputFlex]}
             placeholder="Paste attachment URL (https://...)"
-            value={taskAttachmentInput}
-            onChangeText={setTaskAttachmentInput}
+            value={taskForm.attachmentInput}
+            onChangeText={(value) => setTaskForm((prev) => ({ ...prev, attachmentInput: value }))}
             autoCapitalize="none"
           />
           <TouchableOpacity style={styles.inlineBtn} onPress={handleAddAttachmentLink}>
@@ -817,7 +1239,7 @@ export default function KaryakariniMemberScreen() {
         </TouchableOpacity>
 
         <View style={styles.attachmentList}>
-          {taskDraftAttachments.map((entry, idx) => (
+          {taskForm.attachments.map((entry, idx) => (
             <View key={`task-attachment-${idx}`} style={[styles.attachmentItem, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 10, backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#EDDED5' }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                 <MaterialIcons name="insert-drive-file" size={18} color={theme.colors.primary} />
@@ -825,7 +1247,15 @@ export default function KaryakariniMemberScreen() {
                   {entry.name || entry.url}
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => setTaskDraftAttachments((prev) => prev.filter((_, i) => i !== idx))} style={{ padding: 4 }}>
+              <TouchableOpacity
+                onPress={() =>
+                  setTaskForm((prev) => ({
+                    ...prev,
+                    attachments: prev.attachments.filter((_, i) => i !== idx),
+                  }))
+                }
+                style={{ padding: 4 }}
+              >
                 <MaterialIcons name="close" size={18} color={theme.colors.error} />
               </TouchableOpacity>
             </View>
@@ -1027,6 +1457,9 @@ const styles = StyleSheet.create({
   colDate: {
     width: 110,
   },
+  colNode: {
+    width: 240,
+  },
   colCount: {
     width: 110,
   },
@@ -1145,6 +1578,66 @@ const styles = StyleSheet.create({
     gap: 8,
     alignItems: 'center',
   },
+  populationSection: {
+    marginTop: 4,
+    gap: 6,
+  },
+  populationHint: {
+    fontSize: 10,
+    color: theme.colors.text.secondary,
+    fontWeight: '600',
+  },
+  counterGrid: {
+    gap: 6,
+  },
+  counterCard: {
+    borderWidth: 1,
+    borderColor: theme.colors.borderLight,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  counterLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  counterControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  counterBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceContainerHigh,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  counterBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: theme.colors.primary,
+    lineHeight: 16,
+  },
+  counterInput: {
+    flex: 1,
+    height: 34,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 6,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+    backgroundColor: theme.colors.background,
+    paddingHorizontal: 8,
+  },
   input: {
     borderWidth: 1,
     borderColor: theme.colors.border,
@@ -1157,6 +1650,10 @@ const styles = StyleSheet.create({
   },
   inputFlex: {
     flex: 1,
+  },
+  textArea: {
+    minHeight: 88,
+    textAlignVertical: 'top',
   },
   inlineBtn: {
     borderRadius: 10,

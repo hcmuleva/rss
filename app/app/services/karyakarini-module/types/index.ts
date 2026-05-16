@@ -63,6 +63,10 @@ export type KaryakariniAssignableUser = {
   gotra?: string | null;
   village?: string | null;
   avatar?: string | null;
+  position?: string | null;
+  node_level?: string | null;
+  node_name?: string | null;
+  hierarchy_path?: string | null;
 };
 
 export type KaryakariniAssignableNode = {
@@ -196,6 +200,9 @@ export type KaryakariniTask = {
   task_date: string;
   due_date?: string | null;
   status?: string;
+  male_count?: number;
+  female_count?: number;
+  children_count?: number;
   hierarchy_l1?: string | null;
   hierarchy_l2?: string | null;
   hierarchy_l3?: string | null;
@@ -255,4 +262,41 @@ export type KaryakariniNotificationItem = {
   is_read?: boolean;
   read_at?: string | null;
   created_at?: string | null;
+};
+
+export type KaryakariniActivityAssignment = {
+  id: number;
+  version_id: number;
+  node_id?: number | null;
+  node_name?: string | null;
+  node_level?: string | null;
+  activity_name: string;
+  description?: string | null;
+  assigned_user_id: number;
+  assigned_user_name?: string | null;
+  assigned_user_mobile?: string | null;
+  assigned_by?: number | null;
+  assigned_by_name?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type KaryakariniActivitySubmission = {
+  id: number;
+  assignment_id: number;
+  version_id: number;
+  submitted_by: number;
+  submitted_by_name?: string | null;
+  activity_name: string;
+  assigned_activity_name?: string | null;
+  description?: string | null;
+  male_count?: number;
+  female_count?: number;
+  children_count?: number;
+  attachments?: KaryakariniAttachment[] | null;
+  node_id?: number | null;
+  node_name?: string | null;
+  hierarchy_path?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };

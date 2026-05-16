@@ -39,6 +39,12 @@ const parseMemberLabelList = (value, fallback = null) => {
   const fallbackRaw = String(fallback || '').trim();
   return fallbackRaw ? [fallbackRaw] : [];
 };
+const ACTIVITY_NAME_OPTIONS = [
+  'धर्मरक्षा सूत्र',
+  'धर्मरक्षा दिवस',
+  'भारतमाता पूजन',
+  'संत यात्रा',
+];
 
 const normalizeMemberUserRole = (value) => (String(value || '').trim().toLowerCase() === 'admin' ? 'admin' : 'user');
 
@@ -488,9 +494,65 @@ exports.searchUsers = async (req, res) => {
       });
     }
 
+    const inputVersion = req.query.versionId || req.query.version || null;
+    const requestedNodeId = parsePositiveNumber(req.query.nodeId);
+    const userRole = normalizeRole(req.userRole || req.user?.role);
+    let versionId = null;
+    let allowedNodeIds = null;
+
+    if (inputVersion || requestedNodeId) {
+      versionId = await KaryakariniModel.resolveVersionId(inputVersion || 'current');
+      if (!versionId) {
+        return res.status(404).json({
+          success: false,
+          message: 'Version not found',
+        });
+      }
+
+      const visibleNodeIds = await KaryakariniModel.getVisibleNodeIdsForUser({
+        userId: req.user?.id,
+        userRole,
+        versionId,
+      });
+
+      if (userRole === 'superadmin') {
+        allowedNodeIds = visibleNodeIds;
+      } else {
+        const scopeRoots = await KaryakariniModel.getScopeRootNodes({
+          userId: req.user?.id,
+          versionId,
+        });
+        const scopeRootSet = new Set(
+          scopeRoots.map((row) => Number(row.node_id)).filter((id) => Number.isFinite(id) && id > 0)
+        );
+        allowedNodeIds = visibleNodeIds.filter((id) => !scopeRootSet.has(Number(id)));
+      }
+
+      if (requestedNodeId) {
+        const canAccess = await KaryakariniModel.hasNodeAccess({
+          nodeId: requestedNodeId,
+          userId: req.user?.id,
+          userRole,
+          versionId,
+          includeSelf: userRole === 'superadmin',
+        });
+        if (!canAccess) {
+          return res.status(200).json({
+            success: true,
+            data: {
+              users: [],
+            },
+          });
+        }
+      }
+    }
+
     const rows = await KaryakariniModel.searchUsersForAssignment({
       query,
       limit: Number(req.query.limit || 12),
+      versionId,
+      nodeId: requestedNodeId || null,
+      allowedNodeIds: Array.isArray(allowedNodeIds) ? allowedNodeIds : null,
     });
 
     return res.status(200).json({
@@ -1058,24 +1120,49 @@ exports.createTask = async (req, res) => {
     }
 
     const userRole = normalizeRole(req.userRole || req.user?.role);
-    const hasAccess = await KaryakariniModel.hasNodeAccess({
+    const hasAdminAccess = await KaryakariniModel.hasNodeAccess({
       nodeId,
       userId: req.user?.id,
       userRole,
       versionId,
       includeSelf: false,
     });
-    if (!hasAccess) {
-      return res.status(403).json({
-        success: false,
-        message: 'You can create tasks only in child nodes under your assigned scope',
+    if (!hasAdminAccess) {
+      const hasMemberTaskAccess = await KaryakariniModel.hasUserTaskAssignmentForSubcategories({
+        userId: req.user?.id,
+        versionId,
+        nodeId,
+        subcategories: taskSubcategories,
       });
+      if (!hasMemberTaskAccess) {
+        return res.status(403).json({
+          success: false,
+          message: 'You can create tasks only for your assigned subcategory and node level',
+        });
+      }
     }
 
-    const assignedUserIds = Array.isArray(req.body?.assignedUserIds) && req.body.assignedUserIds.length > 0
+    const requestedAssignedUserIds = Array.isArray(req.body?.assignedUserIds) && req.body.assignedUserIds.length > 0
       ? [...new Set(req.body.assignedUserIds.map(Number).filter((id) => id > 0))]
       : (parsePositiveNumber(req.body?.assignedUserId) ? [parsePositiveNumber(req.body.assignedUserId)] : []);
 
+    if (hasAdminAccess && requestedAssignedUserIds.length > 0) {
+      const eligibleUserIds = await KaryakariniModel.getEligibleTaskAssigneeUserIds({
+        nodeId,
+        versionId,
+      });
+      const eligibleSet = new Set(eligibleUserIds.map((id) => Number(id)));
+      const invalidAssignees = requestedAssignedUserIds.filter((id) => !eligibleSet.has(Number(id)));
+      if (invalidAssignees.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Some selected assignees are not in selected node/lower hierarchy scope',
+          invalidAssignees,
+        });
+      }
+    }
+
+    const assignedUserIds = hasAdminAccess ? [...requestedAssignedUserIds] : [];
     if (assignedUserIds.length === 0) {
       assignedUserIds.push(0);
     }
@@ -1092,6 +1179,9 @@ exports.createTask = async (req, res) => {
         taskDate: toDateString(req.body.taskDate || req.body.date, new Date().toISOString().slice(0, 10)),
         dueDate: toDateString(req.body.dueDate, null),
         status: req.body.status ? String(req.body.status) : 'open',
+        maleCount: Math.max(0, Number(req.body?.maleCount) || 0),
+        femaleCount: Math.max(0, Number(req.body?.femaleCount) || 0),
+        childrenCount: Math.max(0, Number(req.body?.childrenCount) || 0),
         locationHierarchy:
           req.body?.locationHierarchy && typeof req.body.locationHierarchy === 'object'
             ? req.body.locationHierarchy
@@ -1164,38 +1254,186 @@ exports.createTask = async (req, res) => {
 
 exports.updateTask = async (req, res) => {
   try {
-    const taskId = req.params.taskId;
-    const versionId = req.body.versionId || req.query.versionId;
-    if (!taskId || !versionId) {
-      return res.status(400).json({ success: false, message: 'Task ID and version ID are required' });
+    const taskId = parsePositiveNumber(req.params.taskId);
+    if (!taskId) {
+      return res.status(400).json({ success: false, message: 'Task ID is required' });
     }
+
+    const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.query?.versionId || 'current');
+    if (!versionId) {
+      return res.status(404).json({ success: false, message: 'Version not found' });
+    }
+
+    const existingTask = await KaryakariniModel.getTaskById({ taskId, versionId });
+    if (!existingTask) {
+      return res.status(404).json({ success: false, message: 'Task not found' });
+    }
+
+    const targetNodeId = parsePositiveNumber(req.body?.nodeId) || Number(existingTask.node_id || 0);
+    if (!targetNodeId) {
+      return res.status(400).json({ success: false, message: 'Task node is required' });
+    }
+
+    const userRole = normalizeRole(req.userRole || req.user?.role);
+    const hasAdminAccess = await KaryakariniModel.hasNodeAccess({
+      nodeId: targetNodeId,
+      userId: req.user?.id,
+      userRole,
+      versionId,
+      includeSelf: false,
+    });
+
+    const requestedCategories = parseMemberLabelList(req.body?.categories, req.body?.category);
+    const requestedSubcategories = parseMemberLabelList(req.body?.subcategories, req.body?.subcategory);
+    const existingTaskSubcategories = Array.isArray(existingTask.task_subcategories) ? existingTask.task_subcategories : [];
+    const effectiveSubcategories = requestedSubcategories.length ? requestedSubcategories : existingTaskSubcategories;
+
+    if (!hasAdminAccess) {
+      const hasMemberTaskAccess = await KaryakariniModel.hasUserTaskAssignmentForSubcategories({
+        userId: req.user?.id,
+        versionId,
+        nodeId: targetNodeId,
+        subcategories: effectiveSubcategories,
+      });
+      if (!hasMemberTaskAccess) {
+        return res.status(403).json({
+          success: false,
+          message: 'You can edit tasks only for your assigned subcategory and node level',
+        });
+      }
+    }
+
+    const requestedAssignedUserIds = Array.isArray(req.body?.assignedUserIds) && req.body.assignedUserIds.length > 0
+      ? [...new Set(req.body.assignedUserIds.map(Number).filter((id) => id > 0))]
+      : (parsePositiveNumber(req.body?.assignedUserId) ? [parsePositiveNumber(req.body.assignedUserId)] : []);
+
+    if (hasAdminAccess && requestedAssignedUserIds.length > 0) {
+      const eligibleUserIds = await KaryakariniModel.getEligibleTaskAssigneeUserIds({
+        nodeId: targetNodeId,
+        versionId,
+      });
+      const eligibleSet = new Set(eligibleUserIds.map((id) => Number(id)));
+      const invalidAssignees = requestedAssignedUserIds.filter((id) => !eligibleSet.has(Number(id)));
+      if (invalidAssignees.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Some selected assignees are not in selected node/lower hierarchy scope',
+          invalidAssignees,
+        });
+      }
+    }
+
     const updated = await KaryakariniModel.updateTask({
       taskId,
       versionId,
-      nodeId: req.body.nodeId,
+      nodeId: targetNodeId,
       title: req.body.title,
       description: req.body.description,
       taskDate: req.body.taskDate,
       dueDate: req.body.dueDate,
       status: req.body.status,
+      maleCount: req.body?.maleCount,
+      femaleCount: req.body?.femaleCount,
+      childrenCount: req.body?.childrenCount,
       assignedUserId: req.body.assignedUserId,
-      assignedUserIds: req.body.assignedUserIds,
-      categories: req.body.categories || (req.body.category ? [req.body.category] : []),
-      subcategories: req.body.subcategories || (req.body.subcategory ? [req.body.subcategory] : []),
+      assignedUserIds: hasAdminAccess ? requestedAssignedUserIds : [],
+      categories: requestedCategories,
+      subcategories: requestedSubcategories,
       locationHierarchy: req.body.locationHierarchy || req.body.hierarchy || {},
       attachments: req.body.attachments,
       updatedBy: req.user ? req.user.id : null,
     });
+    const refreshed = await KaryakariniModel.getTaskById({ taskId, versionId });
     return res.status(200).json({
       success: true,
       message: 'Task updated successfully',
-      data: updated,
+      data: refreshed || updated,
     });
   } catch (error) {
     console.error('Update Task error:', error);
     return res.status(500).json({
       success: false,
       message: error?.message || 'Internal server error while updating task',
+    });
+  }
+};
+
+exports.assignTaskUsers = async (req, res) => {
+  try {
+    const nodeId = parsePositiveNumber(req.body?.nodeId);
+    if (!nodeId) {
+      return res.status(400).json({ success: false, message: 'nodeId is required' });
+    }
+
+    const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.query?.versionId || 'current');
+    if (!versionId) {
+      return res.status(404).json({ success: false, message: 'Version not found' });
+    }
+
+    const categories = parseMemberLabelList(req.body?.categories, req.body?.category);
+    const subcategories = parseMemberLabelList(req.body?.subcategories, req.body?.subcategory);
+    if (!subcategories.length) {
+      return res.status(400).json({ success: false, message: 'Task subcategory selection is required' });
+    }
+
+    const userIds = Array.isArray(req.body?.assignedUserIds) && req.body.assignedUserIds.length > 0
+      ? [...new Set(req.body.assignedUserIds.map(Number).filter((id) => id > 0))]
+      : (parsePositiveNumber(req.body?.assignedUserId) ? [parsePositiveNumber(req.body.assignedUserId)] : []);
+    if (!userIds.length) {
+      return res.status(400).json({ success: false, message: 'At least one user must be selected' });
+    }
+
+    const userRole = normalizeRole(req.userRole || req.user?.role);
+    const hasAccess = await KaryakariniModel.hasNodeAccess({
+      nodeId,
+      userId: req.user?.id,
+      userRole,
+      versionId,
+      includeSelf: false,
+    });
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can assign users only in child nodes under your assigned scope',
+      });
+    }
+
+    const eligibleUserIds = await KaryakariniModel.getEligibleTaskAssigneeUserIds({ nodeId, versionId });
+    const eligibleSet = new Set(eligibleUserIds.map((id) => Number(id)));
+    const invalidUsers = userIds.filter((id) => !eligibleSet.has(Number(id)));
+    if (invalidUsers.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Some selected users are outside selected node hierarchy',
+        invalidUsers,
+      });
+    }
+
+    const assignedMembers = await KaryakariniModel.assignUsersToTaskScope({
+      versionId,
+      nodeId,
+      categories,
+      subcategories,
+      userIds,
+      createdBy: req.user?.id || null,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `${assignedMembers.length} user(s) assigned to task subcategory`,
+      data: {
+        nodeId,
+        versionId,
+        categories,
+        subcategories,
+        assignedMembers,
+      },
+    });
+  } catch (error) {
+    console.error('Assign task users error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Internal server error while assigning task users',
     });
   }
 };
@@ -1278,6 +1516,186 @@ exports.getMyTeams = async (req, res) => {
       success: false,
       message: 'Failed to load my karyakarini teams',
     });
+  }
+};
+
+exports.createActivityAssignment = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.query?.versionId || 'current');
+    if (!versionId) {
+      return res.status(404).json({ success: false, message: 'Version not found' });
+    }
+
+    const activityName = String(req.body?.activityName || '').trim();
+    const assignedUserId = parsePositiveNumber(req.body?.assignedUserId);
+    const nodeId = parsePositiveNumber(req.body?.nodeId);
+    if (!activityName || !ACTIVITY_NAME_OPTIONS.includes(activityName)) {
+      return res.status(400).json({
+        success: false,
+        message: `activityName must be one of: ${ACTIVITY_NAME_OPTIONS.join(', ')}`,
+      });
+    }
+    if (!assignedUserId) {
+      return res.status(400).json({ success: false, message: 'assignedUserId is required' });
+    }
+
+    if (nodeId) {
+      const userRole = normalizeRole(req.userRole || req.user?.role);
+      const hasAccess = await KaryakariniModel.hasNodeAccess({
+        nodeId,
+        userId: req.user?.id,
+        userRole,
+        versionId,
+      });
+      if (!hasAccess) {
+        return res.status(403).json({ success: false, message: 'You can assign activities only within your scope' });
+      }
+    }
+
+    const created = await KaryakariniModel.createActivityAssignment({
+      versionId,
+      nodeId,
+      activityName,
+      description: req.body?.description || null,
+      assignedUserId,
+      assignedBy: req.user?.id || null,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Activity assigned successfully',
+      data: created,
+    });
+  } catch (error) {
+    console.error('Failed to create activity assignment:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Failed to create activity assignment',
+    });
+  }
+};
+
+exports.getActivityAssignments = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.query.versionId || req.query.version || 'current');
+    if (!versionId) {
+      return res.status(404).json({ success: false, message: 'Version not found' });
+    }
+    const result = await KaryakariniModel.getActivityAssignments({
+      versionId,
+      assignedUserId: parsePositiveNumber(req.query.assignedUserId),
+      assignedBy: parsePositiveNumber(req.query.assignedBy),
+      page: Number(req.query.page || 1),
+      limit: Number(req.query.limit || 20),
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        versionId,
+        activityNameOptions: ACTIVITY_NAME_OPTIONS,
+        assignments: result.rows,
+        pagination: result.pagination,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to get activity assignments:', error);
+    return res.status(500).json({ success: false, message: 'Failed to get activity assignments' });
+  }
+};
+
+exports.getMyActivityAssignments = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.query.versionId || req.query.version || 'current');
+    if (!versionId) {
+      return res.status(404).json({ success: false, message: 'Version not found' });
+    }
+    const result = await KaryakariniModel.getActivityAssignments({
+      versionId,
+      assignedUserId: req.user?.id,
+      page: Number(req.query.page || 1),
+      limit: Number(req.query.limit || 100),
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        versionId,
+        activityNameOptions: ACTIVITY_NAME_OPTIONS,
+        assignments: result.rows,
+        pagination: result.pagination,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to get my activity assignments:', error);
+    return res.status(500).json({ success: false, message: 'Failed to get my activity assignments' });
+  }
+};
+
+exports.createMyActivitySubmission = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.query?.versionId || 'current');
+    if (!versionId) {
+      return res.status(404).json({ success: false, message: 'Version not found' });
+    }
+    const assignmentId = parsePositiveNumber(req.body?.assignmentId);
+    if (!assignmentId) {
+      return res.status(400).json({ success: false, message: 'assignmentId is required' });
+    }
+
+    const assignment = await KaryakariniModel.getActivityAssignmentById({ assignmentId, versionId });
+    if (!assignment || Number(assignment.assigned_user_id) !== Number(req.user?.id || 0)) {
+      return res.status(403).json({ success: false, message: 'Activity is not assigned to current user' });
+    }
+
+    const created = await KaryakariniModel.createActivitySubmission({
+      assignmentId,
+      versionId,
+      submittedBy: req.user?.id,
+      activityName: assignment.activity_name,
+      description: req.body?.description || null,
+      maleCount: Number(req.body?.maleCount || 0),
+      femaleCount: Number(req.body?.femaleCount || 0),
+      childrenCount: Number(req.body?.childrenCount || 0),
+      attachments: Array.isArray(req.body?.attachments) ? req.body.attachments : [],
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Activity submitted successfully',
+      data: created,
+    });
+  } catch (error) {
+    console.error('Failed to create activity submission:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Failed to create activity submission',
+    });
+  }
+};
+
+exports.getMyActivitySubmissions = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.query.versionId || req.query.version || 'current');
+    if (!versionId) {
+      return res.status(404).json({ success: false, message: 'Version not found' });
+    }
+    const result = await KaryakariniModel.getActivitySubmissions({
+      versionId,
+      submittedBy: req.user?.id,
+      assignedUserId: req.user?.id,
+      page: Number(req.query.page || 1),
+      limit: Number(req.query.limit || 20),
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        versionId,
+        submissions: result.rows,
+        pagination: result.pagination,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to get my activity submissions:', error);
+    return res.status(500).json({ success: false, message: 'Failed to get my activity submissions' });
   }
 };
 
