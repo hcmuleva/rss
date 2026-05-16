@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import { ActivityIndicator, Alert, Linking, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ScreenHeader } from '../../core/components/ScreenHeader';
 import { PageHeaderCard } from '../../core/components/PageHeaderCard';
@@ -86,7 +87,7 @@ export default function KaryakariniMemberScreen() {
     attachmentInput: '',
     attachments: [] as KaryakariniAttachment[],
   });
-  const [selectedCategoryKey, setSelectedCategoryKey] = useState<string>('all');
+  const [selectedCategoryKey, setSelectedCategoryKey] = useState<string>('');
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editingTask, setEditingTask] = useState<KaryakariniTask | null>(null);
   const [taskContext, setTaskContext] = useState<AssignmentCard | null>(null);
@@ -123,7 +124,7 @@ export default function KaryakariniMemberScreen() {
       return;
     }
 
-    const [teamsRes, invitationRes, taskRes, unreadRes, assignmentRes, submissionRes] = await Promise.all([
+    const [teamsRes, invitationRes, taskRes, unreadRes, assignmentRes, submissionRes] = await Promise.allSettled([
       karyakariniClient.get('/karyakarini/my/teams', { params: { versionId: selectedVersionId } }),
       karyakariniClient.get('/karyakarini/my/invitations', { params: { versionId: selectedVersionId, limit: 100 } }),
       karyakariniClient.get('/karyakarini/my/tasks', { params: { versionId: selectedVersionId, limit: 100 } }),
@@ -132,14 +133,17 @@ export default function KaryakariniMemberScreen() {
       karyakariniClient.get('/karyakarini/my/activity-submissions', { params: { versionId: selectedVersionId, limit: 100 } }),
     ]);
 
-    const loadedTeams = (teamsRes?.data?.data?.teams || []) as KaryakariniMyTeam[];
-    const loadedTasks = (taskRes?.data?.data?.tasks || []) as KaryakariniTask[];
+    const getValue = (result: PromiseSettledResult<any>) =>
+      result.status === 'fulfilled' ? result.value : null;
+
+    const loadedTeams = (getValue(teamsRes)?.data?.data?.teams || []) as KaryakariniMyTeam[];
+    const loadedTasks = (getValue(taskRes)?.data?.data?.tasks || []) as KaryakariniTask[];
     setTeams(loadedTeams);
-    setInvitations((invitationRes?.data?.data?.invitations || []) as KaryakariniInvitation[]);
+    setInvitations((getValue(invitationRes)?.data?.data?.invitations || []) as KaryakariniInvitation[]);
     setTasks(loadedTasks);
-    setActivityAssignments((assignmentRes?.data?.data?.assignments || []) as KaryakariniActivityAssignment[]);
-    setActivitySubmissions((submissionRes?.data?.data?.submissions || []) as KaryakariniActivitySubmission[]);
-    setNotificationUnreadCount(Number(unreadRes?.data?.data?.total || 0));
+    setActivityAssignments((getValue(assignmentRes)?.data?.data?.assignments || []) as KaryakariniActivityAssignment[]);
+    setActivitySubmissions((getValue(submissionRes)?.data?.data?.submissions || []) as KaryakariniActivitySubmission[]);
+    setNotificationUnreadCount(Number(getValue(unreadRes)?.data?.data?.total || 0));
   }, []);
 
   const loadData = useCallback(async () => {
@@ -180,6 +184,48 @@ export default function KaryakariniMemberScreen() {
     }
   }, [loadData]);
 
+  const handleDownloadAttachment = useCallback(async (url?: string | null, fileName?: string | null) => {
+    const safeUrl = String(url || '').trim();
+    if (!safeUrl) return;
+    try {
+      if (Platform.OS === 'web') {
+        try {
+          const response = await fetch(safeUrl);
+          const blob = await response.blob();
+          const blobUrl = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = fileName || safeUrl.split('/').pop() || 'download';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(blobUrl);
+        } catch {
+          const a = document.createElement('a');
+          a.href = safeUrl;
+          a.download = fileName || safeUrl.split('/').pop() || 'download';
+          a.target = '_blank';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+      } else {
+        const safeFileName = (fileName || safeUrl.split('/').pop() || 'file').replace(/[^a-zA-Z0-9.\-_]/g, '_');
+        const fileUri = `${FileSystem.documentDirectory}${safeFileName}`;
+        const downloadResult = await FileSystem.downloadAsync(safeUrl, fileUri);
+        if (downloadResult.status === 200) {
+          Alert.alert('Download Complete', `File saved to: ${downloadResult.uri}`);
+        } else {
+          Alert.alert('Error', 'Failed to download file');
+          Linking.openURL(safeUrl).catch(() => {});
+        }
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to download file. Opening link directly.');
+      Linking.openURL(safeUrl).catch(() => {});
+    }
+  }, []);
+
   const handleOpenTaskEditor = useCallback((task: KaryakariniTask) => {
     const nextContext: AssignmentCard = {
       key: `task-context-${task.id}`,
@@ -208,13 +254,13 @@ export default function KaryakariniMemberScreen() {
       femaleCount: String(Number(task.female_count || 0)),
       childrenCount: String(Number(task.children_count || 0)),
       attachmentInput: '',
-      attachments: [],
+      attachments: Array.isArray(task.attachments) ? [...task.attachments] : [],
     });
     setShowTaskModal(true);
   }, []);
 
   const handleOpenTaskCreate = useCallback(() => {
-    if (selectedCategoryKey === 'all') {
+    if (selectedCategoryKey === 'all' || !selectedCategoryKey) {
       Alert.alert('Select scope', 'Please select exactly one subcategory card to create a task.');
       return;
     }
@@ -261,15 +307,11 @@ export default function KaryakariniMemberScreen() {
 
   const handleUploadTaskAttachment = useCallback(async () => {
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission', 'Media library permission is required');
-        return;
-      }
-
-      const picked = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.All,
-        quality: 0.8,
+      setTaskUploadingAttachment(true);
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        multiple: false,
+        copyToCacheDirectory: true,
       });
       if (picked.canceled || !picked.assets?.[0]) return;
 
@@ -277,16 +319,17 @@ export default function KaryakariniMemberScreen() {
       const form = new FormData();
       form.append('folder', 'karyakarini');
       form.append('category', 'task');
-      form.append(
-        'file',
-        {
+      const assetFile = (asset as any)?.file;
+      if (assetFile) {
+        form.append('file', assetFile);
+      } else {
+        form.append('file', {
           uri: asset.uri,
-          name: asset.fileName || `task-${Date.now()}`,
-          type: asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg'),
-        } as any
-      );
+          name: asset.name || `task-${Date.now()}`,
+          type: asset.mimeType || 'application/octet-stream',
+        } as any);
+      }
 
-      setTaskUploadingAttachment(true);
       const response = await karyakariniClient.post('/karyakarini/upload/attachment', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -302,8 +345,8 @@ export default function KaryakariniMemberScreen() {
           ...prev.attachments,
           {
             url,
-            type: String(payload.fileType || asset.mimeType || '').trim() || undefined,
-            name: String(payload.fileName || asset.fileName || `task-${Date.now()}`).trim(),
+            type: String(payload.fileType || asset.mimeType || '').trim() || 'document',
+            name: String(payload.fileName || asset.name || `task-${Date.now()}`).trim(),
           },
         ],
       }));
@@ -384,14 +427,11 @@ export default function KaryakariniMemberScreen() {
 
   const handleUploadActivityAttachment = useCallback(async () => {
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission', 'Media library permission is required');
-        return;
-      }
-      const picked = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.All,
-        quality: 0.8,
+      setActivityUploadingAttachment(true);
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        multiple: false,
+        copyToCacheDirectory: true,
       });
       if (picked.canceled || !picked.assets?.[0]) return;
 
@@ -399,15 +439,17 @@ export default function KaryakariniMemberScreen() {
       const form = new FormData();
       form.append('folder', 'karyakarini');
       form.append('category', 'activity-submission');
-      form.append(
-        'file',
-        {
+      const assetFile = (asset as any)?.file;
+      if (assetFile) {
+        form.append('file', assetFile);
+      } else {
+        form.append('file', {
           uri: asset.uri,
-          name: asset.fileName || `activity-${Date.now()}`,
-          type: asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg'),
-        } as any
-      );
-      setActivityUploadingAttachment(true);
+          name: asset.name || `activity-${Date.now()}`,
+          type: asset.mimeType || 'application/octet-stream',
+        } as any);
+      }
+
       const response = await karyakariniClient.post('/karyakarini/upload/attachment', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -420,8 +462,8 @@ export default function KaryakariniMemberScreen() {
           ...prev.attachments,
           {
             url,
-            type: String(payload.fileType || asset.mimeType || '').trim() || undefined,
-            name: String(payload.fileName || asset.fileName || `activity-${Date.now()}`).trim(),
+            type: String(payload.fileType || asset.mimeType || '').trim() || 'document',
+            name: String(payload.fileName || asset.name || `activity-${Date.now()}`).trim(),
           },
         ],
       }));
@@ -559,14 +601,19 @@ export default function KaryakariniMemberScreen() {
   );
 
   const hasSelectedSubcategory = useMemo(() => {
-    if (selectedCategoryKey === 'all') return false;
+    if (selectedCategoryKey === 'all' || !selectedCategoryKey) return false;
     return subcategoryCards.some((entry) => entry.key === selectedCategoryKey);
   }, [selectedCategoryKey, subcategoryCards]);
 
   useEffect(() => {
-    if (selectedCategoryKey === 'all') return;
-    if (!subcategoryCards.some((entry) => entry.key === selectedCategoryKey)) {
-      setSelectedCategoryKey('all');
+    if (!selectedCategoryKey && subcategoryCards.length > 0) {
+      setSelectedCategoryKey(subcategoryCards[0].key);
+    } else if (selectedCategoryKey && selectedCategoryKey !== 'all' && !subcategoryCards.some((entry) => entry.key === selectedCategoryKey)) {
+      if (subcategoryCards.length > 0) {
+        setSelectedCategoryKey(subcategoryCards[0].key);
+      } else {
+        setSelectedCategoryKey('all');
+      }
     }
   }, [selectedCategoryKey, subcategoryCards]);
 
@@ -604,12 +651,16 @@ export default function KaryakariniMemberScreen() {
         Number(task.assigned_user_id || 0) === userId ||
         task.assignees?.some((a) => a.id === userId) ||
         Number((task as any).created_by || 0) === userId ||
-        teams.some((t) => Number(t.node_id) === Number(task.node_id))
+        teams.some(
+          (t) =>
+            Number(t.node_id) === Number(task.node_id) ||
+            (Boolean(t.hierarchy_path) && Boolean(task.hierarchy_path) && String(task.hierarchy_path).startsWith(String(t.hierarchy_path)))
+        )
     );
   }, [groupedTasks, user, teams]);
 
   const filteredTasks = useMemo(() => {
-    if (selectedCategoryKey === 'all') {
+    if (selectedCategoryKey === 'all' || !selectedCategoryKey) {
       return assignedTasks;
     }
     const selectedAssignment = assignmentCards.find(
@@ -625,7 +676,9 @@ export default function KaryakariniMemberScreen() {
         .map((entry) => String(entry || '').trim().toLowerCase())
         .filter(Boolean);
 
-      const nodeMatch = Number(task.node_id || 0) === Number(selectedAssignment.nodeId || 0);
+      const nodeMatch =
+        Number(task.node_id || 0) === Number(selectedAssignment.nodeId || 0) ||
+        (Boolean(selectedAssignment.path) && Boolean(task.hierarchy_path) && String(task.hierarchy_path).startsWith(String(selectedAssignment.path)));
       if (!nodeMatch) return false;
       const selectedCategory = String(selectedAssignment.category || '').trim().toLowerCase();
       const selectedSubcategory = String(selectedAssignment.subcategory || '').trim().toLowerCase();
@@ -639,12 +692,13 @@ export default function KaryakariniMemberScreen() {
   const tasksByCategory = useMemo(() => {
     const map = new Map<string, KaryakariniTask[]>();
 
-    const allowedCategory = selectedCategoryKey === 'all'
+    const allowedCategory = selectedCategoryKey === 'all' || !selectedCategoryKey
       ? null
       : assignmentCards
           .filter((c) => c.key === selectedCategoryKey && c.source !== 'invitation')
           .map((c) => ({
             nodeId: Number(c.nodeId || 0),
+            path: String(c.path || '').trim(),
             sub: String(c.subcategory || '').trim().toLowerCase(),
             cat: String(c.category || '').trim().toLowerCase(),
           }))[0] || null;
@@ -656,7 +710,9 @@ export default function KaryakariniMemberScreen() {
       groupNames.forEach((subName) => {
         const normalizedSub = String(subName || '').trim().toLowerCase();
         if (allowedCategory) {
-          const matchedNode = allowedCategory.nodeId === Number(task.node_id || 0);
+          const matchedNode =
+            allowedCategory.nodeId === Number(task.node_id || 0) ||
+            (Boolean(allowedCategory.path) && Boolean(task.hierarchy_path) && String(task.hierarchy_path).startsWith(String(allowedCategory.path)));
           if (!matchedNode) return;
           if (allowedCategory.sub && allowedCategory.sub !== normalizedSub) return;
           if (!allowedCategory.sub && allowedCategory.cat) {
@@ -736,7 +792,7 @@ export default function KaryakariniMemberScreen() {
                 );
               })}
             </ScrollView>
-            {selectedCategoryKey !== 'all' ? (
+            {selectedCategoryKey && selectedCategoryKey !== 'all' ? (
               <TouchableOpacity onPress={() => setSelectedCategoryKey('all')}>
                 <Text style={styles.clearLink}>सभी श्रेणियों पर रीसेट करें</Text>
               </TouchableOpacity>
@@ -840,7 +896,34 @@ export default function KaryakariniMemberScreen() {
                         <Text style={styles.cardMeta}>
                           जनसंख्या: पुरुष {Number(task.male_count || 0)} • महिला {Number(task.female_count || 0)} • बच्चे {Number(task.children_count || 0)}
                         </Text>
-                        <Text style={styles.cardMeta}>संलग्नक: {Number(task.attachment_count || 0)}</Text>
+                        {Array.isArray(task.attachments) && task.attachments.length > 0 ? (
+                          <View style={{ marginTop: 8, gap: 6 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: theme.colors.text.secondary }}>संलग्नक ({task.attachments.length}):</Text>
+                            {task.attachments.map((att, attIdx) => (
+                              <View
+                                key={`task-${task.id}-att-${attIdx}`}
+                                style={styles.attachmentBadge}
+                              >
+                                <MaterialIcons
+                                  name={att.type?.startsWith('image') ? 'image' : att.type?.startsWith('video') ? 'videocam' : 'insert-drive-file'}
+                                  size={16}
+                                  color={theme.colors.primary}
+                                />
+                                <Text style={styles.attachmentBadgeText} numberOfLines={1}>
+                                  {att.name || att.url.split('/').pop() || 'Attachment'}
+                                </Text>
+                                <TouchableOpacity style={{ padding: 4 }} onPress={() => Linking.openURL(att.url)}>
+                                  <MaterialIcons name="open-in-new" size={18} color={theme.colors.primary} />
+                                </TouchableOpacity>
+                                <TouchableOpacity style={{ padding: 4 }} onPress={() => void handleDownloadAttachment(att.url, att.name)}>
+                                  <MaterialIcons name="file-download" size={18} color={theme.colors.primary} />
+                                </TouchableOpacity>
+                              </View>
+                            ))}
+                          </View>
+                        ) : (
+                          <Text style={styles.cardMeta}>संलग्नक: 0</Text>
+                        )}
                         <TouchableOpacity style={styles.taskEditBtn} onPress={() => handleOpenTaskEditor(task)}>
                           <Text style={styles.taskEditBtnText}>कार्य अपडेट करें</Text>
                         </TouchableOpacity>
@@ -1041,19 +1124,35 @@ export default function KaryakariniMemberScreen() {
         </TouchableOpacity>
 
         <View style={styles.attachmentList}>
-          {activityForm.attachments.map((entry, idx) => (
-            <View key={`activity-attachment-${idx}`} style={[styles.attachmentItem, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 10, backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#EDDED5' }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                <MaterialIcons name="insert-drive-file" size={18} color={theme.colors.primary} />
-                <Text style={[styles.attachmentText, { flex: 1 }]} numberOfLines={1}>
-                  {entry.name || entry.url}
-                </Text>
+          {activityForm.attachments.length === 0 ? (
+            <Text style={styles.attachmentEmpty}>No files attached yet</Text>
+          ) : (
+            activityForm.attachments.map((entry, idx) => (
+              <View key={`activity-attachment-${idx}`} style={styles.attachmentRow}>
+                <MaterialIcons
+                  name={entry.type?.startsWith('image') ? 'image' : entry.type?.startsWith('video') ? 'videocam' : 'insert-drive-file'}
+                  size={18}
+                  color={theme.colors.primary}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.attachmentName} numberOfLines={1}>
+                    {entry.name || entry.url.split('/').pop() || 'attachment'}
+                  </Text>
+                  {entry.type ? (
+                    <Text style={styles.attachmentType}>{entry.type}</Text>
+                  ) : null}
+                </View>
+                <MaterialIcons name="check-circle" size={16} color="#16a34a" />
+                <TouchableOpacity
+                  onPress={() => setActivityForm((prev) => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== idx) }))}
+                  style={{ padding: 4 }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <MaterialIcons name="close" size={18} color={theme.colors.error} />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity onPress={() => setActivityForm((prev) => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== idx) }))} style={{ padding: 4 }}>
-                <MaterialIcons name="close" size={18} color={theme.colors.error} />
-              </TouchableOpacity>
-            </View>
-          ))}
+            ))
+          )}
         </View>
       </StandardModal>
 
@@ -1239,27 +1338,40 @@ export default function KaryakariniMemberScreen() {
         </TouchableOpacity>
 
         <View style={styles.attachmentList}>
-          {taskForm.attachments.map((entry, idx) => (
-            <View key={`task-attachment-${idx}`} style={[styles.attachmentItem, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 10, backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#EDDED5' }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                <MaterialIcons name="insert-drive-file" size={18} color={theme.colors.primary} />
-                <Text style={[styles.attachmentText, { flex: 1 }]} numberOfLines={1}>
-                  {entry.name || entry.url}
-                </Text>
+          {taskForm.attachments.length === 0 ? (
+            <Text style={styles.attachmentEmpty}>No files attached yet</Text>
+          ) : (
+            taskForm.attachments.map((entry, idx) => (
+              <View key={`task-attachment-${idx}`} style={styles.attachmentRow}>
+                <MaterialIcons
+                  name={entry.type?.startsWith('image') ? 'image' : entry.type?.startsWith('video') ? 'videocam' : 'insert-drive-file'}
+                  size={18}
+                  color={theme.colors.primary}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.attachmentName} numberOfLines={1}>
+                    {entry.name || entry.url.split('/').pop() || 'attachment'}
+                  </Text>
+                  {entry.type ? (
+                    <Text style={styles.attachmentType}>{entry.type}</Text>
+                  ) : null}
+                </View>
+                <MaterialIcons name="check-circle" size={16} color="#16a34a" />
+                <TouchableOpacity
+                  onPress={() =>
+                    setTaskForm((prev) => ({
+                      ...prev,
+                      attachments: prev.attachments.filter((_, i) => i !== idx),
+                    }))
+                  }
+                  style={{ padding: 4 }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <MaterialIcons name="close" size={18} color={theme.colors.error} />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                onPress={() =>
-                  setTaskForm((prev) => ({
-                    ...prev,
-                    attachments: prev.attachments.filter((_, i) => i !== idx),
-                  }))
-                }
-                style={{ padding: 4 }}
-              >
-                <MaterialIcons name="close" size={18} color={theme.colors.error} />
-              </TouchableOpacity>
-            </View>
-          ))}
+            ))
+          )}
         </View>
       </StandardModal>
     </View>
@@ -1690,6 +1802,52 @@ const styles = StyleSheet.create({
     flex: 1,
     color: theme.colors.text.primary,
     fontSize: 12,
+  },
+  attachmentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 6,
+  },
+  attachmentName: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  attachmentType: {
+    fontSize: 10,
+    color: theme.colors.text.secondary,
+    marginTop: 2,
+  },
+  attachmentEmpty: {
+    fontSize: 12,
+    color: theme.colors.text.disabled,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 8,
+  },
+  attachmentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  attachmentBadgeText: {
+    fontSize: 12,
+    color: theme.colors.text.primary,
+    fontWeight: '600',
+    flex: 1,
   },
   removeText: {
     color: theme.colors.error,

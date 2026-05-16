@@ -221,6 +221,7 @@ export type KaryakariniTask = {
   assigned_mobile_number?: string | null;
   attachment_count?: number;
   created_by_name?: string;
+  attachments?: KaryakariniAttachment[] | null;
   assignees?: {
     id: number;
     name: string;
@@ -244,6 +245,9 @@ export type KaryakariniCategoryActivity = {
   title: string;
   description?: string | null;
   attachments?: KaryakariniAttachment[] | null;
+  male_count?: number;
+  female_count?: number;
+  children_count?: number;
   created_at?: string | null;
   updated_at?: string | null;
 };

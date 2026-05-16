@@ -1719,15 +1719,17 @@ exports.createMyCategoryActivity = async (req, res) => {
       });
     }
 
-    const visibleNodeIds = await KaryakariniModel.getMemberVisibleNodeIds({
-      userId: req.user?.id,
-      versionId,
-    });
-    if (!visibleNodeIds.includes(Number(nodeId))) {
-      return res.status(403).json({
-        success: false,
-        message: 'You can submit activity only within your assigned node scope',
-      });
+    const userRole = normalizeRole(req.userRole || req.user?.role);
+    if (userRole !== 'superadmin') {
+      const memberVisible = await KaryakariniModel.getMemberVisibleNodeIds({ userId: req.user?.id, versionId });
+      const adminVisible = await KaryakariniModel.getAssignableNodeIds(req.user?.id, versionId);
+      const allVisible = new Set([...memberVisible, ...adminVisible]);
+      if (!allVisible.has(Number(nodeId))) {
+        return res.status(403).json({
+          success: false,
+          message: 'You can submit activity only within your assigned node scope',
+        });
+      }
     }
 
     const created = await KaryakariniModel.createCategoryActivity({
@@ -1739,6 +1741,9 @@ exports.createMyCategoryActivity = async (req, res) => {
       title,
       description: req.body?.description ? String(req.body.description).trim() : null,
       attachments: Array.isArray(req.body?.attachments) ? req.body.attachments : [],
+      maleCount: parsePositiveNumber(req.body?.maleCount) || 0,
+      femaleCount: parsePositiveNumber(req.body?.femaleCount) || 0,
+      childrenCount: parsePositiveNumber(req.body?.childrenCount) || 0,
     });
 
     return res.status(201).json({
