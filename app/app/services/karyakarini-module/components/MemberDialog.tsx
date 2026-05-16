@@ -400,6 +400,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   loadingWrap: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
   pillsWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -417,9 +420,6 @@ const styles = StyleSheet.create({
     color: theme.colors.primary,
     fontSize: 11,
     fontWeight: '700',
-  },
-    paddingVertical: 20,
-    alignItems: 'center',
   },
   loadingText: {
     color: theme.colors.text.secondary,

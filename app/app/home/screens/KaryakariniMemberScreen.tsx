@@ -630,7 +630,7 @@ export default function KaryakariniMemberScreen() {
         </View>
       </Modal>
 
-      <AppBottomNav activeKey="home" userRole={(user as any)?.role || null} />
+      <AppBottomNav activeKey="karyakarini" userRole={(user as any)?.role || null} />
     </View>
   );
 }

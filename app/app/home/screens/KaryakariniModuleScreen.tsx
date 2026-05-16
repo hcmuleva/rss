@@ -27,6 +27,7 @@ import type {
   KaryakariniAssignableNode,
   KaryakariniAssignableUser,
   KaryakariniAttachment,
+  KaryakariniCategoryActivity,
   KaryakariniGuestMember,
   KaryakariniMeeting,
   KaryakariniMeetingDetails,
@@ -154,7 +155,7 @@ const deriveCategoriesFromSubcategories = (subcategories: string[]) => {
   return [...categories];
 };
 
-type KaryakariniTab = 'tree' | 'meetings' | 'tasks' | 'roles';
+type KaryakariniTab = 'tree' | 'meetings' | 'tasks' | 'activities' | 'roles';
 type TaskCascadeOption = {
   key: string;
   label: string;
@@ -231,6 +232,13 @@ export default function KaryakariniModuleScreen() {
   const [tasksLoading, setTasksLoading] = useState(false);
   const [taskRows, setTaskRows] = useState<KaryakariniTask[]>([]);
   const [taskPagination, setTaskPagination] = useState<KaryakariniPagination>(defaultPagination);
+  const [activitiesLoading, setActivitiesLoading] = useState(false);
+  const [activityRows, setActivityRows] = useState<KaryakariniCategoryActivity[]>([]);
+  const [activityPagination, setActivityPagination] = useState<KaryakariniPagination>(defaultPagination);
+  const [activityFilterCategory, setActivityFilterCategory] = useState('');
+  const [activityFilterSubcategory, setActivityFilterSubcategory] = useState('');
+  const [activityFilterNodeLevel, setActivityFilterNodeLevel] = useState('');
+  const [selectedActivityDetails, setSelectedActivityDetails] = useState<KaryakariniCategoryActivity | null>(null);
 
   const [membersVisible, setMembersVisible] = useState(false);
   const [membersLoading, setMembersLoading] = useState(false);
@@ -411,18 +419,44 @@ export default function KaryakariniModuleScreen() {
         const depth = parts.length;
         return {
           nodeId: Number(node.id),
+          parentId: Number(node.parent_id || 0),
           nodeName: String(node.name || '').trim(),
           level: String(node.level || '').trim(),
           parts,
           depth,
         };
       })
-      .filter((node) => node.nodeId > 0 && node.parts.length > 0)
-      .sort((a, b) => a.parts.join(' > ').localeCompare(b.parts.join(' > ')));
+      .filter((node) => node.nodeId > 0 && node.parts.length > 0);
 
     if (!parsedNodes.length) return [];
 
-    const selectedNode = parsedNodes.find((node) => String(node.nodeId) === String(taskForm.nodeId)) || null;
+    const scopeRoots = parsedNodes.filter((node) => scopeRootNodeIds.has(Number(node.nodeId)));
+    const sortedScopeRoots = [...scopeRoots].sort((a, b) => a.parts.join(' > ').localeCompare(b.parts.join(' > ')));
+    const selectedAbsoluteNode = parsedNodes.find((node) => String(node.nodeId) === String(taskForm.nodeId)) || null;
+    const selectedScopeRoot =
+      currentUserRole !== 'superadmin'
+        ? sortedScopeRoots.find((root) =>
+            selectedAbsoluteNode
+              ? selectedAbsoluteNode.parts.slice(0, root.parts.length).join(' > ') === root.parts.join(' > ')
+              : false
+          ) || sortedScopeRoots[0] || null
+        : null;
+    const scopeBaseParts = selectedScopeRoot?.parts || [];
+
+    const scopedParsedNodes =
+      currentUserRole !== 'superadmin' && scopeBaseParts.length
+        ? parsedNodes
+            .filter((node) => node.parts.slice(0, scopeBaseParts.length).join(' > ') === scopeBaseParts.join(' > '))
+            .map((node) => ({
+              ...node,
+              parts: node.parts.slice(scopeBaseParts.length - 1),
+              depth: node.parts.slice(scopeBaseParts.length - 1).length,
+            }))
+        : parsedNodes;
+
+    if (!scopedParsedNodes.length) return [];
+
+    const selectedNode = scopedParsedNodes.find((node) => String(node.nodeId) === String(taskForm.nodeId)) || null;
     const selectedParts = selectedNode?.parts || [];
     const columns: TaskCascadeColumn[] = [];
     let activePrefix: string[] = [];
@@ -430,23 +464,20 @@ export default function KaryakariniModuleScreen() {
 
     while (depth <= 12) {
       const optionsMap = new Map<string, TaskCascadeOption>();
-      parsedNodes.forEach((node) => {
+      scopedParsedNodes.forEach((node) => {
         if (node.depth < depth) return;
         const prefix = node.parts.slice(0, depth - 1);
         if (prefix.join(' > ') !== activePrefix.join(' > ')) return;
         const label = node.parts[depth - 1];
         if (!label) return;
 
-        const exact = parsedNodes.find(
+        const exact = scopedParsedNodes.find(
           (candidate) => candidate.depth === depth && candidate.parts.slice(0, depth).join(' > ') === [...prefix, label].join(' > ')
         );
         const mappedNode = exact || node;
         const key = [...prefix, label].join(' > ');
         if (optionsMap.has(key)) return;
-        const hasChildren = parsedNodes.some(
-          (candidate) =>
-            candidate.depth > depth && candidate.parts.slice(0, depth).join(' > ') === [...prefix, label].join(' > ')
-        );
+        const hasChildren = scopedParsedNodes.some((candidate) => candidate.parentId === mappedNode.nodeId);
         optionsMap.set(key, {
           key,
           label,
@@ -456,7 +487,7 @@ export default function KaryakariniModuleScreen() {
         });
       });
 
-      const options = [...optionsMap.values()].sort((a, b) => a.label.localeCompare(b.label));
+      const options = [...optionsMap.values()];
       if (!options.length) break;
 
       const selectedOption =
@@ -477,7 +508,7 @@ export default function KaryakariniModuleScreen() {
     }
 
     return columns;
-  }, [assignableNodes, taskForm.nodeId]);
+  }, [assignableNodes, currentUserRole, scopeRootNodeIds, taskForm.nodeId]);
   const taskHierarchyFilterOptions = useMemo(
     () =>
       [...new Set(taskRows.map((row) => String(row.hierarchy_l1 || '').trim()).filter(Boolean))]
@@ -779,6 +810,36 @@ export default function KaryakariniModuleScreen() {
     []
   );
 
+  const loadCategoryActivities = useCallback(
+    async (versionId: number, page = 1) => {
+      try {
+        setActivitiesLoading(true);
+        const response = await karyakariniClient.get('/karyakarini/category-activities', {
+          params: {
+            versionId,
+            page,
+            limit: 20,
+            category: activityFilterCategory.trim() || undefined,
+            subcategory: activityFilterSubcategory.trim() || undefined,
+            nodeLevel: activityFilterNodeLevel.trim() || undefined,
+          },
+        });
+        setActivityRows((response?.data?.data?.activities || []) as KaryakariniCategoryActivity[]);
+        setActivityPagination({
+          ...defaultPagination,
+          ...(response?.data?.data?.pagination || {}),
+        });
+      } catch (err: any) {
+        setActivityRows([]);
+        setActivityPagination(defaultPagination);
+        Alert.alert('Error', err?.response?.data?.message || 'Failed to load category activities');
+      } finally {
+        setActivitiesLoading(false);
+      }
+    },
+    [activityFilterCategory, activityFilterNodeLevel, activityFilterSubcategory]
+  );
+
   const loadNodeMembersForForm = useCallback(async (nodeId: number, versionId: number, forType: 'meeting' | 'task') => {
     try {
       const response = await karyakariniClient.get('/karyakarini/nodes/members', {
@@ -1018,6 +1079,7 @@ export default function KaryakariniModuleScreen() {
         loadScopes(targetVersionId),
         loadMeetings(targetVersionId, 1),
         loadTasks(targetVersionId, 1),
+        loadCategoryActivities(targetVersionId, 1),
         loadNotificationCount(targetVersionId),
       ]);
       const initialPathIds = preserveSelectionIds.length
@@ -1025,7 +1087,17 @@ export default function KaryakariniModuleScreen() {
         : await resolveDefaultSelectionPathIds(targetVersionId, scopedNodes);
       await loadTree(targetVersionId, initialPathIds, scopedNodes);
     },
-    [loadAssignableNodes, loadMeetings, loadNotificationCount, loadPadOptions, loadScopes, loadTasks, loadTree, resolveDefaultSelectionPathIds]
+    [
+      loadAssignableNodes,
+      loadCategoryActivities,
+      loadMeetings,
+      loadNotificationCount,
+      loadPadOptions,
+      loadScopes,
+      loadTasks,
+      loadTree,
+      resolveDefaultSelectionPathIds,
+    ]
   );
 
   const loadMembers = useCallback(
@@ -2277,6 +2349,12 @@ export default function KaryakariniModuleScreen() {
           >
             <Text style={[styles.tabSwitchText, activeTab === 'tasks' && styles.tabSwitchTextActive]}>Tasks</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabSwitchBtn, activeTab === 'activities' && styles.tabSwitchBtnActive]}
+            onPress={() => setActiveTab('activities')}
+          >
+            <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>Activities</Text>
+          </TouchableOpacity>
         </View>
 
         {activeTab === 'tree' ? (
@@ -2432,6 +2510,98 @@ export default function KaryakariniModuleScreen() {
             </ScrollView>
             <Text style={styles.tableMeta}>
               Page {taskPagination.page} / {Math.max(1, taskPagination.totalPages || 1)} • Total {taskPagination.total}
+            </Text>
+          </View>
+        ) : null}
+
+        {activeTab === 'activities' ? (
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Category Activities</Text>
+            </View>
+
+            <View style={styles.searchRow}>
+              <TextInput
+                style={[styles.input, styles.searchInput]}
+                value={activityFilterCategory}
+                onChangeText={setActivityFilterCategory}
+                placeholder="Filter category"
+              />
+              <TextInput
+                style={[styles.input, styles.searchInput]}
+                value={activityFilterSubcategory}
+                onChangeText={setActivityFilterSubcategory}
+                placeholder="Filter subcategory"
+              />
+            </View>
+            <View style={styles.searchRow}>
+              <TextInput
+                style={[styles.input, styles.searchInput]}
+                value={activityFilterNodeLevel}
+                onChangeText={setActivityFilterNodeLevel}
+                placeholder="Filter node level"
+              />
+              <TouchableOpacity
+                style={styles.searchBtn}
+                onPress={() => selectedVersionId && void loadCategoryActivities(selectedVersionId, 1)}
+                disabled={!selectedVersionId}
+              >
+                <Text style={styles.searchBtnText}>Apply</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableWrap}>
+              <View>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.tableHeaderCell, styles.colDate]}>Date</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colTitle]}>Title</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colNode]}>Node</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colStatus]}>Category</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colAssignee]}>Subcategory</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colBy]}>By</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colAction]}>Action</Text>
+                </View>
+                {activitiesLoading ? (
+                  <View style={styles.tableEmpty}>
+                    <Text style={styles.helper}>Loading activities...</Text>
+                  </View>
+                ) : activityRows.length === 0 ? (
+                  <View style={styles.tableEmpty}>
+                    <Text style={styles.helper}>No activities found</Text>
+                  </View>
+                ) : (
+                  activityRows.map((row) => (
+                    <View key={`activity-${row.id}`} style={styles.tableRow}>
+                      <Text style={[styles.tableCell, styles.colDate]}>{String(row.created_at || '').slice(0, 10) || '-'}</Text>
+                      <View style={[styles.tableCell, styles.colTitle]}>
+                        <Text style={styles.tableCellTextCompact} numberOfLines={2}>{row.title}</Text>
+                        {row.description ? <Text style={styles.tableCellSubText} numberOfLines={2}>{row.description}</Text> : null}
+                      </View>
+                      <Text style={[styles.tableCell, styles.colNode]} numberOfLines={2}>{row.hierarchy_path || row.node_name || '-'}</Text>
+                      <Text style={[styles.tableCell, styles.colStatus]} numberOfLines={2}>{row.category || '-'}</Text>
+                      <Text style={[styles.tableCell, styles.colAssignee]} numberOfLines={2}>{row.subcategory || '-'}</Text>
+                      <View style={[styles.tableCell, styles.colBy, styles.byCellWrap]}>
+                        {row.submitted_by_avatar ? (
+                          <Image source={{ uri: row.submitted_by_avatar }} style={styles.byAvatar} />
+                        ) : (
+                          <View style={styles.byAvatarFallback}>
+                            <Text style={styles.byAvatarFallbackText}>{getInitials(row.submitted_by_name || '')}</Text>
+                          </View>
+                        )}
+                        <Text style={styles.tableCellTextCompact} numberOfLines={2}>{row.submitted_by_name || '-'}</Text>
+                      </View>
+                      <View style={[styles.tableCell, styles.colAction]}>
+                        <TouchableOpacity style={styles.rowActionBtn} onPress={() => setSelectedActivityDetails(row)}>
+                          <Text style={styles.rowActionText}>View</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            </ScrollView>
+            <Text style={styles.tableMeta}>
+              Page {activityPagination.page} / {Math.max(1, activityPagination.totalPages || 1)} • Total {activityPagination.total}
             </Text>
           </View>
         ) : null}
@@ -3540,6 +3710,52 @@ export default function KaryakariniModuleScreen() {
           </View>
         </View>
       </Modal>
+      <Modal
+        visible={Boolean(selectedActivityDetails)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedActivityDetails(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Activity Details</Text>
+            <Text style={styles.tableCellTextCompact}>{selectedActivityDetails?.title || '-'}</Text>
+            <Text style={styles.modalSub}>Date: {String(selectedActivityDetails?.created_at || '').slice(0, 19).replace('T', ' ') || '-'}</Text>
+            <Text style={styles.modalSub}>Category: {selectedActivityDetails?.category || '-'}</Text>
+            <Text style={styles.modalSub}>Subcategory: {selectedActivityDetails?.subcategory || '-'}</Text>
+            <Text style={styles.modalSub}>Node: {selectedActivityDetails?.hierarchy_path || selectedActivityDetails?.node_name || '-'}</Text>
+            <View style={styles.byCellWrap}>
+              {selectedActivityDetails?.submitted_by_avatar ? (
+                <Image source={{ uri: selectedActivityDetails.submitted_by_avatar }} style={styles.byAvatar} />
+              ) : (
+                <View style={styles.byAvatarFallback}>
+                  <Text style={styles.byAvatarFallbackText}>{getInitials(selectedActivityDetails?.submitted_by_name || '')}</Text>
+                </View>
+              )}
+              <Text style={styles.modalSub}>By: {selectedActivityDetails?.submitted_by_name || '-'}</Text>
+            </View>
+            <Text style={styles.sectionLabel}>Description</Text>
+            <Text style={styles.modalSub}>{selectedActivityDetails?.description || '-'}</Text>
+            <Text style={styles.sectionLabel}>Attachments</Text>
+            {Array.isArray(selectedActivityDetails?.attachments) && selectedActivityDetails.attachments.length > 0 ? (
+              selectedActivityDetails.attachments.map((attachment, index) => (
+                <TouchableOpacity
+                  key={`activity-details-attachment-${index}`}
+                  style={styles.rowActionBtn}
+                  onPress={() => void handleOpenAttachmentUrl(attachment?.url)}
+                >
+                  <Text style={styles.rowActionText}>{attachment?.name || `Attachment ${index + 1}`}</Text>
+                </TouchableOpacity>
+              ))
+            ) : (
+              <Text style={styles.modalSub}>No attachments</Text>
+            )}
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedActivityDetails(null)}>
+              <Text style={styles.closeText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={padPickerVisible} transparent animationType="fade" onRequestClose={() => setPadPickerVisible(false)}>
         <View style={styles.modalBackdrop}>
@@ -3841,6 +4057,9 @@ const styles = StyleSheet.create({
   colAction: {
     width: 110,
   },
+  colBy: {
+    width: 190,
+  },
   colAssignee: {
     width: 170,
   },
@@ -3874,6 +4093,30 @@ const styles = StyleSheet.create({
   rowActionText: {
     color: theme.colors.primary,
     fontSize: 11,
+    fontWeight: '700',
+  },
+  byCellWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  byAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: theme.colors.surfaceContainerHighest,
+  },
+  byAvatarFallback: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: theme.colors.surfaceContainerHighest,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  byAvatarFallbackText: {
+    color: theme.colors.text.secondary,
+    fontSize: 10,
     fontWeight: '700',
   },
   errorBox: {

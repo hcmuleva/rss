@@ -7,6 +7,12 @@ import { theme } from '../../theme';
 
 type Announcement = { id: number; title: string; message: string; category: string };
 type CategoryCard = { key: string; category: string; subcategory: string; count: number };
+const parseLabelList = (value?: string | string[] | null) => {
+  if (Array.isArray(value)) return [...new Set(value.map((entry) => String(entry || '').trim()).filter(Boolean))];
+  const raw = String(value || '').trim();
+  if (!raw) return [] as string[];
+  return [...new Set(raw.split(',').map((entry) => entry.trim()).filter(Boolean))];
+};
 
 export default function RssHomeScreen() {
   const { user, isLoading } = useProfile();
@@ -42,20 +48,42 @@ export default function RssHomeScreen() {
       const teamRes = teamResult.status === 'fulfilled' ? teamResult.value : null;
       setAnnouncements((announcementRes?.data?.data?.announcements || []) as Announcement[]);
 
-      const teams = ((teamRes as any)?.data?.data?.teams || []) as { category?: string | null; subcategory?: string | null }[];
+      const teams = ((teamRes as any)?.data?.data?.teams || []) as {
+        category?: string | null;
+        subcategory?: string | null;
+        categories?: string[] | null;
+        subcategories?: string[] | null;
+      }[];
       setKaryakariniCount(Number(teams.length || 0));
       const categoryMap = new Map<string, CategoryCard>();
       teams.forEach((team) => {
-        const category = String(team?.category || '').trim();
-        if (!category) return;
-        const subcategory = String(team?.subcategory || '').trim();
-        const key = `${category}__${subcategory}`;
-        const existing = categoryMap.get(key);
-        categoryMap.set(key, {
-          key,
-          category,
-          subcategory,
-          count: Number(existing?.count || 0) + 1,
+        const categories = parseLabelList(team?.categories && team.categories.length ? team.categories : team?.category || '');
+        const subcategories = parseLabelList(team?.subcategories && team.subcategories.length ? team.subcategories : team?.subcategory || '');
+        if (subcategories.length > 0) {
+          subcategories.forEach((subcategory) => {
+            const category =
+              categories.find((entry) => subcategory.toLowerCase().includes(entry.toLowerCase())) || categories[0] || 'General';
+            const key = `${category}__${subcategory}`;
+            const existing = categoryMap.get(key);
+            categoryMap.set(key, {
+              key,
+              category,
+              subcategory,
+              count: Number(existing?.count || 0) + 1,
+            });
+          });
+          return;
+        }
+
+        categories.forEach((category) => {
+          const key = `${category}__`;
+          const existing = categoryMap.get(key);
+          categoryMap.set(key, {
+            key,
+            category,
+            subcategory: '',
+            count: Number(existing?.count || 0) + 1,
+          });
         });
       });
       setCategoryCards(Array.from(categoryMap.values()).sort((a, b) => a.category.localeCompare(b.category)));
@@ -96,11 +124,23 @@ export default function RssHomeScreen() {
           <Text style={styles.section}>My Assigned Categories</Text>
           <View style={styles.categoryGrid}>
             {categoryCards.map((entry) => (
-              <View key={entry.key} style={styles.categoryCard}>
+              <TouchableOpacity
+                key={entry.key}
+                style={styles.categoryCard}
+                onPress={() =>
+                  router.push({
+                    pathname: '/karyakarini-category-activity' as any,
+                    params: {
+                      category: entry.category,
+                      subcategory: entry.subcategory || undefined,
+                    },
+                  } as any)
+                }
+              >
                 <Text style={styles.categoryTitle}>{entry.category}</Text>
                 <Text style={styles.categorySub}>{entry.subcategory || 'General'}</Text>
                 <Text style={styles.categoryMeta}>Assignments: {entry.count}</Text>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         </>

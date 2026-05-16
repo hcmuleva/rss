@@ -215,6 +215,25 @@ export type KaryakariniTask = {
   created_by_name?: string;
 };
 
+export type KaryakariniCategoryActivity = {
+  id: number;
+  version_id: number;
+  node_id: number;
+  node_name?: string | null;
+  node_level?: string | null;
+  hierarchy_path?: string | null;
+  submitted_by: number;
+  submitted_by_name?: string | null;
+  submitted_by_avatar?: string | null;
+  category?: string | null;
+  subcategory: string;
+  title: string;
+  description?: string | null;
+  attachments?: KaryakariniAttachment[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 export type KaryakariniNotificationItem = {
   id: number;
   source: 'task_notification' | 'invitation' | string;

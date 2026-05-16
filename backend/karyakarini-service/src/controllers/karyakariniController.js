@@ -1230,6 +1230,200 @@ exports.getMyTeams = async (req, res) => {
   }
 };
 
+exports.createMyCategoryActivity = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.query?.versionId || 'current');
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const nodeId = parsePositiveNumber(req.body?.nodeId);
+    const title = String(req.body?.title || '').trim();
+    const subcategory = String(req.body?.subcategory || '').trim();
+    if (!nodeId || !title || !subcategory) {
+      return res.status(400).json({
+        success: false,
+        message: 'nodeId, title, and subcategory are required',
+      });
+    }
+
+    const visibleNodeIds = await KaryakariniModel.getMemberVisibleNodeIds({
+      userId: req.user?.id,
+      versionId,
+    });
+    if (!visibleNodeIds.includes(Number(nodeId))) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can submit activity only within your assigned node scope',
+      });
+    }
+
+    const created = await KaryakariniModel.createCategoryActivity({
+      versionId,
+      nodeId,
+      submittedBy: req.user?.id,
+      category: req.body?.category ? String(req.body.category).trim() : null,
+      subcategory,
+      title,
+      description: req.body?.description ? String(req.body.description).trim() : null,
+      attachments: Array.isArray(req.body?.attachments) ? req.body.attachments : [],
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Category activity submitted successfully',
+      data: created,
+    });
+  } catch (error) {
+    console.error('Failed to submit category activity:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Failed to submit category activity',
+    });
+  }
+};
+
+exports.getCategoryActivities = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.query.versionId || req.query.version || 'current');
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const userRole = normalizeRole(req.userRole || req.user?.role);
+    const visibleNodeIds = await KaryakariniModel.getVisibleNodeIdsForUser({
+      userId: req.user?.id,
+      userRole,
+      versionId,
+    });
+
+    const result = await KaryakariniModel.getCategoryActivities({
+      versionId,
+      visibleNodeIds,
+      page: Number(req.query.page || 1),
+      limit: Number(req.query.limit || 20),
+      category: String(req.query.category || ''),
+      subcategory: String(req.query.subcategory || ''),
+      nodeLevel: String(req.query.nodeLevel || req.query.level || ''),
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        versionId,
+        activities: result.rows,
+        pagination: result.pagination,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to load category activities:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load category activities',
+    });
+  }
+};
+
+exports.getMyCategoryActivities = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.query.versionId || req.query.version || 'current');
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const visibleNodeIds = await KaryakariniModel.getMemberVisibleNodeIds({
+      userId: req.user?.id,
+      versionId,
+    });
+
+    const result = await KaryakariniModel.getCategoryActivities({
+      versionId,
+      visibleNodeIds,
+      page: Number(req.query.page || 1),
+      limit: Number(req.query.limit || 20),
+      category: String(req.query.category || ''),
+      subcategory: String(req.query.subcategory || ''),
+      nodeLevel: String(req.query.nodeLevel || req.query.level || ''),
+      submittedBy: req.user?.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        versionId,
+        activities: result.rows,
+        pagination: result.pagination,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to load my category activities:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load my category activities',
+    });
+  }
+};
+
+exports.getReportMembers = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.query.versionId || req.query.version || 'current');
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const userRole = normalizeRole(req.userRole || req.user?.role);
+    const adminVisibleNodeIds = await KaryakariniModel.getVisibleNodeIdsForUser({
+      userId: req.user?.id,
+      userRole,
+      versionId,
+    });
+    const memberVisibleNodeIds = await KaryakariniModel.getMemberVisibleNodeIds({
+      userId: req.user?.id,
+      versionId,
+    });
+    const visibleNodeIds = [...new Set([...(adminVisibleNodeIds || []), ...(memberVisibleNodeIds || [])])];
+
+    const result = await KaryakariniModel.getReportMembers({
+      versionId,
+      visibleNodeIds,
+      page: Number(req.query.page || 1),
+      limit: Number(req.query.limit || 20),
+      category: String(req.query.category || ''),
+      subcategory: String(req.query.subcategory || ''),
+      nodeLevel: String(req.query.nodeLevel || req.query.level || ''),
+      pad: String(req.query.pad || ''),
+      query: String(req.query.query || ''),
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        versionId,
+        members: result.rows,
+        pagination: result.pagination,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to load report members:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load report members',
+    });
+  }
+};
+
 exports.getMyInvitations = async (req, res) => {
   try {
     const versionId = await KaryakariniModel.resolveVersionId(req.query.versionId || req.query.version || 'current');

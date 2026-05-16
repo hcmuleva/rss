@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const controller = require('../controllers/karyakariniController');
 const { requireAdmin, requireSuperAdmin, verifyToken } = require('../middleware/auth');
 const upload = require('../config/multer');
@@ -33,6 +34,10 @@ router.get('/tasks', controller.getTasks);
 router.post('/tasks', controller.createTask);
 router.patch('/my/tasks/:taskId/status', controller.updateMyTaskStatus);
 router.get('/my/teams', controller.getMyTeams);
+router.get('/my/report/members', controller.getReportMembers);
+router.post('/my/category-activities', controller.createMyCategoryActivity);
+router.get('/my/category-activities', controller.getMyCategoryActivities);
+router.get('/category-activities', controller.getCategoryActivities);
 router.get('/my/tasks', controller.getMyTasks);
 router.get('/my/notifications', controller.getMyNotifications);
 router.get('/my/notifications/unread-count', controller.getMyNotificationUnreadCount);
@@ -41,7 +46,27 @@ router.get('/my/invitations', controller.getMyInvitations);
 router.get('/my/invitations/sent-summary', controller.getMySentInvitationsSummary);
 router.post('/my/invitations/read', controller.markMyInvitationsRead);
 router.patch('/my/invitations/:invitationId/respond', controller.respondToInvitation);
-router.post('/upload/attachment', upload.single('file'), controller.uploadAttachment);
+router.post('/upload/attachment', (req, res, next) => {
+  upload.single('file')(req, res, (error) => {
+    if (!error) return next();
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        success: false,
+        message: 'File size must be 30MB or less',
+      });
+    }
+    if (String(error?.message || '').toLowerCase().includes('unsupported file type')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Unsupported file type. Please upload image or supported document',
+      });
+    }
+    return res.status(400).json({
+      success: false,
+      message: error?.message || 'Failed to process attachment upload',
+    });
+  });
+}, controller.uploadAttachment);
 
 router.get('/scopes', requireAdmin, controller.getScopes);
 router.post('/scopes', requireAdmin, controller.upsertScope);

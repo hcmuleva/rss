@@ -280,6 +280,22 @@ class KaryakariniModel {
         created_at TIMESTAMP DEFAULT NOW()
       )
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS karyakarini_category_activities (
+        id BIGSERIAL PRIMARY KEY,
+        version_id INTEGER NOT NULL REFERENCES karyakarini_versions(id) ON DELETE CASCADE,
+        node_id BIGINT NOT NULL REFERENCES karyakarini_nodes(id) ON DELETE CASCADE,
+        submitted_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        category VARCHAR(180),
+        subcategory VARCHAR(180) NOT NULL,
+        title VARCHAR(220) NOT NULL,
+        description TEXT,
+        attachments JSONB DEFAULT '[]'::jsonb,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS karyakarini_admin_scopes (
@@ -319,6 +335,9 @@ class KaryakariniModel {
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_meeting_attachments_meeting ON karyakarini_meeting_attachments(meeting_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_notifications_user_created ON karyakarini_notifications(user_id, created_at DESC)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_notifications_user_read ON karyakarini_notifications(user_id, is_read)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_category_activity_node ON karyakarini_category_activities(node_id, created_at DESC)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_category_activity_user ON karyakarini_category_activities(submitted_by, created_at DESC)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_category_activity_filters ON karyakarini_category_activities(version_id, category, subcategory)');
 
     await this.ensureDefaultVersionAndRoot();
   }
@@ -1380,6 +1399,165 @@ class KaryakariniModel {
     };
   }
 
+  static async getReportMembers({
+    versionId,
+    visibleNodeIds = [],
+    page = 1,
+    limit = 20,
+    category = '',
+    subcategory = '',
+    nodeLevel = '',
+    pad = '',
+    query = '',
+  }) {
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+    const offset = (safePage - 1) * safeLimit;
+    if (!visibleNodeIds.length) {
+      return {
+        rows: [],
+        pagination: { page: safePage, limit: safeLimit, total: 0, totalPages: 0 },
+      };
+    }
+
+    const normalizedCategory = String(category || '').trim().toLowerCase();
+    const normalizedSubcategory = String(subcategory || '').trim().toLowerCase();
+    const normalizedNodeLevel = String(nodeLevel || '').trim().toLowerCase();
+    const normalizedPad = String(pad || '').trim().toLowerCase();
+    const normalizedQuery = String(query || '').trim();
+    const hasCategory = Boolean(normalizedCategory);
+    const hasSubcategory = Boolean(normalizedSubcategory);
+    const hasNodeLevel = Boolean(normalizedNodeLevel);
+    const hasPad = Boolean(normalizedPad);
+    const hasQuery = normalizedQuery.length > 0;
+    const queryLike = `%${normalizedQuery}%`;
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM karyakarini_members m
+       JOIN karyakarini_nodes n ON n.id = m.node_id
+       LEFT JOIN users u ON u.id = m.user_id
+       WHERE m.version_id = $1
+         AND m.is_active = true
+         AND m.node_id = ANY($2::bigint[])
+         AND ($3::boolean = false OR lower(COALESCE(m.category, '')) = $4 OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(m.categories, '[]'::jsonb)) AS cat(value) WHERE lower(trim(cat.value)) = $4))
+         AND ($5::boolean = false OR lower(COALESCE(m.subcategory, '')) = $6 OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(m.subcategories, '[]'::jsonb)) AS sub(value) WHERE lower(trim(sub.value)) = $6))
+         AND ($7::boolean = false OR lower(COALESCE(n.level, '')) = $8)
+         AND ($9::boolean = false OR lower(COALESCE(m.pad, '')) = $10)
+         AND (
+           $11::boolean = false
+           OR lower(COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name', m.name, '')) ILIKE $12
+           OR lower(COALESCE(to_jsonb(u) ->> 'father_name', to_jsonb(u) ->> 'last_name', '')) ILIKE $12
+           OR lower(COALESCE(to_jsonb(u) ->> 'phone', to_jsonb(u) ->> 'mobile_number', to_jsonb(u) ->> 'mobile', m.mobile, '')) ILIKE $12
+           OR lower(COALESCE(n.name, '')) ILIKE $12
+         )`,
+      [
+        Number(versionId),
+        visibleNodeIds,
+        hasCategory,
+        normalizedCategory,
+        hasSubcategory,
+        normalizedSubcategory,
+        hasNodeLevel,
+        normalizedNodeLevel,
+        hasPad,
+        normalizedPad,
+        hasQuery,
+        queryLike,
+      ]
+    );
+    const total = Number(countResult.rows[0]?.total || 0);
+
+    const rowsResult = await pool.query(
+      `WITH RECURSIVE node_paths AS (
+         SELECT n.id, n.parent_id, n.name, n.level, n.version_id, n.name::text AS path
+         FROM karyakarini_nodes n
+         WHERE n.version_id = $1
+           AND n.parent_id IS NULL
+         UNION ALL
+         SELECT c.id, c.parent_id, c.name, c.level, c.version_id, np.path || ' > ' || c.name AS path
+         FROM karyakarini_nodes c
+         JOIN node_paths np ON c.parent_id = np.id
+         WHERE c.version_id = $1
+       )
+       SELECT
+         m.id,
+         m.user_id,
+         m.pad,
+         m.period,
+         m.start_date,
+         m.end_date,
+         m.category,
+         m.subcategory,
+         m.categories,
+         m.subcategories,
+         m.address_state AS state,
+         m.address_district AS district,
+         m.address_tehsil AS tehsil,
+         m.address_village AS address_village,
+         m.address_pincode AS pincode,
+         m.node_id,
+         COALESCE(to_jsonb(u) ->> 'role', 'user') AS user_role,
+         COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name') AS first_name,
+         COALESCE(to_jsonb(u) ->> 'father_name', to_jsonb(u) ->> 'last_name') AS father_name,
+         COALESCE(to_jsonb(u) ->> 'phone', to_jsonb(u) ->> 'mobile_number', to_jsonb(u) ->> 'mobile', m.mobile) AS mobile_number,
+         COALESCE(to_jsonb(u) ->> 'profile_photo_url', to_jsonb(u) ->> 'avatar', to_jsonb(u) ->> 'photo_url') AS avatar,
+         COALESCE(to_jsonb(u) ->> 'gotra', '') AS gotra,
+         COALESCE(NULLIF(m.address_village, ''), to_jsonb(u) ->> 'village', '') AS village,
+         n.name AS node_name,
+         n.level AS node_level,
+         COALESCE(np.path, n.name) AS hierarchy_path,
+         m.created_at,
+         m.updated_at
+       FROM karyakarini_members m
+       JOIN karyakarini_nodes n ON n.id = m.node_id
+       LEFT JOIN users u ON u.id = m.user_id
+       LEFT JOIN node_paths np ON np.id = m.node_id
+       WHERE m.version_id = $1
+         AND m.is_active = true
+         AND m.node_id = ANY($2::bigint[])
+         AND ($3::boolean = false OR lower(COALESCE(m.category, '')) = $4 OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(m.categories, '[]'::jsonb)) AS cat(value) WHERE lower(trim(cat.value)) = $4))
+         AND ($5::boolean = false OR lower(COALESCE(m.subcategory, '')) = $6 OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(m.subcategories, '[]'::jsonb)) AS sub(value) WHERE lower(trim(sub.value)) = $6))
+         AND ($7::boolean = false OR lower(COALESCE(n.level, '')) = $8)
+         AND ($9::boolean = false OR lower(COALESCE(m.pad, '')) = $10)
+         AND (
+           $11::boolean = false
+           OR lower(COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name', m.name, '')) ILIKE $12
+           OR lower(COALESCE(to_jsonb(u) ->> 'father_name', to_jsonb(u) ->> 'last_name', '')) ILIKE $12
+           OR lower(COALESCE(to_jsonb(u) ->> 'phone', to_jsonb(u) ->> 'mobile_number', to_jsonb(u) ->> 'mobile', m.mobile, '')) ILIKE $12
+           OR lower(COALESCE(n.name, '')) ILIKE $12
+         )
+       ORDER BY m.created_at DESC, m.id DESC
+       LIMIT $13 OFFSET $14`,
+      [
+        Number(versionId),
+        visibleNodeIds,
+        hasCategory,
+        normalizedCategory,
+        hasSubcategory,
+        normalizedSubcategory,
+        hasNodeLevel,
+        normalizedNodeLevel,
+        hasPad,
+        normalizedPad,
+        hasQuery,
+        queryLike,
+        safeLimit,
+        offset,
+      ]
+    );
+
+    return {
+      rows: rowsResult.rows,
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.ceil(total / safeLimit),
+      },
+    };
+  }
+
   static async searchUsersForAssignment({ query, limit = 12 }) {
     const safeQuery = String(query || '').trim();
     if (!safeQuery || safeQuery.length < 3) return [];
@@ -1855,6 +2033,10 @@ class KaryakariniModel {
          m.period,
          m.start_date,
          m.end_date,
+         m.category,
+         m.subcategory,
+         m.categories,
+         m.subcategories,
          m.node_id,
          n.name AS node_name,
          n.level AS node_level,
@@ -3503,6 +3685,160 @@ class KaryakariniModel {
       values
     );
     return result.rows;
+  }
+
+  static async createCategoryActivity({
+    versionId,
+    nodeId,
+    submittedBy,
+    category = null,
+    subcategory,
+    title,
+    description = null,
+    attachments = [],
+  }) {
+    const result = await pool.query(
+      `INSERT INTO karyakarini_category_activities (
+         version_id, node_id, submitted_by, category, subcategory, title, description, attachments
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+       RETURNING id, version_id, node_id, submitted_by, category, subcategory, title, description, attachments, created_at, updated_at`,
+      [
+        Number(versionId),
+        Number(nodeId),
+        Number(submittedBy),
+        String(category || '').trim() || null,
+        String(subcategory || '').trim(),
+        String(title || '').trim(),
+        String(description || '').trim() || null,
+        JSON.stringify(Array.isArray(attachments) ? attachments : []),
+      ]
+    );
+    return result.rows[0] || null;
+  }
+
+  static async getCategoryActivities({
+    versionId,
+    visibleNodeIds = [],
+    page = 1,
+    limit = 20,
+    category = '',
+    subcategory = '',
+    nodeLevel = '',
+    submittedBy = null,
+  }) {
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+    const offset = (safePage - 1) * safeLimit;
+    if (!visibleNodeIds.length) {
+      return {
+        rows: [],
+        pagination: { page: safePage, limit: safeLimit, total: 0, totalPages: 0 },
+      };
+    }
+
+    const normalizedCategory = String(category || '').trim().toLowerCase();
+    const normalizedSubcategory = String(subcategory || '').trim().toLowerCase();
+    const normalizedNodeLevel = String(nodeLevel || '').trim().toLowerCase();
+    const safeSubmittedBy = Number(submittedBy || 0);
+    const hasCategory = Boolean(normalizedCategory);
+    const hasSubcategory = Boolean(normalizedSubcategory);
+    const hasNodeLevel = Boolean(normalizedNodeLevel);
+    const hasSubmittedBy = Number.isFinite(safeSubmittedBy) && safeSubmittedBy > 0;
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM karyakarini_category_activities a
+       JOIN karyakarini_nodes n ON n.id = a.node_id
+       WHERE a.version_id = $1
+         AND a.is_active = true
+         AND a.node_id = ANY($2::bigint[])
+         AND ($3::boolean = false OR lower(COALESCE(a.category, '')) = $4)
+         AND ($5::boolean = false OR lower(COALESCE(a.subcategory, '')) = $6)
+         AND ($7::boolean = false OR lower(COALESCE(n.level, '')) = $8)
+         AND ($9::boolean = false OR a.submitted_by = $10)`,
+      [
+        Number(versionId),
+        visibleNodeIds,
+        hasCategory,
+        normalizedCategory,
+        hasSubcategory,
+        normalizedSubcategory,
+        hasNodeLevel,
+        normalizedNodeLevel,
+        hasSubmittedBy,
+        safeSubmittedBy,
+      ]
+    );
+    const total = Number(countResult.rows[0]?.total || 0);
+
+    const rowsResult = await pool.query(
+      `WITH RECURSIVE node_paths AS (
+         SELECT n.id, n.parent_id, n.name, n.level, n.version_id, n.name::text AS path
+         FROM karyakarini_nodes n
+         WHERE n.version_id = $1
+           AND n.parent_id IS NULL
+         UNION ALL
+         SELECT c.id, c.parent_id, c.name, c.level, c.version_id, np.path || ' > ' || c.name AS path
+         FROM karyakarini_nodes c
+         JOIN node_paths np ON c.parent_id = np.id
+         WHERE c.version_id = $1
+       )
+       SELECT
+         a.id,
+         a.version_id,
+         a.node_id,
+         n.name AS node_name,
+         n.level AS node_level,
+         COALESCE(np.path, n.name) AS hierarchy_path,
+         a.submitted_by,
+         COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name', ('User #' || a.submitted_by::text)) AS submitted_by_name,
+         COALESCE(to_jsonb(u) ->> 'profile_photo_url', to_jsonb(u) ->> 'avatar', to_jsonb(u) ->> 'photo_url') AS submitted_by_avatar,
+         a.category,
+         a.subcategory,
+         a.title,
+         a.description,
+         COALESCE(a.attachments, '[]'::jsonb) AS attachments,
+         a.created_at,
+         a.updated_at
+       FROM karyakarini_category_activities a
+       JOIN karyakarini_nodes n ON n.id = a.node_id
+       LEFT JOIN node_paths np ON np.id = n.id
+       LEFT JOIN users u ON u.id = a.submitted_by
+       WHERE a.version_id = $1
+         AND a.is_active = true
+         AND a.node_id = ANY($2::bigint[])
+         AND ($3::boolean = false OR lower(COALESCE(a.category, '')) = $4)
+         AND ($5::boolean = false OR lower(COALESCE(a.subcategory, '')) = $6)
+         AND ($7::boolean = false OR lower(COALESCE(n.level, '')) = $8)
+         AND ($9::boolean = false OR a.submitted_by = $10)
+       ORDER BY a.created_at DESC, a.id DESC
+       LIMIT $11 OFFSET $12`,
+      [
+        Number(versionId),
+        visibleNodeIds,
+        hasCategory,
+        normalizedCategory,
+        hasSubcategory,
+        normalizedSubcategory,
+        hasNodeLevel,
+        normalizedNodeLevel,
+        hasSubmittedBy,
+        safeSubmittedBy,
+        safeLimit,
+        offset,
+      ]
+    );
+
+    return {
+      rows: rowsResult.rows,
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.ceil(total / safeLimit),
+      },
+    };
   }
 }
 
