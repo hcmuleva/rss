@@ -1,1 +1,6 @@
-export { default } from './home/screens/KaryakariniMemberScreen';
+import React from 'react';
+import { Redirect } from 'expo-router';
+
+export default function KaryakariniMemberRedirect() {
+  return <Redirect href="/" />;
+}

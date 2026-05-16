@@ -13,8 +13,7 @@ export default function MainLayout() {
     if (pathname.includes('/admin')) return 'admin';
     if (pathname.includes('/karyakarini-admin')) return 'admin';
     if (pathname.includes('/karyakarini-report')) return 'report';
-    if (pathname.includes('/karyakarini-member')) return 'karyakarini';
-    return 'home';
+    return 'karyakarini';
   };
 
   return (

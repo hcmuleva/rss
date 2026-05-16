@@ -14,10 +14,11 @@ type Props = {
   levels: TreeLevelState[];
   breadcrumb: string;
   onSelectNode: (levelIndex: number, node: KaryakariniNode) => void;
-  onOpenMembers: (node: KaryakariniNode) => void;
+  onOpenMembers?: (node: KaryakariniNode) => void;
   onAddMember?: (node: KaryakariniNode) => void;
   onAddNode?: (node: KaryakariniNode) => void;
   canAddMembers?: boolean;
+  showCards?: boolean;
 };
 
 const titleCase = (value?: string | null) =>
@@ -33,6 +34,7 @@ export function TreeView({
   onAddMember,
   onAddNode,
   canAddMembers = false,
+  showCards = true,
 }: Props) {
   const activeLevelIndex = levels.length - 1;
   const activeLevel = activeLevelIndex >= 0 ? levels[activeLevelIndex] : null;
@@ -85,7 +87,7 @@ export function TreeView({
         </ScrollView>
       </View>
 
-      {activeLevel ? (
+      {showCards && activeLevel ? (
         <View style={styles.cardsSection}>
           <View style={styles.cardsHeader}>
             <Text style={styles.cardsTitle}>
@@ -104,7 +106,7 @@ export function TreeView({
                 node={node}
                 selected={activeLevel.selectedNodeId === node.id}
                 onPress={() => onSelectNode(activeLevelIndex, node)}
-                onMembersPress={() => onOpenMembers(node)}
+                onMembersPress={onOpenMembers ? () => onOpenMembers(node) : undefined}
                 onAddMemberPress={
                   canAddMembers && node.can_assign_member && onAddMember ? () => onAddMember(node) : undefined
                 }

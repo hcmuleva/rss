@@ -3,9 +3,11 @@ import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInpu
 import { router } from 'expo-router';
 import { karyakariniClient } from '../../api/client';
 import { AppBottomNav } from '../../core/components/AppBottomNav';
-import { ProfileMenu } from '../../core/components/ProfileMenu';
+import { ScreenHeader } from '../../core/components/ScreenHeader';
+import { PageHeaderCard } from '../../core/components/PageHeaderCard';
 import { useProfile } from '../../core/context/ProfileContext';
 import { theme } from '../../theme';
+import { MaterialIcons } from '@expo/vector-icons';
 import type {
   KaryakariniCategoryActivity,
   KaryakariniMember,
@@ -167,10 +169,16 @@ export default function KaryakariniReportScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.topHeader}>
-        <Text style={styles.title}>Reports</Text>
-        <ProfileMenu user={user as any} onLogout={handleLogout} />
-      </View>
+      <ScreenHeader
+        title="Reports"
+        user={user}
+        onLogout={handleLogout}
+      />
+      <PageHeaderCard
+        title="Administrative Reports"
+        subtitle="Data insights for Karyakarini members and activities"
+        icon={<MaterialIcons name="assessment" size={24} color={theme.colors.primary} />}
+      />
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.content}>
         <View style={styles.tabRow}>

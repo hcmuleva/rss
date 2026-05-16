@@ -7,7 +7,7 @@ type Props = {
   node: KaryakariniNode;
   selected?: boolean;
   onPress: () => void;
-  onMembersPress: () => void;
+  onMembersPress?: () => void;
   onAddMemberPress?: () => void;
   onAddNodePress?: () => void;
 };
@@ -35,9 +35,11 @@ export function NodeCard({ node, selected = false, onPress, onMembersPress, onAd
       </View>
 
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.actionBtn} onPress={onMembersPress}>
-          <Text style={styles.actionText}>Members</Text>
-        </TouchableOpacity>
+        {onMembersPress ? (
+          <TouchableOpacity style={styles.actionBtn} onPress={onMembersPress}>
+            <Text style={styles.actionText}>Members</Text>
+          </TouchableOpacity>
+        ) : null}
         {onAddMemberPress ? (
           <TouchableOpacity style={[styles.actionBtn, styles.actionBtnPrimary]} onPress={onAddMemberPress}>
             <Text style={[styles.actionText, styles.actionTextPrimary]}>Add</Text>

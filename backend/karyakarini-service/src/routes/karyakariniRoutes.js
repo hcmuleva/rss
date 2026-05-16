@@ -32,6 +32,7 @@ router.get('/meetings/:meetingId', controller.getMeetingDetails);
 router.put('/meetings/:meetingId', controller.updateMeeting);
 router.get('/tasks', controller.getTasks);
 router.post('/tasks', controller.createTask);
+router.put('/tasks/:taskId', controller.updateTask);
 router.patch('/my/tasks/:taskId/status', controller.updateMyTaskStatus);
 router.get('/my/teams', controller.getMyTeams);
 router.get('/my/report/members', controller.getReportMembers);

@@ -15,3 +15,7 @@ backend/auth-service/node_modules/
 backend/karyakarini-service/node_modules/
 backend/**/dist/
 backend/**/build/
+node_modules/
+.env
+.env.*
+!apps/**/.env.example

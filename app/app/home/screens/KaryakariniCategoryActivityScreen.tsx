@@ -6,6 +6,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { karyakariniClient } from '../../api/client';
 import { useProfile } from '../../core/context/ProfileContext';
 import { theme } from '../../theme';
+import { ScreenHeader } from '../../core/components/ScreenHeader';
 import type {
   KaryakariniAttachment,
   KaryakariniCategoryActivity,
@@ -253,22 +254,23 @@ export default function KaryakariniCategoryActivityScreen() {
   const canNext = pagination.page < Math.max(1, pagination.totalPages || 1);
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <View style={styles.headerRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.heading}>Category Activity</Text>
-          <Text style={styles.subHeading}>Your submitted activities</Text>
+    <View style={styles.root}>
+      <ScreenHeader title="Category Activity" showBack user={user} />
+      <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.headerRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.subHeading}>Your submitted activities</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.createBtn}
+            onPress={() => {
+              resetCreateForm();
+              setShowCreateModal(true);
+            }}
+          >
+            <Text style={styles.createBtnText}>Create</Text>
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          style={styles.createBtn}
-          onPress={() => {
-            resetCreateForm();
-            setShowCreateModal(true);
-          }}
-        >
-          <Text style={styles.createBtnText}>Create</Text>
-        </TouchableOpacity>
-      </View>
 
       <View style={styles.filterRow}>
         <Text style={styles.filterText}>Category: {form.category || 'All'}</Text>
@@ -369,11 +371,7 @@ export default function KaryakariniCategoryActivityScreen() {
         </View>
       </View>
 
-      <View style={styles.row}>
-        <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => router.back()}>
-          <Text style={styles.btnTextDark}>Back</Text>
-        </TouchableOpacity>
-      </View>
+
 
       <Modal visible={showCreateModal} animationType="slide" transparent onRequestClose={() => setShowCreateModal(false)}>
         <View style={styles.modalBackdrop}>
@@ -499,7 +497,8 @@ export default function KaryakariniCategoryActivityScreen() {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 

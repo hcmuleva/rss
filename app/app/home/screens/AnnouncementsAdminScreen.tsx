@@ -5,6 +5,10 @@ import { ProfileMenu } from '../../core/components/ProfileMenu';
 import { useProfile } from '../../core/context/ProfileContext';
 import { authClient } from '../../api/client';
 import { theme } from '../../theme';
+import { ScreenHeader } from '../../core/components/ScreenHeader';
+import { PageHeaderCard } from '../../core/components/PageHeaderCard';
+import { StandardModal } from '../../core/components/StandardModal';
+import { MaterialIcons } from '@expo/vector-icons';
 
 type AnnouncementCategory = {
   category: string;
@@ -179,25 +183,26 @@ export default function AnnouncementsAdminScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={styles.topHeader}>
-        <View style={styles.headerLeft}>
-          <Image source={require('../../../assets/images/logo.png')} style={styles.headerLogo} resizeMode="contain" />
-          <Text style={styles.headerBrand}>Emeelan</Text>
-        </View>
-        {user ? <ProfileMenu user={user as any} onLogout={handleLogout} /> : null}
-      </View>
+      <ScreenHeader
+        title="Announcements"
+        showBack
+        onBack={() => router.replace('/admin' as any)}
+        user={user}
+        onLogout={handleLogout}
+      />
+
+      <PageHeaderCard
+        title="Announcements"
+        subtitle="Broadcast to all members"
+        icon={<MaterialIcons name="campaign" size={24} color={theme.colors.primary} />}
+      />
 
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void handleRefresh()} />}
+        showsVerticalScrollIndicator={false}
       >
-        <TouchableOpacity style={styles.backButton} onPress={() => router.replace('/admin' as any)}>
-          <Text style={styles.backButtonText}>← Back to Admin</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.heading}>Announcements</Text>
-        <Text style={styles.subHeading}>Select one of 14 categories and broadcast to all registered members.</Text>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <ScrollView
@@ -270,47 +275,35 @@ export default function AnnouncementsAdminScreen() {
         </View>
       </ScrollView>
 
-      <Modal
+      <StandardModal
         visible={commentsModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setCommentsModalVisible(false)}
+        onClose={() => setCommentsModalVisible(false)}
+        title="Comments"
+        subtitle={selectedAnnouncement?.title || '-'}
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.modalTitle}>Comments</Text>
-                <Text style={styles.modalSubTitle} numberOfLines={1}>{selectedAnnouncement?.title || '-'}</Text>
-              </View>
-              <TouchableOpacity onPress={() => setCommentsModalVisible(false)} style={styles.modalCloseBtn}>
-                <Text style={styles.modalCloseText}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            {commentsLoading ? (
-              <View style={styles.modalStateWrap}>
-                <ActivityIndicator size="small" color={theme.colors.primary} />
-                <Text style={styles.helperText}>Loading comments...</Text>
-              </View>
-            ) : comments.length === 0 ? (
-              <View style={styles.modalStateWrap}>
-                <Text style={styles.helperText}>No comments yet.</Text>
-              </View>
-            ) : (
-              <ScrollView style={styles.commentsList} showsVerticalScrollIndicator={false}>
-                {comments.map((comment) => (
-                  <View key={`modal-comment-${comment.id}`} style={styles.modalCommentCard}>
-                    <Text style={styles.modalCommentAuthor}>{comment.user_name || 'User'}</Text>
-                    <Text style={styles.modalCommentText}>{comment.comment_text}</Text>
-                    <Text style={styles.modalCommentDate}>{toDateTimeText(comment.created_at)}</Text>
-                  </View>
-                ))}
-              </ScrollView>
-            )}
+        {commentsLoading ? (
+          <View style={styles.modalStateWrap}>
+            <ActivityIndicator size="small" color={theme.colors.primary} />
+            <Text style={styles.helperText}>Loading comments...</Text>
           </View>
-        </View>
-      </Modal>
+        ) : comments.length === 0 ? (
+          <View style={styles.modalStateWrap}>
+            <Text style={styles.helperText}>No comments yet.</Text>
+          </View>
+        ) : (
+          <View style={styles.commentsList}>
+            {comments.map((comment) => (
+              <View key={`comment-${comment.id}`} style={styles.modalCommentCard}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={styles.modalCommentAuthor}>{comment.user_name || 'Member'}</Text>
+                  <Text style={styles.modalCommentDate}>{toDateTimeText(comment.created_at)}</Text>
+                </View>
+                <Text style={styles.modalCommentText}>{comment.comment_text}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </StandardModal>
     </View>
   );
 }

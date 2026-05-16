@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { theme } from '../../../theme';
+import { StandardModal } from '../../../core/components/StandardModal';
 import type { KaryakariniMember, KaryakariniNode, KaryakariniPagination } from '../types';
 
 type Props = {
@@ -96,363 +97,337 @@ export function MemberDialog({ visible, loading, node, members, pagination, onCl
   }, [members, node?.id]);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
-          <View style={styles.header}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Members</Text>
-              <Text style={styles.subtitle}>{node?.name || 'Selected Node'}</Text>
-            </View>
-            <TouchableOpacity onPress={onClose}>
-              <Text style={styles.close}>✕</Text>
+    <StandardModal
+      visible={visible}
+      onClose={onClose}
+      title="Members"
+      subtitle={node?.name || 'Selected Node'}
+      footer={
+        <View style={styles.pagination}>
+          <Text style={styles.pageText}>
+            Page {pagination.page} / {Math.max(1, pagination.totalPages || 1)} • Total {pagination.total}
+          </Text>
+          <View style={styles.pageActions}>
+            <TouchableOpacity
+              disabled={!canPrev || loading}
+              style={[styles.pageBtn, (!canPrev || loading) && styles.pageBtnDisabled]}
+              onPress={() => canPrev && onChangePage(pagination.page - 1)}
+            >
+              <Text style={styles.pageBtnText}>Prev</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              disabled={!canNext || loading}
+              style={[styles.pageBtn, (!canNext || loading) && styles.pageBtnDisabled]}
+              onPress={() => canNext && onChangePage(pagination.page + 1)}
+            >
+              <Text style={styles.pageBtnText}>Next</Text>
             </TouchableOpacity>
           </View>
-
-          <ScrollView showsVerticalScrollIndicator style={styles.groupedWrap}>
-            {loading ? (
-              <View style={styles.loadingWrap}>
-                <Text style={styles.loadingText}>Loading members...</Text>
-              </View>
-            ) : groupedMembers.length === 0 ? (
-              <View style={styles.loadingWrap}>
-                <Text style={styles.loadingText}>No members found</Text>
-              </View>
-            ) : (
-              groupedMembers.map((location) => (
-                <View key={`loc-${location.nodeId}-${location.path}`} style={styles.locationSection}>
-                  <Text style={styles.locationTitle}>{location.locationName}</Text>
-                  <Text style={styles.locationSub}>{location.path}</Text>
-                  {location.padGroups.map((padGroup) => (
-                    <View key={`pad-${location.nodeId}-${padGroup.pad}`} style={styles.padSection}>
-                      <Text style={styles.padTitle}>{padGroup.pad}</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableWrap}>
-                        <View>
-                          <View style={styles.tableHeader}>
-                            <Text style={[styles.headerCell, styles.colAvatar]}>Avatar</Text>
-                            <Text style={[styles.headerCell, styles.colName]}>Name</Text>
-                            <Text style={[styles.headerCell, styles.colCategory]}>Categories</Text>
-                            <Text style={[styles.headerCell, styles.colSubcategory]}>Subcategories</Text>
-                            <Text style={[styles.headerCell, styles.colMobile]}>Mobile</Text>
-                            <Text style={[styles.headerCell, styles.colGotra]}>Gotra</Text>
-                            <Text style={[styles.headerCell, styles.colVillage]}>Village</Text>
-                            <Text style={[styles.headerCell, styles.colPeriod]}>Period</Text>
-                            <Text style={[styles.headerCell, styles.colPath]}>Path</Text>
-                            <Text style={[styles.headerCell, styles.colAction]}>Action</Text>
-                          </View>
-
-                          {padGroup.rows.map((member) => (
-                            <View key={`${member.id}-${member.user_id || member.mobile_number || 'member'}`} style={styles.row}>
-                              <View style={[styles.cell, styles.colAvatar]}>
-                                {member.avatar ? (
-                                  <Image source={{ uri: member.avatar }} style={styles.avatar} />
-                                ) : (
-                                  <View style={styles.avatarFallback}>
-                                    <Text style={styles.avatarFallbackText}>{initials(memberName(member))}</Text>
-                                  </View>
-                                )}
-                              </View>
-                              <View style={[styles.cell, styles.colName]}>
-                                <RowValue text={memberName(member)} />
-                              </View>
-                              <View style={[styles.cell, styles.colCategory]}>
-                                <View style={styles.pillsWrap}>
-                                  {parseLabelList(member.categories && member.categories.length ? member.categories : member.category || '').map((entry) => (
-                                    <View key={`cat-${member.id}-${entry}`} style={styles.pill}>
-                                      <Text style={styles.pillText}>{entry}</Text>
-                                    </View>
-                                  ))}
-                                  {parseLabelList(member.categories && member.categories.length ? member.categories : member.category || '').length === 0 ? (
-                                    <Text style={styles.value}>-</Text>
-                                  ) : null}
-                                </View>
-                              </View>
-                              <View style={[styles.cell, styles.colSubcategory]}>
-                                <View style={styles.pillsWrap}>
-                                  {parseLabelList(member.subcategories && member.subcategories.length ? member.subcategories : member.subcategory || '').map(
-                                    (entry) => (
-                                      <View key={`sub-${member.id}-${entry}`} style={styles.pill}>
-                                        <Text style={styles.pillText}>{entry}</Text>
-                                      </View>
-                                    )
-                                  )}
-                                  {parseLabelList(member.subcategories && member.subcategories.length ? member.subcategories : member.subcategory || '').length ===
-                                  0 ? (
-                                    <Text style={styles.value}>-</Text>
-                                  ) : null}
-                                </View>
-                              </View>
-                              <View style={[styles.cell, styles.colMobile]}>
-                                <RowValue text={member.mobile_number} />
-                              </View>
-                              <View style={[styles.cell, styles.colGotra]}>
-                                <RowValue text={member.gotra} />
-                              </View>
-                              <View style={[styles.cell, styles.colVillage]}>
-                                <RowValue text={member.village} />
-                              </View>
-                              <View style={[styles.cell, styles.colPeriod]}>
-                                <RowValue text={memberPeriod(member)} />
-                              </View>
-                              <View style={[styles.cell, styles.colPath]}>
-                                <RowValue text={member.hierarchy_path} />
-                              </View>
-                              <View style={[styles.cell, styles.colAction]}>
-                                {onEditMember ? (
-                                  <TouchableOpacity style={styles.editBtn} onPress={() => onEditMember(member)}>
-                                    <Text style={styles.editBtnText}>Edit</Text>
-                                  </TouchableOpacity>
-                                ) : null}
-                              </View>
-                            </View>
-                          ))}
-                        </View>
-                      </ScrollView>
-                    </View>
-                  ))}
-                </View>
-              ))
-            )}
-          </ScrollView>
-
-          <View style={styles.pagination}>
-            <Text style={styles.pageText}>
-              Page {pagination.page} / {Math.max(1, pagination.totalPages || 1)} • Total {pagination.total}
-            </Text>
-            <View style={styles.pageActions}>
-              <TouchableOpacity
-                disabled={!canPrev || loading}
-                style={[styles.pageBtn, (!canPrev || loading) && styles.pageBtnDisabled]}
-                onPress={() => canPrev && onChangePage(pagination.page - 1)}
-              >
-                <Text style={styles.pageBtnText}>Prev</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                disabled={!canNext || loading}
-                style={[styles.pageBtn, (!canNext || loading) && styles.pageBtnDisabled]}
-                onPress={() => canNext && onChangePage(pagination.page + 1)}
-              >
-                <Text style={styles.pageBtnText}>Next</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
         </View>
-      </View>
-    </Modal>
+      }
+    >
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <Text style={styles.loadingText}>Loading members...</Text>
+        </View>
+      ) : groupedMembers.length === 0 ? (
+        <View style={styles.loadingWrap}>
+          <Text style={styles.loadingText}>No members found</Text>
+        </View>
+      ) : (
+        groupedMembers.map((location) => (
+          <View key={`loc-${location.nodeId}-${location.path}`} style={styles.locationSection}>
+            <Text style={styles.locationTitle}>{location.locationName}</Text>
+            <Text style={styles.locationSub}>{location.path}</Text>
+            {location.padGroups.map((padGroup) => (
+              <View key={`pad-${location.nodeId}-${padGroup.pad}`} style={styles.padSection}>
+                <Text style={styles.padTitle}>{padGroup.pad}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableWrap}>
+                  <View>
+                    <View style={styles.tableHeader}>
+                      <Text style={[styles.headerCell, styles.colAvatar]}>Avatar</Text>
+                      <Text style={[styles.headerCell, styles.colName]}>Name</Text>
+                      <Text style={[styles.headerCell, styles.colCategory]}>Categories</Text>
+                      <Text style={[styles.headerCell, styles.colSubcategory]}>Subcategories</Text>
+                      <Text style={[styles.headerCell, styles.colMobile]}>Mobile</Text>
+                      <Text style={[styles.headerCell, styles.colGotra]}>Gotra</Text>
+                      <Text style={[styles.headerCell, styles.colVillage]}>Village</Text>
+                      <Text style={[styles.headerCell, styles.colPeriod]}>Period</Text>
+                      <Text style={[styles.headerCell, styles.colPath]}>Path</Text>
+                      <Text style={[styles.headerCell, styles.colAction]}>Action</Text>
+                    </View>
+
+                    {padGroup.rows.map((member, rowIndex) => (
+                      <View key={`${member.id}-${member.user_id || member.mobile_number || 'member'}`} style={[styles.row, rowIndex % 2 === 1 && styles.rowEven]}>
+                        <View style={[styles.cell, styles.colAvatar]}>
+                          {member.avatar ? (
+                            <Image source={{ uri: member.avatar }} style={styles.avatar} />
+                          ) : (
+                            <View style={styles.avatarFallback}>
+                              <Text style={styles.avatarFallbackText}>{initials(memberName(member))}</Text>
+                            </View>
+                          )}
+                        </View>
+                        <View style={[styles.cell, styles.colName]}>
+                          <RowValue text={memberName(member)} />
+                        </View>
+                        <View style={[styles.cell, styles.colCategory]}>
+                          <View style={styles.pillsWrap}>
+                            {parseLabelList(member.categories && member.categories.length ? member.categories : member.category || '').map((entry) => (
+                              <View key={`cat-${member.id}-${entry}`} style={styles.pill}>
+                                <Text style={styles.pillText}>{entry}</Text>
+                              </View>
+                            ))}
+                            {parseLabelList(member.categories && member.categories.length ? member.categories : member.category || '').length === 0 ? (
+                              <Text style={styles.value}>-</Text>
+                            ) : null}
+                          </View>
+                        </View>
+                        <View style={[styles.cell, styles.colSubcategory]}>
+                          <View style={styles.pillsWrap}>
+                            {parseLabelList(member.subcategories && member.subcategories.length ? member.subcategories : member.subcategory || '').map(
+                              (entry) => (
+                                <View key={`sub-${member.id}-${entry}`} style={styles.pill}>
+                                  <Text style={styles.pillText}>{entry}</Text>
+                                </View>
+                              )
+                            )}
+                            {parseLabelList(member.subcategories && member.subcategories.length ? member.subcategories : member.subcategory || '').length ===
+                            0 ? (
+                              <Text style={styles.value}>-</Text>
+                            ) : null}
+                          </View>
+                        </View>
+                        <View style={[styles.cell, styles.colMobile]}>
+                          <RowValue text={member.mobile_number} />
+                        </View>
+                        <View style={[styles.cell, styles.colGotra]}>
+                          <RowValue text={member.gotra} />
+                        </View>
+                        <View style={[styles.cell, styles.colVillage]}>
+                          <RowValue text={member.village} />
+                        </View>
+                        <View style={[styles.cell, styles.colPeriod]}>
+                          <RowValue text={memberPeriod(member)} />
+                        </View>
+                        <View style={[styles.cell, styles.colPath]}>
+                          <RowValue text={member.hierarchy_path} />
+                        </View>
+                        <View style={[styles.cell, styles.colAction]}>
+                          {onEditMember ? (
+                            <TouchableOpacity style={styles.editBtn} onPress={() => onEditMember(member)}>
+                              <Text style={styles.editBtnText}>Edit</Text>
+                            </TouchableOpacity>
+                          ) : null}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </ScrollView>
+              </View>
+            ))}
+          </View>
+        ))
+      )}
+    </StandardModal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    padding: 16,
-  },
-  card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: 16,
-    padding: 14,
-    maxHeight: '90%',
-    gap: 10,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-  },
-  subtitle: {
-    fontSize: 12,
-    color: theme.colors.text.secondary,
-  },
-  close: {
-    fontSize: 22,
-    color: theme.colors.text.secondary,
-  },
-  groupedWrap: {
-    maxHeight: '70%',
-  },
   locationSection: {
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: '#E2E8F0',
     borderRadius: 10,
-    backgroundColor: theme.colors.background,
-    padding: 10,
-    marginBottom: 10,
-    gap: 8,
+    backgroundColor: '#F8FAFC',
+    padding: 6,
+    gap: 3,
   },
   locationTitle: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '800',
     color: theme.colors.text.primary,
   },
   locationSub: {
-    fontSize: 12,
+    fontSize: 11,
     color: theme.colors.text.secondary,
+    fontWeight: '500',
+    lineHeight: 15,
   },
   padSection: {
-    gap: 6,
+    gap: 3,
+    marginTop: 2,
   },
   padTitle: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 10,
+    fontWeight: '800',
     color: theme.colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   tableWrap: {
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 10,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
   },
   tableHeader: {
     flexDirection: 'row',
-    backgroundColor: theme.colors.surfaceContainerHigh,
+    backgroundColor: '#F1F5F9',
     borderBottomWidth: 1,
-    borderColor: theme.colors.border,
+    borderBottomColor: '#E2E8F0',
   },
   headerCell: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#475569',
     paddingHorizontal: 8,
-    paddingVertical: 10,
+    paddingVertical: 7,
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   row: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderColor: theme.colors.borderLight,
+    borderBottomColor: '#F1F5F9',
+  },
+  rowEven: {
+    backgroundColor: '#FBFCFD',
   },
   cell: {
     paddingHorizontal: 8,
-    paddingVertical: 10,
+    paddingVertical: 7,
     justifyContent: 'center',
+    borderRightWidth: 1,
+    borderRightColor: '#F1F5F9',
   },
   value: {
     fontSize: 12,
     color: theme.colors.text.primary,
+    fontWeight: '500',
   },
   colAvatar: {
-    width: 74,
+    width: 48,
+    alignItems: 'center',
   },
   colName: {
-    width: 170,
-  },
-  colFather: {
-    width: 180,
-  },
-  colCategory: {
-    width: 200,
-  },
-  colSubcategory: {
-    width: 240,
-  },
-  colMobile: {
-    width: 140,
-  },
-  colGotra: {
-    width: 130,
-  },
-  colVillage: {
     width: 150,
   },
-  colPeriod: {
-    width: 170,
+  colCategory: {
+    width: 160,
   },
-  colPath: {
-    width: 260,
+  colSubcategory: {
+    width: 190,
   },
-  colAction: {
+  colMobile: {
+    width: 120,
+  },
+  colGotra: {
     width: 110,
   },
+  colVillage: {
+    width: 120,
+  },
+  colPeriod: {
+    width: 140,
+  },
+  colPath: {
+    width: 210,
+  },
+  colAction: {
+    width: 80,
+    borderRightWidth: 0,
+    alignItems: 'center',
+  },
   editBtn: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: theme.colors.primary,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    alignSelf: 'flex-start',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   editBtnText: {
     color: theme.colors.primary,
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
   },
   avatarFallback: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: theme.colors.surfaceContainerHighest,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarFallbackText: {
     color: theme.colors.text.secondary,
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '700',
   },
   loadingWrap: {
-    paddingVertical: 20,
+    paddingVertical: 24,
     alignItems: 'center',
   },
   pillsWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: 4,
   },
   pill: {
     borderWidth: 1,
     borderColor: theme.colors.primary,
     backgroundColor: theme.colors.primarySoft,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
   pillText: {
     color: theme.colors.primary,
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 10,
+    fontWeight: '800',
   },
   loadingText: {
     color: theme.colors.text.secondary,
     fontSize: 13,
   },
   pagination: {
+    flex: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
   },
   pageText: {
     color: theme.colors.text.secondary,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   pageActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
   },
   pageBtn: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: theme.colors.border,
-    borderRadius: 8,
+    borderRadius: 6,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
+    backgroundColor: '#fff',
   },
   pageBtnDisabled: {
     opacity: 0.45,
+    backgroundColor: '#F1F5F9',
   },
   pageBtnText: {
     color: theme.colors.text.primary,
-    fontWeight: '700',
-    fontSize: 12,
+    fontWeight: '800',
+    fontSize: 11,
   },
 });
+
