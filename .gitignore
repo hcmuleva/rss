@@ -1,0 +1,17 @@
+.DS_Store
+apps/.tbd
+apps/**/node_modules/
+apps/**/.env
+apps/**/.env.*
+!apps/**/.env.example
+apps/**/dist/
+apps/**/.expo/
+apps/**/.expo-shared/
+backend/**/.env
+backend/**/node_modules/
+backend/karyakarini-service/.env
+backend/auth-service/.env
+backend/auth-service/node_modules/
+backend/karyakarini-service/node_modules/
+backend/**/dist/
+backend/**/build/

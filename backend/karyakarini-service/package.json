@@ -1,0 +1,25 @@
+{
+  "name": "@emeelan/karyakarini-service",
+  "version": "1.0.0",
+  "description": "Karyakarini hierarchy and member management service",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "import:mahasabha": "node scripts/importMahasabhaCsv.js",
+    "backfill:mahasabha-families": "node scripts/backfillMahasabhaFamilies.js"
+  },
+  "dependencies": {
+    "ably": "^2.21.0",
+    "aws-sdk": "^2.1693.0",
+    "axios": "^1.4.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "multer": "^2.1.1",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  }
+}
