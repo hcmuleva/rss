@@ -7,9 +7,10 @@ import {
   StyleSheet,
   Pressable,
   Animated,
+  Image,
 } from 'react-native';
-import { router } from 'expo-router';
 import { theme } from '@/theme';
+import { AUTH_BASE_URL, KARYAKARINI_BASE_URL } from '../../api/client';
 import type { User } from '../types';
 
 interface ProfileMenuProps {
@@ -20,9 +21,35 @@ interface ProfileMenuProps {
 }
 
 export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout, notificationCount = 0, onPressNotifications }) => {
+  const normalizeProfileUri = (value?: string | null) => {
+    const raw = String(value || '').trim();
+    if (!raw || raw === 'null' || raw === 'undefined') return '';
+    if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('data:')) return raw;
+    const baseCandidates = [AUTH_BASE_URL, KARYAKARINI_BASE_URL]
+      .map((entry) => String(entry || '').trim().replace(/\/api\/?$/, ''))
+      .filter(Boolean);
+    const base = baseCandidates[0] || '';
+    if (!base) return raw;
+    return raw.startsWith('/') ? `${base}${raw}` : `${base}/${raw}`;
+  };
   const [menuVisible, setMenuVisible] = useState(false);
   const [fadeAnim] = useState(new Animated.Value(0));
   const showBell = Boolean(onPressNotifications);
+  const resolvedName = String((user as any)?.firstName || (user as any)?.first_name || (user as any)?.name || '').trim();
+  const userInitial = (resolvedName.substring(0, 1) || 'U').toUpperCase();
+  const profilePhoto = [
+    (user as any)?.profilePhotoUrl,
+    (user as any)?.profile_photo_url,
+    (user as any)?.profilePhoto,
+    (user as any)?.profile_image,
+    (user as any)?.avatar,
+    (user as any)?.image,
+    (user as any)?.photo_url,
+    (user as any)?.photo,
+  ]
+    .map((entry) => String(entry || '').trim())
+    .map((entry) => normalizeProfileUri(entry))
+    .find((entry) => entry && entry !== 'null' && entry !== 'undefined') || '';
 
   const openMenu = () => {
     setMenuVisible(true);
@@ -50,11 +77,7 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout, notifi
 
   const menuItems = [
     {
-      label: 'My Profile',
-      onPress: () => router.push('/user-profile' as any),
-    },
-    {
-      label: 'Logout',
+      label: 'लॉगआउट',
       onPress: onLogout,
       destructive: true,
     },
@@ -78,11 +101,15 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout, notifi
           </TouchableOpacity>
         ) : null}
         <TouchableOpacity onPress={openMenu} style={styles.avatarButton} activeOpacity={0.7}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {user.firstName.substring(0, 1).toUpperCase()}
-            </Text>
-          </View>
+          {profilePhoto ? (
+            <Image source={{ uri: profilePhoto }} style={styles.avatarImage} />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {userInitial}
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -112,14 +139,18 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout, notifi
           >
             {/* User Info Header */}
             <View style={styles.menuHeader}>
-              <View style={styles.menuAvatar}>
-                <Text style={styles.menuAvatarText}>
-                  {user.firstName.substring(0, 1).toUpperCase()}
-                </Text>
-              </View>
+              {profilePhoto ? (
+                <Image source={{ uri: profilePhoto }} style={styles.menuAvatarImage} />
+              ) : (
+                <View style={styles.menuAvatar}>
+                  <Text style={styles.menuAvatarText}>
+                    {userInitial}
+                  </Text>
+                </View>
+              )}
               <View style={styles.menuUserInfo}>
-                <Text style={styles.menuUserName}>{user.firstName}</Text>
-                <Text style={styles.menuUserEmail}>{user.email}</Text>
+                <Text style={styles.menuUserName}>{resolvedName || 'उपयोगकर्ता'}</Text>
+                <Text style={styles.menuUserEmail}>{String(user.email || '') || 'कोई डेटा नहीं'}</Text>
               </View>
             </View>
 
@@ -208,6 +239,15 @@ const styles = StyleSheet.create({
     borderColor: '#FFF',
     ...theme.shadows.sm,
   },
+  avatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#FFF',
+    backgroundColor: theme.colors.surfaceContainerHigh,
+    ...theme.shadows.sm,
+  },
   avatarText: {
     ...theme.typography.button,
     color: '#FFF',
@@ -245,6 +285,14 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  menuAvatarImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceContainerHigh,
   },
   menuAvatarText: {
     ...theme.typography.h3,

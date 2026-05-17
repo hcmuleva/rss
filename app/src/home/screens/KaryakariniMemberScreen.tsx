@@ -263,10 +263,6 @@ export default function KaryakariniMemberScreen() {
     }
   }, [logout]);
 
-  const handleOpenNotifications = useCallback(() => {
-    router.push('/karyakarini-notifications' as any);
-  }, []);
-
   const pendingInvitations = useMemo(
     () => invitations.filter((invitation) => String(invitation.invitation_status || '').toLowerCase() === 'pending').length,
     [invitations]
@@ -354,7 +350,6 @@ export default function KaryakariniMemberScreen() {
             user={user as any}
             onLogout={handleLogout}
             notificationCount={notificationUnreadCount}
-            onPressNotifications={handleOpenNotifications}
           />
         ) : null}
       </View>
