@@ -35,7 +35,7 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
-      Alert.alert('जानकारी अधूरी है', 'Please fill in all fields / सभी फ़ील्ड भरें');
+      Alert.alert('जानकारी अधूरी है', 'कृपया सभी फ़ील्ड भरें');
       return;
     }
 
@@ -45,8 +45,8 @@ export default function LoginScreen() {
       router.replace('/');
     } catch (error: any) {
       Alert.alert(
-        'Login Failed / लॉगिन विफल',
-        error.message || 'Please check your credentials and try again.'
+        'लॉगिन विफल',
+        error.message || 'कृपया अपनी जानकारी जाँचकर पुनः प्रयास करें।'
       );
     } finally {
       setLoading(false);
@@ -77,15 +77,15 @@ export default function LoginScreen() {
 
         {/* ── Login Card ─────────────────────────────────────── */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Welcome Back 🙏</Text>
+          <Text style={styles.cardTitle}>पुनः स्वागत है 🙏</Text>
           <Text style={styles.cardTitleHindi}>नमस्ते, वापस स्वागत है</Text>
 
           {/* Email */}
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Email / Mobile / Seervi ID</Text>
+            <Text style={styles.fieldLabel}>ईमेल / मोबाइल / सीरवी आईडी</Text>
             <TextInput
               style={[styles.input, emailFocused && styles.inputFocused]}
-              placeholder="Enter email, mobile, or Seervi ID"
+              placeholder="ईमेल, मोबाइल या सीरवी आईडी दर्ज करें"
               placeholderTextColor={theme.colors.text.disabled}
               value={email}
               onChangeText={setEmail}
@@ -100,7 +100,7 @@ export default function LoginScreen() {
 
           {/* Password */}
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Password / पासवर्ड</Text>
+            <Text style={styles.fieldLabel}>पासवर्ड</Text>
             <View style={styles.passwordRow}>
               <TextInput
                 style={[
@@ -108,7 +108,7 @@ export default function LoginScreen() {
                   styles.passwordInput,
                   passwordFocused && styles.inputFocused,
                 ]}
-                placeholder="Enter your password"
+                placeholder="अपना पासवर्ड दर्ज करें"
                 placeholderTextColor={theme.colors.text.disabled}
                 value={password}
                 onChangeText={setPassword}
@@ -128,17 +128,6 @@ export default function LoginScreen() {
             </View>
           </View>
 
-          {/* Forgot Password */}
-          <TouchableOpacity
-            style={styles.forgotRow}
-            onPress={() =>
-              Alert.alert('Coming Soon', 'Password reset feature is coming soon!')
-            }
-            activeOpacity={0.7}
-          >
-            <Text style={styles.forgotText}>Forgot Password? / पासवर्ड भूल गए?</Text>
-          </TouchableOpacity>
-
           {/* Sign In Button */}
           <TouchableOpacity
             style={[styles.primaryBtn, loading && styles.primaryBtnDisabled]}
@@ -149,22 +138,11 @@ export default function LoginScreen() {
             {loading ? (
               <ActivityIndicator color="#FFFFFF" size="small" />
             ) : (
-              <Text style={styles.primaryBtnText}>Sign In / प्रवेश करें</Text>
+              <Text style={styles.primaryBtnText}>प्रवेश करें</Text>
             )}
           </TouchableOpacity>
 
         </View>
-
-        {/* Demo shortcut (dev only – remove before production) */}
-        <TouchableOpacity
-          style={styles.demoBtn}
-          onPress={() => {
-            setEmail('kapilm@a.com');
-            setPassword('welcome');
-          }}
-        >
-          <Text style={styles.demoText}>Use Demo Account</Text>
-        </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -329,17 +307,5 @@ const styles = StyleSheet.create({
     ...theme.typography.body,
     color: theme.colors.secondary,
     fontWeight: '600' as const,
-  },
-
-  // ── Dev demo button ─────────────────────────────────────────────
-  demoBtn: {
-    alignSelf: 'center',
-    marginTop: theme.spacing.lg,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-  },
-  demoText: {
-    ...theme.typography.caption,
-    color: theme.colors.text.disabled,
   },
 });

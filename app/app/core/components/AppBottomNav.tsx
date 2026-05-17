@@ -13,7 +13,6 @@ interface AppBottomNavProps {
 
 const BASE_NAV_ITEMS: { key: AppNavKey; icon: string; label: string; labelHi: string }[] = [
   { key: 'karyakarini', icon: '🏛️', label: 'Karyakarini', labelHi: 'कार्यकारिणी' },
-  { key: 'report', icon: '📊', label: 'Report', labelHi: 'रिपोर्ट' },
 ];
 
 const isAdminRole = (role?: string | null) => {
@@ -30,7 +29,7 @@ export function AppBottomNav({ activeKey, userRole }: AppBottomNavProps) {
   const handlePress = (key: AppNavKey) => {
     if (key === 'karyakarini') return router.replace('/karyakarini-member');
     if (key === 'report') return router.replace('/karyakarini-report');
-    if (key === 'admin') return router.replace('/admin');
+    if (key === 'admin') return router.replace('/karyakarini-admin');
   };
 
   return (

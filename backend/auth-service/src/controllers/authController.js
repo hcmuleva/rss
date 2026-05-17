@@ -152,6 +152,7 @@ const register = async (req, res) => {
           district: user.district || null,
           tehsil: user.tehsil || null,
           village: user.village || null,
+          profilePhotoUrl: user.profile_photo_url || null,
         },
         tokens,
       },
@@ -241,6 +242,7 @@ const login = async (req, res) => {
           tehsil: user.tehsil || null,
           village: user.village || null,
           lastLogin: user.last_login,
+          profilePhotoUrl: user.profile_photo_url || null,
         },
         tokens,
       },
@@ -331,6 +333,7 @@ const getMe = async (req, res) => {
           tehsil: user.tehsil || null,
           village: user.village || null,
           lastLogin: user.last_login,
+          profilePhotoUrl: user.profile_photo_url || null,
         },
       },
     });

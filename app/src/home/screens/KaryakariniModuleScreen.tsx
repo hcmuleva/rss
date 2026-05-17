@@ -452,22 +452,22 @@ export default function KaryakariniModuleScreen() {
     const selectedScopeRoot =
       currentUserRole !== 'superadmin'
         ? sortedScopeRoots.find((root) =>
-            selectedAbsoluteNode
-              ? selectedAbsoluteNode.parts.slice(0, root.parts.length).join(' > ') === root.parts.join(' > ')
-              : false
-          ) || sortedScopeRoots[0] || null
+          selectedAbsoluteNode
+            ? selectedAbsoluteNode.parts.slice(0, root.parts.length).join(' > ') === root.parts.join(' > ')
+            : false
+        ) || sortedScopeRoots[0] || null
         : null;
     const scopeBaseParts = selectedScopeRoot?.parts || [];
 
     const scopedParsedNodes =
       currentUserRole !== 'superadmin' && scopeBaseParts.length
         ? parsedNodes
-            .filter((node) => node.parts.slice(0, scopeBaseParts.length).join(' > ') === scopeBaseParts.join(' > '))
-            .map((node) => ({
-              ...node,
-              parts: node.parts.slice(scopeBaseParts.length - 1),
-              depth: node.parts.slice(scopeBaseParts.length - 1).length,
-            }))
+          .filter((node) => node.parts.slice(0, scopeBaseParts.length).join(' > ') === scopeBaseParts.join(' > '))
+          .map((node) => ({
+            ...node,
+            parts: node.parts.slice(scopeBaseParts.length - 1),
+            depth: node.parts.slice(scopeBaseParts.length - 1).length,
+          }))
         : parsedNodes;
 
     if (!scopedParsedNodes.length) return [];
@@ -933,15 +933,15 @@ export default function KaryakariniModuleScreen() {
         const pickerResult =
           source === 'camera'
             ? await ImagePicker.launchCameraAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                quality: 0.8,
-                allowsEditing: true,
-              })
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              quality: 0.8,
+              allowsEditing: true,
+            })
             : await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                quality: 0.8,
-                allowsEditing: true,
-              });
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              quality: 0.8,
+              allowsEditing: true,
+            });
 
         if (pickerResult.canceled || !pickerResult.assets?.[0]) return;
         const asset = pickerResult.assets[0];
@@ -2332,10 +2332,6 @@ export default function KaryakariniModuleScreen() {
     }
   }, [logout]);
 
-  const handleOpenNotifications = useCallback(() => {
-    router.push('/karyakarini-notifications' as any);
-  }, []);
-
   if (loading) {
     return (
       <View style={styles.center}>
@@ -2349,9 +2345,6 @@ export default function KaryakariniModuleScreen() {
     <View style={styles.container}>
       <View style={styles.topHeader}>
         <View style={styles.headerLeft}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.push('/admin' as any)}>
-            <Text style={styles.backBtnText}>← Back</Text>
-          </TouchableOpacity>
           <Image source={require('../../../assets/images/logo.png')} style={styles.headerLogo} resizeMode="contain" />
           <Text style={styles.headerBrand}>Emeelan</Text>
         </View>
@@ -2360,7 +2353,6 @@ export default function KaryakariniModuleScreen() {
             user={user as any}
             onLogout={handleLogout}
             notificationCount={notificationUnreadCount}
-            onPressNotifications={handleOpenNotifications}
           />
         ) : null}
       </View>
@@ -2669,7 +2661,7 @@ export default function KaryakariniModuleScreen() {
                   levels={roleLevels}
                   breadcrumb={roleBreadcrumb}
                   onSelectNode={(levelIndex, node) => void handleRoleNodeSelect(levelIndex, node)}
-                  onOpenMembers={() => {}} // Not needed for role assignment view
+                  onOpenMembers={() => { }} // Not needed for role assignment view
                 />
 
                 <Text style={styles.sectionLabel}>Select Member</Text>
@@ -2872,240 +2864,240 @@ export default function KaryakariniModuleScreen() {
               showsVerticalScrollIndicator={false}
             >
 
-            {memberModalTab === 'create' ? (
-              <>
-                <View style={styles.twoColRow}>
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.mobileNumber}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, mobileNumber: value }))}
-                    keyboardType="phone-pad"
-                    placeholder="Mobile Number *"
-                  />
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.name}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, name: value }))}
-                    placeholder="Name *"
-                  />
-                </View>
+              {memberModalTab === 'create' ? (
+                <>
+                  <View style={styles.twoColRow}>
+                    <TextInput
+                      style={[styles.input, styles.twoColField]}
+                      value={memberForm.mobileNumber}
+                      onChangeText={(value) => setMemberForm((prev) => ({ ...prev, mobileNumber: value }))}
+                      keyboardType="phone-pad"
+                      placeholder="Mobile Number *"
+                    />
+                    <TextInput
+                      style={[styles.input, styles.twoColField]}
+                      value={memberForm.name}
+                      onChangeText={(value) => setMemberForm((prev) => ({ ...prev, name: value }))}
+                      placeholder="Name *"
+                    />
+                  </View>
 
-                <View style={styles.twoColRow}>
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.password}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, password: value }))}
-                    placeholder="Login password (optional)"
-                    autoCapitalize="none"
-                    secureTextEntry
-                  />
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.fatherOrHusbandName}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, fatherOrHusbandName: value }))}
-                    placeholder="Father/Husband Name"
-                  />
-                </View>
+                  <View style={styles.twoColRow}>
+                    <TextInput
+                      style={[styles.input, styles.twoColField]}
+                      value={memberForm.password}
+                      onChangeText={(value) => setMemberForm((prev) => ({ ...prev, password: value }))}
+                      placeholder="Login password (optional)"
+                      autoCapitalize="none"
+                      secureTextEntry
+                    />
+                    <TextInput
+                      style={[styles.input, styles.twoColField]}
+                      value={memberForm.fatherOrHusbandName}
+                      onChangeText={(value) => setMemberForm((prev) => ({ ...prev, fatherOrHusbandName: value }))}
+                      placeholder="Father/Husband Name"
+                    />
+                  </View>
 
-                <Text style={styles.sectionLabel}>Member Photo</Text>
-                {memberForm.avatar ? (
-                  <Image source={{ uri: memberForm.avatar }} style={styles.memberPhotoPreview} />
-                ) : null}
-                <View style={styles.photoActionsRow}>
-                  <TouchableOpacity
-                    style={[styles.secondaryAction, styles.photoActionBtn, uploadingMemberPhoto && styles.saveBtnDisabled]}
-                    onPress={() => void uploadMemberPhotoFromSource('camera')}
-                    disabled={uploadingMemberPhoto}
-                  >
-                    <Text style={styles.secondaryActionText}>{uploadingMemberPhoto ? 'Uploading...' : 'Take Photo'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.secondaryAction, styles.photoActionBtn, uploadingMemberPhoto && styles.saveBtnDisabled]}
-                    onPress={() => void uploadMemberPhotoFromSource('gallery')}
-                    disabled={uploadingMemberPhoto}
-                  >
-                    <Text style={styles.secondaryActionText}>{uploadingMemberPhoto ? 'Uploading...' : 'Upload Photo'}</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.twoColRow}>
-                  <TouchableOpacity
-                    style={[styles.input, styles.twoColField]}
-                    onPress={() => {
-                      if (selectedVersionId && padOptions.length === 0 && !loadingPads) {
-                        void loadPadOptions(selectedVersionId);
-                      }
-                      setPadPickerVisible(true);
-                    }}
-                    disabled={loadingPads}
-                  >
-                    <Text style={memberForm.pad ? styles.inputText : styles.inputPlaceholder}>
-                      {memberForm.pad || (loadingPads ? 'Loading pad options...' : 'Select pad')}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.input, styles.twoColField]} onPress={() => void handleOpenPadbharTransfer()}>
-                    <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                      {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} subcategories selected` : 'Assign Padbhar *'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.sectionLabel}>User Role</Text>
-                <View style={styles.optionRow}>
-                  {(['user', 'admin'] as const).map((role) => (
+                  <Text style={styles.sectionLabel}>Member Photo</Text>
+                  {memberForm.avatar ? (
+                    <Image source={{ uri: memberForm.avatar }} style={styles.memberPhotoPreview} />
+                  ) : null}
+                  <View style={styles.photoActionsRow}>
                     <TouchableOpacity
-                      key={`create-role-${role}`}
-                      style={[styles.optionChip, memberForm.userRole === role && styles.optionChipActive]}
-                      onPress={() => setMemberForm((prev) => ({ ...prev, userRole: role }))}
+                      style={[styles.secondaryAction, styles.photoActionBtn, uploadingMemberPhoto && styles.saveBtnDisabled]}
+                      onPress={() => void uploadMemberPhotoFromSource('camera')}
+                      disabled={uploadingMemberPhoto}
                     >
-                      <Text style={[styles.optionChipText, memberForm.userRole === role && styles.optionChipTextActive]}>
-                        {role === 'admin' ? 'Admin' : 'User'}
-                      </Text>
+                      <Text style={styles.secondaryActionText}>{uploadingMemberPhoto ? 'Uploading...' : 'Take Photo'}</Text>
                     </TouchableOpacity>
-                  ))}
-                </View>
-                {padOptionsError ? <Text style={styles.errorInline}>{padOptionsError}</Text> : null}
-                <TouchableOpacity onPress={() => setMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-                  <Text style={styles.clearLink}>Clear category/subcategory</Text>
-                </TouchableOpacity>
-                {addFormSelectedCategories.length ? (
-                  <Text style={styles.helper}>Categories: {addFormSelectedCategories.join(', ')}</Text>
-                ) : null}
-                {addFormSelectedSubcategories.length ? (
-                  <Text style={styles.helper}>Subcategories: {addFormSelectedSubcategories.join(', ')}</Text>
-                ) : null}
-
-                <Text style={styles.sectionLabel}>Address (Optional)</Text>
-                <View style={styles.twoColRow}>
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.state}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, state: value }))}
-                    placeholder="State"
-                  />
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.district}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, district: value }))}
-                    placeholder="District"
-                  />
-                </View>
-                <View style={styles.twoColRow}>
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.tehsil}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, tehsil: value }))}
-                    placeholder="Tehsil"
-                  />
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.village}
-                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, village: value }))}
-                    placeholder="Village"
-                  />
-                </View>
-                <View style={styles.twoColRow}>
-                  <TextInput
-                    style={[styles.input, styles.twoColField]}
-                    value={memberForm.pincode}
-                    onChangeText={handleMemberPincodeChange}
-                    placeholder="Pincode (auto-fill)"
-                    keyboardType="number-pad"
-                  />
-                  <View style={styles.twoColField} />
-                </View>
-                {pincodeLookupLoading ? <Text style={styles.helper}>Fetching address from pincode...</Text> : null}
-                {pincodeLookupMessage ? <Text style={styles.helper}>{pincodeLookupMessage}</Text> : null}
-              </>
-            ) : (
-              <>
-                <Text style={styles.sectionLabel}>Search existing user by mobile/email</Text>
-                <View style={styles.searchRow}>
-                  <TextInput
-                    style={[styles.input, styles.searchInput]}
-                    value={userSearchQuery}
-                    onChangeText={setUserSearchQuery}
-                    placeholder="Enter mobile or email"
-                    keyboardType="default"
-                    autoCapitalize="none"
-                  />
-                  <TouchableOpacity
-                    style={[styles.searchBtn, searchingUsers && styles.saveBtnDisabled]}
-                    onPress={() => void handleSearchUsers()}
-                    disabled={searchingUsers}
-                  >
-                    <Text style={styles.searchBtnText}>{searchingUsers ? '...' : 'Search'}</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {selectedUser ? (
-                  <View style={styles.selectedUserBox}>
-                    <Text style={styles.selectedUserTitle}>Selected User</Text>
-                    <Text style={styles.selectedUserText}>{fullUserName(selectedUser) || 'Unnamed User'}</Text>
-                    <Text style={styles.selectedUserText}>{selectedUser.phone || selectedUser.email || '-'}</Text>
-                    <TouchableOpacity onPress={() => setSelectedUser(null)}>
-                      <Text style={styles.clearLink}>Clear selection</Text>
+                    <TouchableOpacity
+                      style={[styles.secondaryAction, styles.photoActionBtn, uploadingMemberPhoto && styles.saveBtnDisabled]}
+                      onPress={() => void uploadMemberPhotoFromSource('gallery')}
+                      disabled={uploadingMemberPhoto}
+                    >
+                      <Text style={styles.secondaryActionText}>{uploadingMemberPhoto ? 'Uploading...' : 'Upload Photo'}</Text>
                     </TouchableOpacity>
                   </View>
-                ) : null}
 
-                {searchResults.length > 0 ? (
-                  <View style={styles.searchResultsWrap}>
-                    {searchResults.map((entry) => (
-                      <TouchableOpacity key={`user-${entry.id}`} style={styles.searchResultItem} onPress={() => handlePickUser(entry)}>
-                        <Text style={styles.searchResultName}>{fullUserName(entry) || `User #${entry.id}`}</Text>
-                        <Text style={styles.searchResultMeta}>{entry.phone || entry.email || '-'}</Text>
+                  <View style={styles.twoColRow}>
+                    <TouchableOpacity
+                      style={[styles.input, styles.twoColField]}
+                      onPress={() => {
+                        if (selectedVersionId && padOptions.length === 0 && !loadingPads) {
+                          void loadPadOptions(selectedVersionId);
+                        }
+                        setPadPickerVisible(true);
+                      }}
+                      disabled={loadingPads}
+                    >
+                      <Text style={memberForm.pad ? styles.inputText : styles.inputPlaceholder}>
+                        {memberForm.pad || (loadingPads ? 'Loading pad options...' : 'Select pad')}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.input, styles.twoColField]} onPress={() => void handleOpenPadbharTransfer()}>
+                      <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
+                        {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} subcategories selected` : 'Assign Padbhar *'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.sectionLabel}>User Role</Text>
+                  <View style={styles.optionRow}>
+                    {(['user', 'admin'] as const).map((role) => (
+                      <TouchableOpacity
+                        key={`create-role-${role}`}
+                        style={[styles.optionChip, memberForm.userRole === role && styles.optionChipActive]}
+                        onPress={() => setMemberForm((prev) => ({ ...prev, userRole: role }))}
+                      >
+                        <Text style={[styles.optionChipText, memberForm.userRole === role && styles.optionChipTextActive]}>
+                          {role === 'admin' ? 'Admin' : 'User'}
+                        </Text>
                       </TouchableOpacity>
                     ))}
                   </View>
-                ) : null}
+                  {padOptionsError ? <Text style={styles.errorInline}>{padOptionsError}</Text> : null}
+                  <TouchableOpacity onPress={() => setMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
+                    <Text style={styles.clearLink}>Clear category/subcategory</Text>
+                  </TouchableOpacity>
+                  {addFormSelectedCategories.length ? (
+                    <Text style={styles.helper}>Categories: {addFormSelectedCategories.join(', ')}</Text>
+                  ) : null}
+                  {addFormSelectedSubcategories.length ? (
+                    <Text style={styles.helper}>Subcategories: {addFormSelectedSubcategories.join(', ')}</Text>
+                  ) : null}
 
-                <View style={styles.twoColRow}>
-                  <TouchableOpacity
-                    style={[styles.input, styles.twoColField]}
-                    onPress={() => {
-                      if (selectedVersionId && padOptions.length === 0 && !loadingPads) {
-                        void loadPadOptions(selectedVersionId);
-                      }
-                      setPadPickerVisible(true);
-                    }}
-                    disabled={loadingPads}
-                  >
-                    <Text style={assignForm.pad ? styles.inputText : styles.inputPlaceholder}>
-                      {assignForm.pad || (loadingPads ? 'Loading pad options...' : 'Select pad')}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.input, styles.twoColField]} onPress={() => void handleOpenPadbharTransfer()}>
-                    <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                      {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} subcategories selected` : 'Assign Padbhar *'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.sectionLabel}>User Role</Text>
-                <View style={styles.optionRow}>
-                  {(['user', 'admin'] as const).map((role) => (
+                  <Text style={styles.sectionLabel}>Address (Optional)</Text>
+                  <View style={styles.twoColRow}>
+                    <TextInput
+                      style={[styles.input, styles.twoColField]}
+                      value={memberForm.state}
+                      onChangeText={(value) => setMemberForm((prev) => ({ ...prev, state: value }))}
+                      placeholder="State"
+                    />
+                    <TextInput
+                      style={[styles.input, styles.twoColField]}
+                      value={memberForm.district}
+                      onChangeText={(value) => setMemberForm((prev) => ({ ...prev, district: value }))}
+                      placeholder="District"
+                    />
+                  </View>
+                  <View style={styles.twoColRow}>
+                    <TextInput
+                      style={[styles.input, styles.twoColField]}
+                      value={memberForm.tehsil}
+                      onChangeText={(value) => setMemberForm((prev) => ({ ...prev, tehsil: value }))}
+                      placeholder="Tehsil"
+                    />
+                    <TextInput
+                      style={[styles.input, styles.twoColField]}
+                      value={memberForm.village}
+                      onChangeText={(value) => setMemberForm((prev) => ({ ...prev, village: value }))}
+                      placeholder="Village"
+                    />
+                  </View>
+                  <View style={styles.twoColRow}>
+                    <TextInput
+                      style={[styles.input, styles.twoColField]}
+                      value={memberForm.pincode}
+                      onChangeText={handleMemberPincodeChange}
+                      placeholder="Pincode (auto-fill)"
+                      keyboardType="number-pad"
+                    />
+                    <View style={styles.twoColField} />
+                  </View>
+                  {pincodeLookupLoading ? <Text style={styles.helper}>Fetching address from pincode...</Text> : null}
+                  {pincodeLookupMessage ? <Text style={styles.helper}>{pincodeLookupMessage}</Text> : null}
+                </>
+              ) : (
+                <>
+                  <Text style={styles.sectionLabel}>Search existing user by mobile/email</Text>
+                  <View style={styles.searchRow}>
+                    <TextInput
+                      style={[styles.input, styles.searchInput]}
+                      value={userSearchQuery}
+                      onChangeText={setUserSearchQuery}
+                      placeholder="Enter mobile or email"
+                      keyboardType="default"
+                      autoCapitalize="none"
+                    />
                     <TouchableOpacity
-                      key={`assign-role-${role}`}
-                      style={[styles.optionChip, assignForm.userRole === role && styles.optionChipActive]}
-                      onPress={() => setAssignForm((prev) => ({ ...prev, userRole: role }))}
+                      style={[styles.searchBtn, searchingUsers && styles.saveBtnDisabled]}
+                      onPress={() => void handleSearchUsers()}
+                      disabled={searchingUsers}
                     >
-                      <Text style={[styles.optionChipText, assignForm.userRole === role && styles.optionChipTextActive]}>
-                        {role === 'admin' ? 'Admin' : 'User'}
+                      <Text style={styles.searchBtnText}>{searchingUsers ? '...' : 'Search'}</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {selectedUser ? (
+                    <View style={styles.selectedUserBox}>
+                      <Text style={styles.selectedUserTitle}>Selected User</Text>
+                      <Text style={styles.selectedUserText}>{fullUserName(selectedUser) || 'Unnamed User'}</Text>
+                      <Text style={styles.selectedUserText}>{selectedUser.phone || selectedUser.email || '-'}</Text>
+                      <TouchableOpacity onPress={() => setSelectedUser(null)}>
+                        <Text style={styles.clearLink}>Clear selection</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+
+                  {searchResults.length > 0 ? (
+                    <View style={styles.searchResultsWrap}>
+                      {searchResults.map((entry) => (
+                        <TouchableOpacity key={`user-${entry.id}`} style={styles.searchResultItem} onPress={() => handlePickUser(entry)}>
+                          <Text style={styles.searchResultName}>{fullUserName(entry) || `User #${entry.id}`}</Text>
+                          <Text style={styles.searchResultMeta}>{entry.phone || entry.email || '-'}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : null}
+
+                  <View style={styles.twoColRow}>
+                    <TouchableOpacity
+                      style={[styles.input, styles.twoColField]}
+                      onPress={() => {
+                        if (selectedVersionId && padOptions.length === 0 && !loadingPads) {
+                          void loadPadOptions(selectedVersionId);
+                        }
+                        setPadPickerVisible(true);
+                      }}
+                      disabled={loadingPads}
+                    >
+                      <Text style={assignForm.pad ? styles.inputText : styles.inputPlaceholder}>
+                        {assignForm.pad || (loadingPads ? 'Loading pad options...' : 'Select pad')}
                       </Text>
                     </TouchableOpacity>
-                  ))}
-                </View>
-                {padOptionsError ? <Text style={styles.errorInline}>{padOptionsError}</Text> : null}
-                <TouchableOpacity onPress={() => setAssignForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-                  <Text style={styles.clearLink}>Clear category/subcategory</Text>
-                </TouchableOpacity>
-                {addFormSelectedCategories.length ? (
-                  <Text style={styles.helper}>Categories: {addFormSelectedCategories.join(', ')}</Text>
-                ) : null}
-                {addFormSelectedSubcategories.length ? (
-                  <Text style={styles.helper}>Subcategories: {addFormSelectedSubcategories.join(', ')}</Text>
-                ) : null}
-              </>
-            )}
+                    <TouchableOpacity style={[styles.input, styles.twoColField]} onPress={() => void handleOpenPadbharTransfer()}>
+                      <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
+                        {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} subcategories selected` : 'Assign Padbhar *'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.sectionLabel}>User Role</Text>
+                  <View style={styles.optionRow}>
+                    {(['user', 'admin'] as const).map((role) => (
+                      <TouchableOpacity
+                        key={`assign-role-${role}`}
+                        style={[styles.optionChip, assignForm.userRole === role && styles.optionChipActive]}
+                        onPress={() => setAssignForm((prev) => ({ ...prev, userRole: role }))}
+                      >
+                        <Text style={[styles.optionChipText, assignForm.userRole === role && styles.optionChipTextActive]}>
+                          {role === 'admin' ? 'Admin' : 'User'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  {padOptionsError ? <Text style={styles.errorInline}>{padOptionsError}</Text> : null}
+                  <TouchableOpacity onPress={() => setAssignForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
+                    <Text style={styles.clearLink}>Clear category/subcategory</Text>
+                  </TouchableOpacity>
+                  {addFormSelectedCategories.length ? (
+                    <Text style={styles.helper}>Categories: {addFormSelectedCategories.join(', ')}</Text>
+                  ) : null}
+                  {addFormSelectedSubcategories.length ? (
+                    <Text style={styles.helper}>Subcategories: {addFormSelectedSubcategories.join(', ')}</Text>
+                  ) : null}
+                </>
+              )}
 
             </ScrollView>
 
@@ -3635,9 +3627,9 @@ export default function KaryakariniModuleScreen() {
                               <Text style={[styles.taskCascaderItemText, selected && styles.taskCascaderItemTextSelected]} numberOfLines={1}>
                                 {option.label}
                               </Text>
-                            {option.hasChildren ? (
-                              <Text style={[styles.taskCascaderArrow, selected && styles.taskCascaderArrowSelected]}>›</Text>
-                            ) : null}
+                              {option.hasChildren ? (
+                                <Text style={[styles.taskCascaderArrow, selected && styles.taskCascaderArrowSelected]}>›</Text>
+                              ) : null}
                             </TouchableOpacity>
                           );
                         })}

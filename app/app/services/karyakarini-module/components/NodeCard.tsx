@@ -27,27 +27,27 @@ export function NodeCard({ node, selected = false, onPress, onMembersPress, onAd
 
       <View style={styles.badges}>
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>Members: {Number(node.member_count || 0)}</Text>
+          <Text style={styles.badgeText}>सदस्य: {Number(node.member_count || 0)}</Text>
         </View>
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>Children: {Number(node.child_count || 0)}</Text>
+          <Text style={styles.badgeText}>उप-स्तर: {Number(node.child_count || 0)}</Text>
         </View>
       </View>
 
       <View style={styles.actions}>
         {onMembersPress ? (
           <TouchableOpacity style={styles.actionBtn} onPress={onMembersPress}>
-            <Text style={styles.actionText}>Members</Text>
+            <Text style={styles.actionText}>सदस्य</Text>
           </TouchableOpacity>
         ) : null}
         {onAddMemberPress ? (
           <TouchableOpacity style={[styles.actionBtn, styles.actionBtnPrimary]} onPress={onAddMemberPress}>
-            <Text style={[styles.actionText, styles.actionTextPrimary]}>Add</Text>
+            <Text style={[styles.actionText, styles.actionTextPrimary]}>जोड़ें</Text>
           </TouchableOpacity>
         ) : null}
         {onAddNodePress ? (
           <TouchableOpacity style={styles.actionBtn} onPress={onAddNodePress}>
-            <Text style={styles.actionText}>Add Node</Text>
+            <Text style={styles.actionText}>नोड जोड़ें</Text>
           </TouchableOpacity>
         ) : null}
       </View>

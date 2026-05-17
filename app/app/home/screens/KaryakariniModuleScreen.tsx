@@ -61,19 +61,26 @@ const defaultPagination: KaryakariniPagination = {
 };
 
 const NODE_LEVEL_OPTIONS = [
-  { label: 'Rashtriya', value: 'rashtriya' },
-  { label: 'Prant', value: 'prant' },
-  { label: 'Sambhag', value: 'sambhag' },
-  { label: 'Vibhag', value: 'vibhag' },
-  { label: 'Jila', value: 'jila' },
-  { label: 'Khand', value: 'khand' },
-  { label: 'Nagar', value: 'nagar' },
-  { label: 'Mandal Basti', value: 'mandal_basti' },
-  { label: 'Nagar Mohalla', value: 'nagar_mohalla' },
+  { label: 'राष्ट्रीय', value: 'rashtriya' },
+  { label: 'प्रांत', value: 'prant' },
+  { label: 'संभाग', value: 'sambhag' },
+  { label: 'विभाग', value: 'vibhag' },
+  { label: 'जिला', value: 'jila' },
+  { label: 'खंड', value: 'khand' },
+  { label: 'नगर', value: 'nagar' },
+  { label: 'मंडल बस्ती', value: 'mandal_basti' },
+  { label: 'नगर मोहल्ला', value: 'nagar_mohalla' },
 ];
 
 const NODE_LEVEL_ORDER = NODE_LEVEL_OPTIONS.map((option) => option.value);
-const DEFAULT_PAD_OPTIONS = ['संयोजक', 'सह संयोजक', 'प्रमुख', 'आयाम', 'Other'];
+const NODE_LEVEL_LABEL_MAP: Record<string, string> = Object.fromEntries(
+  NODE_LEVEL_OPTIONS.map((entry) => [entry.value, entry.label])
+);
+const DEFAULT_PAD_OPTIONS = ['संयोजक', 'सह संयोजक', 'प्रमुख', 'आयाम', 'अन्य'];
+const formatNodeLevelLabel = (level?: string | null) => {
+  const normalized = String(level || '').trim().toLowerCase();
+  return NODE_LEVEL_LABEL_MAP[normalized] || String(level || '').trim();
+};
 const CATEGORY_SUBCATEGORY_OPTIONS: { category: string; subcategories: string[] }[] = [
   {
     category: 'संस्कृति प्रमुख',
@@ -148,9 +155,50 @@ const getAllowedNodeLevels = (targetLevel?: string | null, relation: 'child' | '
 const fullUserName = (entry: KaryakariniAssignableUser) =>
   [entry.first_name, entry.father_name].filter(Boolean).join(' ').trim();
 
+const sanitizeInputValue = (value?: string | null) => {
+  const raw = String(value ?? '').trim();
+  const normalized = raw.toLowerCase();
+  if (!raw || normalized === 'null' || normalized === 'undefined' || normalized === 'nan') return '';
+  return raw;
+};
+
+const appendPickerAssetToFormData = async (
+  formData: FormData,
+  asset: ImagePicker.ImagePickerAsset,
+  fallbackName: string,
+  fallbackType: string
+) => {
+  const webFile = (asset as any)?.file;
+  const isBlobLike = Boolean(
+    webFile &&
+    (typeof webFile.arrayBuffer === 'function' || typeof webFile.stream === 'function')
+  );
+
+  if (isBlobLike) {
+    formData.append('file', webFile, String(webFile.name || fallbackName));
+    return;
+  }
+
+  if (Platform.OS === 'web') {
+    const response = await fetch(asset.uri);
+    const blob = await response.blob();
+    formData.append('file', blob as any, fallbackName);
+    return;
+  }
+
+  formData.append(
+    'file',
+    {
+      uri: asset.uri,
+      name: fallbackName,
+      type: fallbackType,
+    } as any
+  );
+};
+
 const formatAssignableUserPosition = (entry?: Partial<KaryakariniAssignableUser> | null) => {
   const position = String(entry?.position || '').trim();
-  const level = String(entry?.node_level || '').trim();
+  const level = formatNodeLevelLabel(entry?.node_level);
   const nodeName = String(entry?.node_name || '').trim();
   const levelNode = [level, nodeName].filter(Boolean).join('-');
   return [position && position !== '-' ? position : '', levelNode].filter(Boolean).join(' • ');
@@ -158,7 +206,7 @@ const formatAssignableUserPosition = (entry?: Partial<KaryakariniAssignableUser>
 
 const formatMemberPosition = (member?: Partial<KaryakariniMember> | null) => {
   const pad = String(member?.pad || '').trim();
-  const level = String(member?.node_level || '').trim();
+  const level = formatNodeLevelLabel(member?.node_level);
   const nodeName = String(member?.node_name || '').trim();
   const levelNode = [level, nodeName].filter(Boolean).join('-');
   return [pad, levelNode].filter(Boolean).join(' • ');
@@ -166,11 +214,17 @@ const formatMemberPosition = (member?: Partial<KaryakariniMember> | null) => {
 
 const parseLabelList = (value?: string | string[] | null) => {
   if (Array.isArray(value)) {
-    return [...new Set(value.map((entry) => String(entry || '').trim()).filter(Boolean))];
+    return [
+      ...new Set(
+        value
+          .map((entry) => sanitizeInputValue(String(entry || '')))
+          .filter(Boolean)
+      ),
+    ];
   }
-  const raw = String(value || '').trim();
+  const raw = sanitizeInputValue(String(value || ''));
   if (!raw) return [] as string[];
-  return [...new Set(raw.split(',').map((entry) => entry.trim()).filter(Boolean))];
+  return [...new Set(raw.split(',').map((entry) => sanitizeInputValue(entry)).filter(Boolean))];
 };
 
 const deriveCategoriesFromSubcategories = (subcategories: string[]) => {
@@ -283,6 +337,9 @@ export default function KaryakariniModuleScreen() {
   const [members, setMembers] = useState<KaryakariniMember[]>([]);
   const [membersPagination, setMembersPagination] = useState<KaryakariniPagination>(defaultPagination);
   const [memberBrowseNodeId, setMemberBrowseNodeId] = useState('');
+  const [memberFilterNodeLevel, setMemberFilterNodeLevel] = useState('');
+  const [memberFilterCategory, setMemberFilterCategory] = useState('');
+  const [memberFilterSubcategory, setMemberFilterSubcategory] = useState('');
   const [showEditMemberModal, setShowEditMemberModal] = useState(false);
   const [editingMember, setEditingMember] = useState<KaryakariniMember | null>(null);
   const [savingMemberEdit, setSavingMemberEdit] = useState(false);
@@ -351,6 +408,7 @@ export default function KaryakariniModuleScreen() {
     category: '',
     subcategory: '',
     userRole: 'user',
+    avatar: '',
   });
 
   const [showMeetingModal, setShowMeetingModal] = useState(false);
@@ -452,7 +510,7 @@ export default function KaryakariniModuleScreen() {
         return level.nodes.find((n) => n.id === level.selectedNodeId);
       })
       .filter(Boolean) as KaryakariniNode[];
-    return nodes.length > 0 ? nodes.map((n) => n.name).join(' > ') : 'Root';
+    return nodes.length > 0 ? nodes.map((n) => n.name).join(' > ') : 'मूल';
   }, [roleLevels]);
   const [memberLevels, setMemberLevels] = useState<TreeLevelState[]>([]);
   const memberBreadcrumb = useMemo(() => {
@@ -462,7 +520,7 @@ export default function KaryakariniModuleScreen() {
         return level.nodes.find((n) => n.id === level.selectedNodeId);
       })
       .filter(Boolean) as KaryakariniNode[];
-    return nodes.length > 0 ? nodes.map((n) => n.name).join(' > ') : 'Root';
+    return nodes.length > 0 ? nodes.map((n) => n.name).join(' > ') : 'मूल';
   }, [memberLevels]);
   const [roleMembers, setRoleMembers] = useState<KaryakariniMember[]>([]);
   const [selectedRoleUserId, setSelectedRoleUserId] = useState('');
@@ -484,7 +542,7 @@ export default function KaryakariniModuleScreen() {
   const taskSelectedPathLabel = useMemo(() => {
     const path = String(taskSelectedNode?.hierarchy_path || '').trim();
     if (path) return path;
-    return taskSelectedNode?.name || 'Select node';
+    return taskSelectedNode?.name || 'नोड चुनें';
   }, [taskSelectedNode]);
   const activitySelectedNode = useMemo(
     () => assignableNodes.find((node) => String(node.id) === String(activityForm.nodeId)) || null,
@@ -493,7 +551,7 @@ export default function KaryakariniModuleScreen() {
   const activitySelectedPathLabel = useMemo(() => {
     const path = String(activitySelectedNode?.hierarchy_path || '').trim();
     if (path) return path;
-    return activitySelectedNode?.name || 'Select node';
+    return activitySelectedNode?.name || 'नोड चुनें';
   }, [activitySelectedNode]);
   const scopeRootNodeIds = useMemo(() => {
     const assignableSet = new Set(assignableNodes.map((entry) => Number(entry.id)).filter((id) => id > 0));
@@ -525,7 +583,7 @@ export default function KaryakariniModuleScreen() {
       const key = `${row.title?.trim()}###${row.task_date}###${row.node_id}`;
       const assigneeObj = row.assigned_user_id ? {
         id: Number(row.assigned_user_id),
-        name: row.assigned_first_name || `User #${row.assigned_user_id}`,
+        name: row.assigned_first_name || `उपयोगकर्ता #${row.assigned_user_id}`,
         father_name: row.assigned_father_name || '',
         mobile_number: row.assigned_mobile_number || '',
       } : null;
@@ -560,13 +618,33 @@ export default function KaryakariniModuleScreen() {
   const activitySelectedSubcategories = useMemo(() => parseLabelList(activityForm.subcategory), [activityForm.subcategory]);
   const activitySelectedCategories = useMemo(() => parseLabelList(activityForm.category), [activityForm.category]);
 
+  const filteredMembersForTab = useMemo(() => {
+    const normalizedLevel = memberFilterNodeLevel.trim().toLowerCase();
+    const normalizedCategory = memberFilterCategory.trim().toLowerCase();
+    const normalizedSubcategory = memberFilterSubcategory.trim().toLowerCase();
+    return members.filter((member) => {
+      const levelValue = String(member.node_level || '').trim().toLowerCase();
+      const levelLabel = formatNodeLevelLabel(member.node_level).toLowerCase();
+      const categoryList = parseLabelList(
+        member.categories && member.categories.length ? member.categories : member.category || ''
+      ).map((entry) => entry.toLowerCase());
+      const subcategoryList = parseLabelList(
+        member.subcategories && member.subcategories.length ? member.subcategories : member.subcategory || ''
+      ).map((entry) => entry.toLowerCase());
+      const matchesLevel = !normalizedLevel || levelValue.includes(normalizedLevel) || levelLabel.includes(normalizedLevel);
+      const matchesCategory = !normalizedCategory || categoryList.some((entry) => entry.includes(normalizedCategory));
+      const matchesSubcategory = !normalizedSubcategory || subcategoryList.some((entry) => entry.includes(normalizedSubcategory));
+      return matchesLevel && matchesCategory && matchesSubcategory;
+    });
+  }, [memberFilterCategory, memberFilterNodeLevel, memberFilterSubcategory, members]);
+
   const groupedMembersForTab = useMemo(() => {
     const locationMap = new Map<
       string,
       { key: string; locationName: string; path: string; rows: KaryakariniMember[] }
     >();
 
-    members.forEach((member) => {
+    filteredMembersForTab.forEach((member) => {
       const nodeId = Number(member.node_id || 0);
       const path = String(member.hierarchy_path || member.node_name || `Node #${nodeId}`).trim() || `Node #${nodeId}`;
       const locationName = String(member.node_name || path.split(' > ').slice(-1)[0] || `Node #${nodeId}`).trim();
@@ -593,7 +671,7 @@ export default function KaryakariniModuleScreen() {
         };
       })
       .sort((a, b) => a.path.localeCompare(b.path));
-  }, [members]);
+  }, [filteredMembersForTab]);
 
   const meetingMemberTransferItems = useMemo<TransferAttendee[]>(
     () =>
@@ -601,7 +679,7 @@ export default function KaryakariniModuleScreen() {
         .map((member) => {
           const userId = Number(member.user_id || 0);
           if (!userId) return null;
-          const fullName = [member.first_name, member.father_name].filter(Boolean).join(' ').trim() || `User #${userId}`;
+          const fullName = [member.first_name, member.father_name].filter(Boolean).join(' ').trim() || `उपयोगकर्ता #${userId}`;
           const branchLabel = [member.node_level, member.node_name].filter(Boolean).join('-');
           return {
             key: `member-${userId}`,
@@ -676,7 +754,7 @@ export default function KaryakariniModuleScreen() {
   }, [levels]);
 
   const breadcrumb = useMemo(() => {
-    if (!selectedPathNodes.length) return 'Rashtriya';
+    if (!selectedPathNodes.length) return 'राष्ट्रीय';
     return selectedPathNodes.map((node) => node.name).join(' > ');
   }, [selectedPathNodes]);
 
@@ -805,7 +883,7 @@ export default function KaryakariniModuleScreen() {
       } catch (err: any) {
         setMeetingRows([]);
         setMeetingPagination(defaultPagination);
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to load meetings');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'बैठकें लोड करने में विफल');
       } finally {
         setMeetingsLoading(false);
       }
@@ -835,7 +913,7 @@ export default function KaryakariniModuleScreen() {
       } catch (err: any) {
         setTaskRows([]);
         setTaskPagination(defaultPagination);
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to load tasks');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'कार्य लोड करने में विफल');
       } finally {
         setTasksLoading(false);
       }
@@ -865,7 +943,7 @@ export default function KaryakariniModuleScreen() {
       } catch (err: any) {
         setActivityRows([]);
         setActivityPagination(defaultPagination);
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to load category activities');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'श्रेणी गतिविधियाँ लोड करने में विफल');
       } finally {
         setActivitiesLoading(false);
       }
@@ -887,7 +965,7 @@ export default function KaryakariniModuleScreen() {
     } catch (err: any) {
       if (forType === 'meeting') setMeetingMembers([]);
       else setTaskMembers([]);
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to load node members');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'नोड सदस्य लोड करने में विफल');
     }
   }, []);
 
@@ -905,7 +983,7 @@ export default function KaryakariniModuleScreen() {
       setMeetingGuests((response?.data?.data?.guests || []) as KaryakariniGuestMember[]);
     } catch (err: any) {
       setMeetingGuests([]);
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to load guest members');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'अतिथि सदस्य लोड करने में विफल');
     } finally {
       setMeetingGuestSearching(false);
     }
@@ -914,7 +992,7 @@ export default function KaryakariniModuleScreen() {
   const pickAndUploadAttachment = useCallback(async (category: 'meeting' | 'task') => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission', 'Media library permission is required');
+      Alert.alert('अनुमति', 'मीडिया लाइब्रेरी की अनुमति आवश्यक है');
       return null;
     }
 
@@ -931,14 +1009,7 @@ export default function KaryakariniModuleScreen() {
     const form = new FormData();
     form.append('folder', 'karyakarini');
     form.append('category', category);
-    form.append(
-      'file',
-      {
-        uri: asset.uri,
-        name: fileName,
-        type: mimeType,
-      } as any
-    );
+    await appendPickerAssetToFormData(form, asset, fileName, mimeType);
 
     const response = await karyakariniClient.post('/karyakarini/upload/attachment', form, {
       headers: {
@@ -973,7 +1044,7 @@ export default function KaryakariniModuleScreen() {
       const asset = picked.assets[0];
       const fileSize = Number(asset.size || 0);
       if (fileSize > 30 * 1024 * 1024) {
-        Alert.alert('File too large', 'Please upload file up to 30MB only.');
+        Alert.alert('फाइल बहुत बड़ी है', 'कृपया अधिकतम 30MB तक की फाइल अपलोड करें।');
         return;
       }
 
@@ -983,6 +1054,10 @@ export default function KaryakariniModuleScreen() {
       const assetFile = (asset as any)?.file;
       if (assetFile) {
         formData.append('file', assetFile);
+      } else if (Platform.OS === 'web') {
+        const response = await fetch(asset.uri);
+        const blob = await response.blob();
+        formData.append('file', blob as any, asset.name || `activity-${Date.now()}`);
       } else {
         formData.append(
           'file',
@@ -1008,25 +1083,25 @@ export default function KaryakariniModuleScreen() {
         ],
       }));
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to upload attachment');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'संलग्नक अपलोड करने में विफल');
     } finally {
       setUploadingActivityAttachment(false);
     }
   }, []);
 
   const uploadMemberPhotoFromSource = useCallback(
-    async (source: 'camera' | 'gallery') => {
+    async (source: 'camera' | 'gallery', target: 'create' | 'edit' | 'assign' = 'create') => {
       try {
         if (source === 'camera') {
           const permission = await ImagePicker.requestCameraPermissionsAsync();
           if (!permission.granted) {
-            Alert.alert('Permission', 'Camera permission is required');
+            Alert.alert('अनुमति', 'कैमरा अनुमति आवश्यक है');
             return;
           }
         } else {
           const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
           if (!permission.granted) {
-            Alert.alert('Permission', 'Media library permission is required');
+            Alert.alert('अनुमति', 'मीडिया लाइब्रेरी की अनुमति आवश्यक है');
             return;
           }
         }
@@ -1034,15 +1109,15 @@ export default function KaryakariniModuleScreen() {
         const pickerResult =
           source === 'camera'
             ? await ImagePicker.launchCameraAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                quality: 0.8,
-                allowsEditing: true,
-              })
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              quality: 0.8,
+              allowsEditing: true,
+            })
             : await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                quality: 0.8,
-                allowsEditing: true,
-              });
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              quality: 0.8,
+              allowsEditing: true,
+            });
 
         if (pickerResult.canceled || !pickerResult.assets?.[0]) return;
         const asset = pickerResult.assets[0];
@@ -1052,14 +1127,7 @@ export default function KaryakariniModuleScreen() {
         const form = new FormData();
         form.append('folder', 'karyakarini');
         form.append('category', 'member-profile');
-        form.append(
-          'file',
-          {
-            uri: asset.uri,
-            name: fileName,
-            type: mimeType,
-          } as any
-        );
+        await appendPickerAssetToFormData(form, asset, fileName, mimeType);
 
         setUploadingMemberPhoto(true);
         const response = await karyakariniClient.post('/karyakarini/upload/attachment', form, {
@@ -1071,12 +1139,18 @@ export default function KaryakariniModuleScreen() {
         const payload = response?.data?.data || {};
         const avatarUrl = String(payload.url || '').trim();
         if (!avatarUrl) {
-          Alert.alert('Error', 'Failed to upload member photo');
+          Alert.alert('त्रुटि', 'सदस्य फोटो अपलोड करने में विफल');
           return;
         }
-        setMemberForm((prev) => ({ ...prev, avatar: avatarUrl }));
+        if (target === 'edit') {
+          setEditMemberForm((prev) => ({ ...prev, avatar: avatarUrl }));
+        } else if (target === 'assign') {
+          setAssignForm((prev) => ({ ...prev, avatar: avatarUrl }));
+        } else {
+          setMemberForm((prev) => ({ ...prev, avatar: avatarUrl }));
+        }
       } catch (err: any) {
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to upload member photo');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'सदस्य फोटो अपलोड करने में विफल');
       } finally {
         setUploadingMemberPhoto(false);
       }
@@ -1152,15 +1226,16 @@ export default function KaryakariniModuleScreen() {
   const loadRestrictedTrees = useCallback(
     async (versionId: number, scopedNodesList: KaryakariniAssignableNode[]) => {
       const isScopedTree = currentUserRole !== 'superadmin' && scopedNodesList.length > 0;
-      let rootNodes: KaryakariniNode[] = [];
+      let roleRootNodes: KaryakariniNode[] = [];
+      let memberRootNodes: KaryakariniNode[] = [];
 
       if (isScopedTree) {
         const scopedSet = new Set(scopedNodesList.map((node) => Number(node.id)).filter((id) => id > 0));
         const scopeRoots = scopedNodesList.filter((node) => !scopedSet.has(Number(node.parent_id || 0)));
         const scopeRootSet = new Set(scopeRoots.map((node) => Number(node.id)).filter((id) => id > 0));
-
         const childRoots = scopedNodesList.filter((node) => scopeRootSet.has(Number(node.parent_id || 0)));
-        const initialNodes = childRoots.length ? childRoots : [];
+        const roleInitialNodes = childRoots.length ? childRoots : scopeRoots;
+        const memberInitialNodes = scopeRoots.length ? scopeRoots : childRoots;
 
         const childCountByParent = new Map<number, number>();
         scopedNodesList.forEach((node) => {
@@ -1168,7 +1243,7 @@ export default function KaryakariniModuleScreen() {
           childCountByParent.set(parentId, Number(childCountByParent.get(parentId) || 0) + 1);
         });
 
-        rootNodes = initialNodes.map((node) => ({
+        const mapNode = (node: KaryakariniAssignableNode): KaryakariniNode => ({
           id: Number(node.id),
           name: node.name,
           level: node.level,
@@ -1178,13 +1253,18 @@ export default function KaryakariniModuleScreen() {
           can_manage_hierarchy: (node as any).can_manage_hierarchy,
           members_count: (node as any).members_count || 0,
           has_children: (childCountByParent.get(Number(node.id)) || 0) > 0,
-        }));
+        });
+
+        roleRootNodes = roleInitialNodes.map(mapNode);
+        memberRootNodes = memberInitialNodes.map(mapNode);
       } else {
-        rootNodes = await fetchNodes(versionId, null);
+        const rootNodes = await fetchNodes(versionId, null);
+        roleRootNodes = rootNodes;
+        memberRootNodes = rootNodes;
       }
 
-      setRoleLevels([{ parentNode: null, nodes: rootNodes, selectedNodeId: null }]);
-      setMemberLevels([{ parentNode: null, nodes: rootNodes, selectedNodeId: null }]);
+      setRoleLevels([{ parentNode: null, nodes: roleRootNodes, selectedNodeId: null }]);
+      setMemberLevels([{ parentNode: null, nodes: memberRootNodes, selectedNodeId: null }]);
       setSelectedRoleNodeId('');
       setRoleMembers([]);
       setMemberBrowseNodeId('');
@@ -1260,7 +1340,60 @@ export default function KaryakariniModuleScreen() {
       } catch (err: any) {
         setMembers([]);
         setMembersPagination(defaultPagination);
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to load members');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'सदस्य लोड करने में विफल');
+      } finally {
+        setMembersLoading(false);
+      }
+    },
+    [selectedVersionId]
+  );
+
+  const loadMembersForScopeNodes = useCallback(
+    async (nodes: KaryakariniNode[]) => {
+      if (!selectedVersionId) return;
+      const uniqueNodes = [...new Map(nodes.filter((node) => Number(node.id || 0) > 0).map((node) => [Number(node.id), node])).values()];
+      if (!uniqueNodes.length) {
+        setMembers([]);
+        setMembersPagination(defaultPagination);
+        return;
+      }
+
+      try {
+        setMembersLoading(true);
+        const responses = await Promise.all(
+          uniqueNodes.map(async (node) => {
+            try {
+              const response = await karyakariniClient.get('/karyakarini/members', {
+                params: {
+                  nodeId: node.id,
+                  versionId: selectedVersionId,
+                  page: 1,
+                  limit: 200,
+                },
+              });
+              return (response?.data?.data?.members || []) as KaryakariniMember[];
+            } catch {
+              return [] as KaryakariniMember[];
+            }
+          })
+        );
+
+        const membersMap = new Map<number, KaryakariniMember>();
+        responses.flat().forEach((member) => {
+          membersMap.set(Number(member.id), member);
+        });
+        const mergedRows = Array.from(membersMap.values()).sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+        setMembers(mergedRows);
+        setMembersPagination({
+          page: 1,
+          limit: Math.max(1, mergedRows.length),
+          total: mergedRows.length,
+          totalPages: 1,
+        });
+      } catch (err: any) {
+        setMembers([]);
+        setMembersPagination(defaultPagination);
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'सदस्य लोड करने में विफल');
       } finally {
         setMembersLoading(false);
       }
@@ -1299,7 +1432,7 @@ export default function KaryakariniModuleScreen() {
           return firstUserId ? String(firstUserId) : '';
         });
       } catch (err: any) {
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to load data');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'डेटा लोड करने में विफल');
         setRoleMembers([]);
         setSelectedRoleUserId('');
       } finally {
@@ -1331,7 +1464,7 @@ export default function KaryakariniModuleScreen() {
           ]);
         }
       } catch (err: any) {
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to load child nodes');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'चाइल्ड नोड लोड करने में विफल');
       }
     },
     [fetchNodes, memberLevels, selectedVersionId, loadMembers]
@@ -1343,7 +1476,7 @@ export default function KaryakariniModuleScreen() {
         setLoading(true);
         await loadVersionsAndTree();
       } catch (err: any) {
-        setError(err?.response?.data?.message || err?.message || 'Failed to load karyakarini data');
+        setError(err?.response?.data?.message || err?.message || 'कार्यकारिणी डेटा लोड करने में विफल');
       } finally {
         setLoading(false);
       }
@@ -1356,20 +1489,29 @@ export default function KaryakariniModuleScreen() {
       setRefreshing(true);
       const selectedIds = selectedPathNodes.map((node) => node.id);
       await loadVersionsAndTree(selectedVersionId, selectedIds);
-      if (activeTab === 'members' && membersNode) {
-        await loadMembers(membersNode, membersPagination.page || 1);
+      const scopeMemberNodes = memberLevels[0]?.nodes || [];
+      if (activeTab === 'members') {
+        if (currentUserRole !== 'superadmin' && !memberBrowseNodeId && scopeMemberNodes.length > 0) {
+          await loadMembersForScopeNodes(scopeMemberNodes);
+        } else if (membersNode) {
+          await loadMembers(membersNode, membersPagination.page || 1);
+        }
       }
       if (membersVisible && membersNode) {
         await loadMembers(membersNode, membersPagination.page || 1);
       }
     } catch (err: any) {
-      setError(err?.response?.data?.message || err?.message || 'Failed to refresh');
+      setError(err?.response?.data?.message || err?.message || 'रीफ्रेश करने में विफल');
     } finally {
       setRefreshing(false);
     }
   }, [
+    currentUserRole,
     loadMembers,
+    loadMembersForScopeNodes,
     loadVersionsAndTree,
+    memberBrowseNodeId,
+    memberLevels,
     membersNode,
     membersPagination.page,
     membersVisible,
@@ -1394,7 +1536,7 @@ export default function KaryakariniModuleScreen() {
         const initialPathIds = await resolveDefaultSelectionPathIds(versionId, scopedNodes);
         await loadTree(versionId, initialPathIds, scopedNodes);
       } catch (err: any) {
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to switch version');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'संस्करण बदलने में विफल');
       } finally {
         setLoading(false);
       }
@@ -1403,11 +1545,41 @@ export default function KaryakariniModuleScreen() {
   );
 
   useEffect(() => {
-    if (activeTab !== 'members' || !memberBrowseNodeId) return;
-    if (membersNode && String(membersNode.id) === memberBrowseNodeId) {
-      void loadMembers(membersNode, membersPagination.page || 1);
+    if (activeTab !== 'members') return;
+    const scopeMemberNodes = memberLevels[0]?.nodes || [];
+    if (currentUserRole !== 'superadmin' && !memberBrowseNodeId && scopeMemberNodes.length > 0) {
+      setMembersNode(scopeMemberNodes[0]);
+      void loadMembersForScopeNodes(scopeMemberNodes);
+      return;
     }
-  }, [activeTab, loadMembers, memberBrowseNodeId, membersNode, membersPagination.page]);
+
+    if (memberBrowseNodeId && membersNode && String(membersNode.id) === memberBrowseNodeId) {
+      void loadMembers(membersNode, membersPagination.page || 1);
+      return;
+    }
+
+    const fallbackNode =
+      membersNode ||
+      selectedPathNodes[selectedPathNodes.length - 1] ||
+      memberLevels[memberLevels.length - 1]?.nodes.find((node) => node.id === memberLevels[memberLevels.length - 1]?.selectedNodeId) ||
+      memberLevels[0]?.nodes?.[0] ||
+      null;
+    if (!fallbackNode) return;
+
+    setMembersNode(fallbackNode);
+    setMemberBrowseNodeId(String(fallbackNode.id));
+    void loadMembers(fallbackNode, 1);
+  }, [
+    activeTab,
+    currentUserRole,
+    loadMembers,
+    loadMembersForScopeNodes,
+    memberBrowseNodeId,
+    memberLevels,
+    membersNode,
+    membersPagination.page,
+    selectedPathNodes,
+  ]);
 
   const handleSelectNode = useCallback(
     async (levelIndex: number, node: KaryakariniNode) => {
@@ -1430,7 +1602,7 @@ export default function KaryakariniModuleScreen() {
           },
         ]);
       } catch (err: any) {
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to load child nodes');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'चाइल्ड नोड लोड करने में विफल');
       }
     },
     [fetchNodes, levels, selectedVersionId]
@@ -1452,19 +1624,19 @@ export default function KaryakariniModuleScreen() {
     );
     setEditingMember(member);
     setEditMemberForm({
-      name: String(member.first_name || '').trim(),
-      fatherOrHusbandName: String(member.father_name || '').trim(),
-      mobileNumber: String(member.mobile_number || '').trim(),
-      pad: String(member.pad || '').trim(),
+      name: sanitizeInputValue(member.first_name),
+      fatherOrHusbandName: sanitizeInputValue(member.father_name),
+      mobileNumber: sanitizeInputValue(member.mobile_number),
+      pad: sanitizeInputValue(member.pad),
       category: categoryValues.join(', '),
       subcategory: subcategoryValues.join(', '),
       userRole: String(member.user_role || 'user').trim().toLowerCase() === 'admin' ? 'admin' : 'user',
-      state: String(member.state || '').trim(),
-      district: String(member.district || '').trim(),
-      tehsil: String(member.tehsil || '').trim(),
-      village: String(member.address_village || member.village || '').trim(),
-      pincode: String(member.pincode || '').trim(),
-      avatar: String(member.avatar || '').trim(),
+      state: sanitizeInputValue(member.state),
+      district: sanitizeInputValue(member.district),
+      tehsil: sanitizeInputValue(member.tehsil),
+      village: sanitizeInputValue(member.address_village || member.village),
+      pincode: sanitizeInputValue(member.pincode),
+      avatar: sanitizeInputValue(member.avatar),
     });
     setShowEditMemberModal(true);
   }, []);
@@ -1472,11 +1644,11 @@ export default function KaryakariniModuleScreen() {
   const handleSubmitMemberEdit = useCallback(async () => {
     if (!editingMember || !selectedVersionId) return;
     if (!editMemberForm.pad.trim()) {
-      Alert.alert('Required', 'Pad is required');
+      Alert.alert('आवश्यक', 'पद आवश्यक है');
       return;
     }
     if (!editMemberForm.category.trim() || !editMemberForm.subcategory.trim()) {
-      Alert.alert('Required', 'Category and subcategory are required');
+      Alert.alert('आवश्यक', 'श्रेणी और उप-श्रेणी आवश्यक हैं');
       return;
     }
 
@@ -1506,9 +1678,9 @@ export default function KaryakariniModuleScreen() {
       if (membersNode) {
         await loadMembers(membersNode, membersPagination.page || 1);
       }
-      Alert.alert('Success', 'Member updated successfully');
+      Alert.alert('सफल', 'सदस्य सफलतापूर्वक अपडेट हो गया');
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to update member');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'सदस्य अपडेट करने में विफल');
     } finally {
       setSavingMemberEdit(false);
     }
@@ -1541,6 +1713,7 @@ export default function KaryakariniModuleScreen() {
       category: '',
       subcategory: '',
       userRole: 'user',
+      avatar: '',
     });
     setPincodeLookupMessage(null);
     setLastAutoFilledPincode('');
@@ -1578,7 +1751,7 @@ export default function KaryakariniModuleScreen() {
   const handleSearchUsers = useCallback(async () => {
     const q = userSearchQuery.trim();
     if (q.length < 3) {
-      Alert.alert('Search', 'Enter at least 3 characters of mobile number or email');
+      Alert.alert('खोज', 'मोबाइल नंबर या ईमेल के कम से कम 3 अक्षर दर्ज करें');
       return;
     }
     try {
@@ -1588,7 +1761,7 @@ export default function KaryakariniModuleScreen() {
       });
       setSearchResults((response?.data?.data?.users || []) as KaryakariniAssignableUser[]);
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to search users');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'उपयोगकर्ता खोजने में विफल');
       setSearchResults([]);
     } finally {
       setSearchingUsers(false);
@@ -1597,6 +1770,8 @@ export default function KaryakariniModuleScreen() {
 
   const handlePickUser = useCallback((picked: KaryakariniAssignableUser) => {
     setSelectedUser(picked);
+    const pickedAvatar = String(picked.avatar || '').trim();
+    setAssignForm((prev) => ({ ...prev, avatar: pickedAvatar }));
   }, []);
 
   const lookupAddressByPincode = useCallback(async (pincode: string) => {
@@ -1735,11 +1910,11 @@ export default function KaryakariniModuleScreen() {
   const handleSubmitNode = useCallback(async () => {
     if (!addTargetNode || !selectedVersionId) return;
     if (!nodeForm.name.trim()) {
-      Alert.alert('Required', 'Node name is required');
+      Alert.alert('आवश्यक', 'नोड नाम आवश्यक है');
       return;
     }
     if (!allowedNodeLevelOptions.length) {
-      Alert.alert('Invalid', 'No valid level available for selected relation');
+      Alert.alert('अमान्य', 'चुने गए संबंध के लिए कोई मान्य स्तर उपलब्ध नहीं है');
       return;
     }
 
@@ -1762,9 +1937,9 @@ export default function KaryakariniModuleScreen() {
 
       setShowAddNodeModal(false);
       await loadTree(selectedVersionId, [], assignableNodes);
-      Alert.alert('Success', 'Node added successfully');
+      Alert.alert('सफल', 'नोड सफलतापूर्वक जोड़ दिया गया');
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to add node');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'नोड जोड़ने में विफल');
     } finally {
       setAddingNode(false);
     }
@@ -1778,15 +1953,15 @@ export default function KaryakariniModuleScreen() {
       let response: any;
       if (memberModalTab === 'assign') {
         if (!selectedUser?.id) {
-          Alert.alert('Required', 'Search and select an existing user');
+          Alert.alert('आवश्यक', 'मौजूदा उपयोगकर्ता खोजें और चुनें');
           return;
         }
         if (!assignForm.pad.trim()) {
-          Alert.alert('Required', 'Pad is required');
+          Alert.alert('आवश्यक', 'पद आवश्यक है');
           return;
         }
         if (!assignForm.category.trim() || !assignForm.subcategory.trim()) {
-          Alert.alert('Required', 'Category and subcategory are required');
+          Alert.alert('आवश्यक', 'श्रेणी और उप-श्रेणी आवश्यक हैं');
           return;
         }
         const assignCategories = parseLabelList(assignForm.category);
@@ -1801,18 +1976,19 @@ export default function KaryakariniModuleScreen() {
           categories: assignCategories,
           subcategories: assignSubcategories,
           userRole: assignForm.userRole === 'admin' ? 'admin' : 'user',
+          avatar: assignForm.avatar.trim() || String(selectedUser.avatar || '').trim() || null,
         });
       } else {
         if (!memberForm.mobileNumber.trim() || !memberForm.name.trim()) {
-          Alert.alert('Required', 'Mobile and name are required');
+          Alert.alert('आवश्यक', 'मोबाइल और नाम आवश्यक हैं');
           return;
         }
         if (!memberForm.pad.trim()) {
-          Alert.alert('Required', 'Pad is required');
+          Alert.alert('आवश्यक', 'पद आवश्यक है');
           return;
         }
         if (!memberForm.category.trim() || !memberForm.subcategory.trim()) {
-          Alert.alert('Required', 'Category and subcategory are required');
+          Alert.alert('आवश्यक', 'श्रेणी और उप-श्रेणी आवश्यक हैं');
           return;
         }
         const createCategories = parseLabelList(memberForm.category);
@@ -1844,9 +2020,9 @@ export default function KaryakariniModuleScreen() {
       if (created?.createdUser) {
         const loginId = created.mobileNumber || created.email || memberForm.mobileNumber.trim();
         const loginPassword = created.loginPassword || memberForm.password.trim() || 'welcome';
-        Alert.alert('Success', `Member added. New user login:\nID: ${loginId}\nPassword: ${loginPassword}`);
+      Alert.alert('सफल', `सदस्य जोड़ दिया गया। नए उपयोगकर्ता का लॉगिन:\nआईडी: ${loginId}\nपासवर्ड: ${loginPassword}`);
       } else {
-        Alert.alert('Success', memberModalTab === 'assign' ? 'Member assigned successfully' : 'Member added successfully');
+        Alert.alert('सफल', memberModalTab === 'assign' ? 'सदस्य सफलतापूर्वक आवंटित हुआ' : 'सदस्य सफलतापूर्वक जोड़ दिया गया');
       }
 
       const selectedIds = selectedPathNodes.map((node) => node.id);
@@ -1855,7 +2031,7 @@ export default function KaryakariniModuleScreen() {
         await loadMembers(addTargetNode, membersPagination.page || 1);
       }
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to add member');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'सदस्य जोड़ने में विफल');
     } finally {
       setAddingMember(false);
     }
@@ -1881,6 +2057,7 @@ export default function KaryakariniModuleScreen() {
     assignForm.category,
     assignForm.subcategory,
     assignForm.userRole,
+    assignForm.avatar,
     assignableNodes,
     memberModalTab,
     selectedUser,
@@ -1894,7 +2071,7 @@ export default function KaryakariniModuleScreen() {
   const handleOpenMeetingModal = useCallback(async () => {
     if (!selectedVersionId) return;
     if (!assignableNodes.length) {
-      Alert.alert('Access', 'No assignable node scope found for this user');
+      Alert.alert('प्रवेश', 'इस उपयोगकर्ता के लिए कोई आवंटित नोड दायरा नहीं मिला');
       return;
     }
     const defaultNodeId = String(assignableNodes[0]?.id || '');
@@ -1949,7 +2126,7 @@ export default function KaryakariniModuleScreen() {
         setMeetingDetailLoading(true);
         const details = await fetchMeetingDetails(meetingId);
         if (!details) {
-          Alert.alert('Error', 'Meeting details not found');
+          Alert.alert('त्रुटि', 'बैठक विवरण नहीं मिला');
           return;
         }
         const nodeId = String(details.node_id || '');
@@ -1992,7 +2169,7 @@ export default function KaryakariniModuleScreen() {
                   key: `member-${invitedUserId}`,
                   attendeeType: 'member' as const,
                   id: invitedUserId,
-                  name: fullName || `User #${invitedUserId}`,
+                  name: fullName || `उपयोगकर्ता #${invitedUserId}`,
                   subtitle: branchLabel || invite.invited_mobile || invite.invited_email || '',
                   avatar: null,
                 };
@@ -2026,7 +2203,7 @@ export default function KaryakariniModuleScreen() {
         }
         setShowMeetingModal(true);
       } catch (err: any) {
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to load meeting details');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'बैठक विवरण लोड करने में विफल');
       } finally {
         setMeetingDetailLoading(false);
       }
@@ -2040,14 +2217,14 @@ export default function KaryakariniModuleScreen() {
         setMeetingDetailLoading(true);
         const details = await fetchMeetingDetails(meetingId);
         if (!details) {
-          Alert.alert('Error', 'Meeting details not found');
+          Alert.alert('त्रुटि', 'बैठक विवरण नहीं मिला');
           return;
         }
         setMeetingAttachmentTitle(meetingTitle || details.title || 'Meeting Attachments');
         setMeetingAttachmentItems(Array.isArray(details.attachments) ? details.attachments : []);
         setShowMeetingAttachmentModal(true);
       } catch (err: any) {
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to load attachments');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'संलग्नक लोड करने में विफल');
       } finally {
         setMeetingDetailLoading(false);
       }
@@ -2178,7 +2355,7 @@ export default function KaryakariniModuleScreen() {
   const handleOpenTaskModal = useCallback(async () => {
     if (!selectedVersionId) return;
     if (!assignableNodes.length) {
-      Alert.alert('Access', 'No assignable node scope found for this user');
+      Alert.alert('प्रवेश', 'इस उपयोगकर्ता के लिए कोई आवंटित नोड दायरा नहीं मिला');
       return;
     }
     const defaultNodeId = String(assignableNodes[0]?.id || '');
@@ -2276,7 +2453,7 @@ export default function KaryakariniModuleScreen() {
           },
         ]);
       } catch (err: any) {
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to load child nodes');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'चाइल्ड नोड लोड करने में विफल');
       }
     },
     [fetchNodes, loadNodeMembersForForm, selectedVersionId, taskLevels]
@@ -2322,7 +2499,7 @@ export default function KaryakariniModuleScreen() {
           },
         ]);
       } catch (err: any) {
-        Alert.alert('Error', err?.response?.data?.message || 'Failed to load child nodes');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'चाइल्ड नोड लोड करने में विफल');
       }
     },
     [fetchNodes, selectedVersionId, activityLevels]
@@ -2334,7 +2511,7 @@ export default function KaryakariniModuleScreen() {
     const safeTitle = String(activityForm.title || '').trim();
     const safeSubcategory = String(activityForm.subcategory || '').trim();
     if (safeNodeId <= 0 || !safeTitle || !safeSubcategory) {
-      Alert.alert('Validation', 'Please select a node in the hierarchy, and provide Title and Subcategory.');
+      Alert.alert('सत्यापन', 'कृपया हाइरार्की में नोड चुनें और शीर्षक व उप-श्रेणी भरें।');
       return;
     }
 
@@ -2353,11 +2530,11 @@ export default function KaryakariniModuleScreen() {
         childrenCount: activityForm.includePopulation ? Number(activityForm.childrenCount) || 0 : 0,
       });
 
-      Alert.alert('Success', 'Activity submitted successfully.');
+      Alert.alert('सफल', 'गतिविधि सफलतापूर्वक जमा हो गई।');
       setShowActivityModal(false);
       await loadCategoryActivities(1);
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to submit activity.');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'गतिविधि जमा करने में विफल।');
     } finally {
       setSubmittingActivity(false);
     }
@@ -2442,7 +2619,7 @@ export default function KaryakariniModuleScreen() {
         attachments: [...prev.attachments, uploaded],
       }));
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || err?.message || 'Failed to upload attachment');
+      Alert.alert('त्रुटि', err?.response?.data?.message || err?.message || 'संलग्नक अपलोड करने में विफल');
     } finally {
       setMeetingUploadingAttachment(false);
     }
@@ -2458,7 +2635,7 @@ export default function KaryakariniModuleScreen() {
         attachments: [...prev.attachments, uploaded],
       }));
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || err?.message || 'Failed to upload attachment');
+      Alert.alert('त्रुटि', err?.response?.data?.message || err?.message || 'संलग्नक अपलोड करने में विफल');
     } finally {
       setTaskUploadingAttachment(false);
     }
@@ -2468,11 +2645,11 @@ export default function KaryakariniModuleScreen() {
     if (!selectedVersionId) return;
     const nodeId = Number(currentAttendanceNodeId || 0);
     if (!nodeId) {
-      Alert.alert('Required', 'Select node first');
+      Alert.alert('आवश्यक', 'पहले नोड चुनें');
       return;
     }
     if (!meetingForm.newGuestName.trim()) {
-      Alert.alert('Required', 'Guest name is required');
+      Alert.alert('आवश्यक', 'अतिथि नाम आवश्यक है');
       return;
     }
 
@@ -2511,7 +2688,7 @@ export default function KaryakariniModuleScreen() {
       }
       await loadGuestsForNode(nodeId, selectedVersionId, '');
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to create guest');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'अतिथि बनाने में विफल');
     }
   }, [
     currentAttendanceNodeId,
@@ -2534,7 +2711,7 @@ export default function KaryakariniModuleScreen() {
     if (!selectedVersionId) return;
     const nodeId = Number(meetingForm.nodeId || 0);
     if (!nodeId || !meetingForm.title.trim()) {
-      Alert.alert('Required', 'Meeting title and node are required');
+      Alert.alert('आवश्यक', 'बैठक शीर्षक और नोड आवश्यक हैं');
       return;
     }
 
@@ -2563,9 +2740,9 @@ export default function KaryakariniModuleScreen() {
       setMeetingParticipantPreview([]);
       setMeetingInvitePreview([]);
       await loadMeetings(selectedVersionId, 1);
-      Alert.alert('Success', editingMeetingId ? 'Meeting updated successfully' : 'Meeting created successfully');
+      Alert.alert('सफल', editingMeetingId ? 'बैठक सफलतापूर्वक अपडेट हुई' : 'बैठक सफलतापूर्वक बनाई गई');
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || `Failed to ${editingMeetingId ? 'update' : 'create'} meeting`);
+      Alert.alert('त्रुटि', err?.response?.data?.message || `बैठक ${editingMeetingId ? 'अपडेट' : 'बनाने'} में विफल`);
     } finally {
       setCreatingMeeting(false);
     }
@@ -2577,21 +2754,21 @@ export default function KaryakariniModuleScreen() {
     const isAdminAssignMode = !editingTaskId && ['admin', 'superadmin', 'templeadmin'].includes(currentUserRole);
 
     if (!nodeId || (!isAdminAssignMode && !taskForm.title.trim())) {
-      Alert.alert('Required', isAdminAssignMode ? 'Node is required' : 'Task title and node are required');
+      Alert.alert('आवश्यक', isAdminAssignMode ? 'नोड आवश्यक है' : 'कार्य शीर्षक और नोड आवश्यक हैं');
       return;
     }
     if (currentUserRole !== 'superadmin' && scopeRootNodeIds.has(nodeId)) {
-      Alert.alert('Restricted', 'You can create tasks only for child nodes below your assigned level');
+      Alert.alert('प्रतिबंधित', 'आप अपने आवंटित स्तर से नीचे के चाइल्ड नोड के लिए ही कार्य बना सकते हैं');
       return;
     }
     const taskCategories = parseLabelList(taskForm.category);
     const taskSubcategories = parseLabelList(taskForm.subcategory);
     if (!taskSubcategories.length) {
-      Alert.alert('Required', 'Task subcategory selection is required');
+      Alert.alert('आवश्यक', 'कार्य उप-श्रेणी चयन आवश्यक है');
       return;
     }
     if (isAdminAssignMode && taskForm.assignedUserIds.length === 0) {
-      Alert.alert('Required', 'Select at least one user to assign');
+      Alert.alert('आवश्यक', 'आवंटन के लिए कम से कम एक उपयोगकर्ता चुनें');
       return;
     }
 
@@ -2610,7 +2787,7 @@ export default function KaryakariniModuleScreen() {
         });
         setShowTaskModal(false);
         await loadTasks(selectedVersionId, 1);
-        Alert.alert('Success', 'Task users assigned successfully');
+        Alert.alert('सफल', 'कार्य उपयोगकर्ता सफलतापूर्वक आवंटित हुए');
         return;
       }
 
@@ -2638,9 +2815,9 @@ export default function KaryakariniModuleScreen() {
       }
       setShowTaskModal(false);
       await loadTasks(selectedVersionId, 1);
-      Alert.alert('Success', editingTaskId ? 'Task updated successfully' : 'Task created successfully');
+      Alert.alert('सफल', editingTaskId ? 'कार्य सफलतापूर्वक अपडेट हुआ' : 'कार्य सफलतापूर्वक बनाया गया');
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || `Failed to ${editingTaskId ? 'update' : 'create'} task`);
+      Alert.alert('त्रुटि', err?.response?.data?.message || `कार्य ${editingTaskId ? 'अपडेट' : 'बनाने'} में विफल`);
     } finally {
       setCreatingTask(false);
     }
@@ -2651,7 +2828,7 @@ export default function KaryakariniModuleScreen() {
     const nodeId = Number(selectedRoleNodeId || 0);
     const targetUserId = Number(selectedRoleUserId || 0);
     if (!nodeId || !targetUserId) {
-      Alert.alert('Required', 'Select node level, node, and member to assign admin role');
+      Alert.alert('आवश्यक', 'एडमिन भूमिका देने के लिए नोड स्तर, नोड और सदस्य चुनें');
       return;
     }
 
@@ -2663,10 +2840,10 @@ export default function KaryakariniModuleScreen() {
         versionId: selectedVersionId,
         isActive: true,
       });
-      Alert.alert('Success', 'Admin role assigned successfully. User should login again to see Admin tab.');
+      Alert.alert('सफल', 'एडमिन भूमिका सफलतापूर्वक आवंटित हुई। एडमिन टैब देखने के लिए उपयोगकर्ता पुनः लॉगिन करे।');
       await loadScopes(selectedVersionId);
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to assign admin role');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'एडमिन भूमिका आवंटित करने में विफल');
     } finally {
       setAssigningRole(false);
     }
@@ -2678,12 +2855,12 @@ export default function KaryakariniModuleScreen() {
     try {
       const supported = await Linking.canOpenURL(safeUrl);
       if (!supported) {
-        Alert.alert('Attachment', 'Cannot open this attachment URL');
+      Alert.alert('संलग्नक', 'यह संलग्नक URL नहीं खोला जा सकता');
         return;
       }
       await Linking.openURL(safeUrl);
     } catch {
-      Alert.alert('Attachment', 'Failed to open attachment');
+      Alert.alert('संलग्नक', 'संलग्नक खोलने में विफल');
     }
   }, []);
 
@@ -2717,15 +2894,15 @@ export default function KaryakariniModuleScreen() {
         const fileUri = `${(FileSystem as any).documentDirectory}${safeFileName}`;
         const downloadResult = await (FileSystem as any).downloadAsync(safeUrl, fileUri);
         if (downloadResult.status === 200) {
-          Alert.alert('Download Complete', `File saved to: ${downloadResult.uri}`);
+          Alert.alert('डाउनलोड पूर्ण', `फाइल यहाँ सहेजी गई: ${downloadResult.uri}`);
         } else {
-          Alert.alert('Error', 'Failed to download file');
-          Linking.openURL(safeUrl).catch(() => {});
+          Alert.alert('त्रुटि', 'फाइल डाउनलोड करने में विफल');
+          Linking.openURL(safeUrl).catch(() => { });
         }
       }
     } catch {
-      Alert.alert('Error', 'Failed to download file. Opening link directly.');
-      Linking.openURL(safeUrl).catch(() => {});
+      Alert.alert('त्रुटि', 'फाइल डाउनलोड नहीं हुई। लिंक सीधे खोला जा रहा है।');
+      Linking.openURL(safeUrl).catch(() => { });
     }
   }, []);
 
@@ -2734,20 +2911,17 @@ export default function KaryakariniModuleScreen() {
       await logout();
       router.replace('/auth/login' as any);
     } catch {
-      Alert.alert('Error', 'Failed to logout');
+      Alert.alert('त्रुटि', 'लॉगआउट करने में विफल');
     }
   }, [logout]);
 
-  const handleOpenNotifications = useCallback(() => {
-    router.push('/karyakarini-notifications' as any);
-  }, []);
   const isTaskAssignMode = !editingTaskId && ['admin', 'superadmin', 'templeadmin'].includes(currentUserRole);
 
   if (loading) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={theme.colors.primary} />
-        <Text style={styles.helper}>Loading Karyakarini...</Text>
+        <Text style={styles.helper}>कार्यकारिणी लोड हो रही है...</Text>
       </View>
     );
   }
@@ -2758,14 +2932,11 @@ export default function KaryakariniModuleScreen() {
         user={user}
         onLogout={handleLogout}
         notificationCount={notificationUnreadCount}
-        onPressNotifications={handleOpenNotifications}
-        onBack={() => router.push('/admin' as any)}
-        showBack
       />
 
       <PageHeaderCard
-        title="Karyakarini Admin"
-        subtitle="Manage Hierarchies & Activities"
+        title="कार्यकारिणी प्रशासन"
+        subtitle="हाइरार्की और गतिविधियों का प्रबंधन"
         icon={<MaterialIcons name="admin-panel-settings" size={24} color={theme.colors.primary} />}
       />
 
@@ -2793,20 +2964,20 @@ export default function KaryakariniModuleScreen() {
               style={[styles.tabSwitchBtn, activeTab === 'tree' && styles.tabSwitchBtnActive]}
               onPress={() => setActiveTab('tree')}
             >
-              <Text style={[styles.tabSwitchText, activeTab === 'tree' && styles.tabSwitchTextActive]}>Team</Text>
+              <Text style={[styles.tabSwitchText, activeTab === 'tree' && styles.tabSwitchTextActive]}>टीम</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.tabSwitchBtn, activeTab === 'members' && styles.tabSwitchBtnActive]}
               onPress={() => setActiveTab('members')}
             >
-              <Text style={[styles.tabSwitchText, activeTab === 'members' && styles.tabSwitchTextActive]}>Members</Text>
+              <Text style={[styles.tabSwitchText, activeTab === 'members' && styles.tabSwitchTextActive]}>सदस्य</Text>
             </TouchableOpacity>
             {!isMobile ? (
               <TouchableOpacity
                 style={[styles.tabSwitchBtn, activeTab === 'meetings' && styles.tabSwitchBtnActive]}
                 onPress={() => setActiveTab('meetings')}
               >
-                <Text style={[styles.tabSwitchText, activeTab === 'meetings' && styles.tabSwitchTextActive]}>Meetings</Text>
+                <Text style={[styles.tabSwitchText, activeTab === 'meetings' && styles.tabSwitchTextActive]}>बैठकें</Text>
               </TouchableOpacity>
             ) : null}
             {!isMobile ? (
@@ -2814,21 +2985,21 @@ export default function KaryakariniModuleScreen() {
                 style={[styles.tabSwitchBtn, activeTab === 'tasks' && styles.tabSwitchBtnActive]}
                 onPress={() => setActiveTab('tasks')}
               >
-                <Text style={[styles.tabSwitchText, activeTab === 'tasks' && styles.tabSwitchTextActive]}>Tasks</Text>
+                <Text style={[styles.tabSwitchText, activeTab === 'tasks' && styles.tabSwitchTextActive]}>कार्य</Text>
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
               style={[styles.tabSwitchBtn, activeTab === 'activities' && styles.tabSwitchBtnActive]}
               onPress={() => setActiveTab('activities')}
             >
-              <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>Activities</Text>
+              <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>गतिविधियाँ</Text>
             </TouchableOpacity>
             {!isMobile ? (
               <TouchableOpacity
                 style={[styles.tabSwitchBtn, activeTab === 'roles' && styles.tabSwitchBtnActive]}
                 onPress={() => setActiveTab('roles')}
               >
-                <Text style={[styles.tabSwitchText, activeTab === 'roles' && styles.tabSwitchTextActive]}>Roles</Text>
+                <Text style={[styles.tabSwitchText, activeTab === 'roles' && styles.tabSwitchTextActive]}>भूमिकाएँ</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -2849,25 +3020,25 @@ export default function KaryakariniModuleScreen() {
         {activeTab === 'meetings' ? (
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Meetings</Text>
+              <Text style={styles.sectionTitle}>बैठकें</Text>
               <TouchableOpacity
                 style={styles.primaryAction}
                 onPress={() => void handleOpenMeetingModal()}
                 disabled={!canManageActivities || assignableNodesLoading}
               >
-                <Text style={styles.primaryActionText}>Create Meeting</Text>
+                <Text style={styles.primaryActionText}>बैठक बनाएं</Text>
               </TouchableOpacity>
             </View>
-            {!canManageActivities ? <Text style={styles.modalSub}>No node scope assigned for this user</Text> : null}
+            {!canManageActivities ? <Text style={styles.modalSub}>इस उपयोगकर्ता को कोई नोड दायरा आवंटित नहीं है</Text> : null}
             {taskHierarchyFilterOptions.length > 0 ? (
               <>
-                <Text style={styles.sectionLabel}>Filter by L1</Text>
+                <Text style={styles.sectionLabel}>स्तर 1 के अनुसार फ़िल्टर</Text>
                 <View style={styles.optionRow}>
                   <TouchableOpacity
                     style={[styles.optionChip, !taskHierarchyFilterL1 && styles.optionChipActive]}
                     onPress={() => setTaskHierarchyFilterL1('')}
                   >
-                    <Text style={[styles.optionChipText, !taskHierarchyFilterL1 && styles.optionChipTextActive]}>All</Text>
+                    <Text style={[styles.optionChipText, !taskHierarchyFilterL1 && styles.optionChipTextActive]}>सभी</Text>
                   </TouchableOpacity>
                   {taskHierarchyFilterOptions.map((entry) => (
                     <TouchableOpacity
@@ -2884,20 +3055,20 @@ export default function KaryakariniModuleScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableWrap}>
               <View>
                 <View style={styles.tableHeader}>
-                  <Text style={[styles.tableHeaderCell, styles.colDate]}>Date</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colTitle]}>Title</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colNode]}>Node</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colCount]}>Attendees</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colCount]}>Attachments</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colAction]}>Action</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colDate]}>दिनांक</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colTitle]}>शीर्षक</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colNode]}>नोड</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colCount]}>उपस्थित</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colCount]}>संलग्नक</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colAction]}>कार्य</Text>
                 </View>
                 {meetingsLoading ? (
                   <View style={styles.tableEmpty}>
-                    <Text style={styles.helper}>Loading meetings...</Text>
+                    <Text style={styles.helper}>बैठकें लोड हो रही हैं...</Text>
                   </View>
                 ) : meetingRows.length === 0 ? (
                   <View style={styles.tableEmpty}>
-                    <Text style={styles.helper}>No meetings found</Text>
+                    <Text style={styles.helper}>कोई बैठक नहीं मिली</Text>
                   </View>
                 ) : (
                   meetingRows.map((row, index) => (
@@ -2923,7 +3094,7 @@ export default function KaryakariniModuleScreen() {
                           onPress={() => void handleOpenMeetingEdit(Number(row.id))}
                           disabled={meetingDetailLoading}
                         >
-                          <Text style={styles.rowActionText}>Edit</Text>
+                          <Text style={styles.rowActionText}>संपादित करें</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -2932,7 +3103,7 @@ export default function KaryakariniModuleScreen() {
               </View>
             </ScrollView>
             <Text style={styles.tableMeta}>
-              Page {meetingPagination.page} / {Math.max(1, meetingPagination.totalPages || 1)} • Total {meetingPagination.total}
+              पृष्ठ {meetingPagination.page} / {Math.max(1, meetingPagination.totalPages || 1)} • कुल {meetingPagination.total}
             </Text>
           </View>
         ) : null}
@@ -2940,36 +3111,36 @@ export default function KaryakariniModuleScreen() {
         {activeTab === 'tasks' ? (
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Tasks</Text>
+              <Text style={styles.sectionTitle}>कार्य</Text>
             </View>
-            {!canManageActivities ? <Text style={styles.modalSub}>No node scope assigned for this user</Text> : null}
+            {!canManageActivities ? <Text style={styles.modalSub}>इस उपयोगकर्ता को कोई नोड दायरा आवंटित नहीं है</Text> : null}
 
             <View style={styles.filterGrid}>
               <View style={styles.filterCol}>
-                <Text style={styles.sectionLabel}>Category</Text>
+                <Text style={styles.sectionLabel}>श्रेणी</Text>
                 <TextInput
                   style={styles.inputCompact}
                   value={taskFilterCategory}
                   onChangeText={setTaskFilterCategory}
-                  placeholder="Filter category"
+                  placeholder="श्रेणी फ़िल्टर करें"
                 />
               </View>
               <View style={styles.filterCol}>
-                <Text style={styles.sectionLabel}>Subcategory</Text>
+                <Text style={styles.sectionLabel}>उप-श्रेणी</Text>
                 <TextInput
                   style={styles.inputCompact}
                   value={taskFilterSubcategory}
                   onChangeText={setTaskFilterSubcategory}
-                  placeholder="Filter subcategory"
+                  placeholder="उप-श्रेणी फ़िल्टर करें"
                 />
               </View>
               <View style={styles.filterCol}>
-                <Text style={styles.sectionLabel}>Level</Text>
+                <Text style={styles.sectionLabel}>स्तर</Text>
                 <TextInput
                   style={styles.inputCompact}
                   value={taskFilterNodeLevel}
                   onChangeText={setTaskFilterNodeLevel}
-                  placeholder="Filter node level"
+                  placeholder="नोड स्तर फ़िल्टर करें"
                 />
               </View>
               <TouchableOpacity
@@ -2978,18 +3149,18 @@ export default function KaryakariniModuleScreen() {
                 disabled={!selectedVersionId}
               >
                 <MaterialIcons name="filter-list" size={18} color="#fff" />
-                <Text style={styles.filterApplyText}>Apply</Text>
+                <Text style={styles.filterApplyText}>लागू करें</Text>
               </TouchableOpacity>
             </View>
             {taskHierarchyFilterOptions.length > 0 ? (
               <>
-                <Text style={styles.sectionLabel}>Filter by L1</Text>
+                <Text style={styles.sectionLabel}>स्तर 1 के अनुसार फ़िल्टर</Text>
                 <View style={styles.optionRow}>
                   <TouchableOpacity
                     style={[styles.optionChip, !taskHierarchyFilterL1 && styles.optionChipActive]}
                     onPress={() => setTaskHierarchyFilterL1('')}
                   >
-                    <Text style={[styles.optionChipText, !taskHierarchyFilterL1 && styles.optionChipTextActive]}>All</Text>
+                    <Text style={[styles.optionChipText, !taskHierarchyFilterL1 && styles.optionChipTextActive]}>सभी</Text>
                   </TouchableOpacity>
                   {taskHierarchyFilterOptions.map((entry) => (
                     <TouchableOpacity
@@ -3006,21 +3177,21 @@ export default function KaryakariniModuleScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableWrap}>
               <View>
                 <View style={styles.tableHeader}>
-                  <Text style={[styles.tableHeaderCell, styles.colDate]}>Date</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colTitle]}>Title</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colNode]}>Node</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colAssignee]}>Assignee</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colStatus]}>Status</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colCount]}>Attachments</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colAction]}>Action</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colDate]}>दिनांक</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colTitle]}>शीर्षक</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colNode]}>नोड</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colAssignee]}>असाइनी</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colStatus]}>स्थिति</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colCount]}>संलग्नक</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colAction]}>कार्य</Text>
                 </View>
                 {tasksLoading ? (
                   <View style={styles.tableEmpty}>
-                    <Text style={styles.helper}>Loading tasks...</Text>
+                    <Text style={styles.helper}>कार्य लोड हो रहे हैं...</Text>
                   </View>
                 ) : filteredTaskRows.length === 0 ? (
                   <View style={styles.tableEmpty}>
-                    <Text style={styles.helper}>No tasks found</Text>
+                    <Text style={styles.helper}>कोई कार्य नहीं मिला</Text>
                   </View>
                 ) : (
                   filteredTaskRows.map((row, index) => (
@@ -3068,7 +3239,7 @@ export default function KaryakariniModuleScreen() {
                           style={styles.rowActionBtn}
                           onPress={() => void handleOpenTaskEdit(row)}
                         >
-                          <Text style={styles.rowActionText}>Edit</Text>
+                          <Text style={styles.rowActionText}>संपादित करें</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -3077,7 +3248,7 @@ export default function KaryakariniModuleScreen() {
               </View>
             </ScrollView>
             <Text style={styles.tableMeta}>
-              Page {taskPagination.page} / {Math.max(1, taskPagination.totalPages || 1)} • Total {taskPagination.total}
+              पृष्ठ {taskPagination.page} / {Math.max(1, taskPagination.totalPages || 1)} • कुल {taskPagination.total}
             </Text>
             <View style={[styles.optionRow, { justifyContent: 'flex-end', marginTop: 10 }]}>
               <TouchableOpacity
@@ -3085,14 +3256,14 @@ export default function KaryakariniModuleScreen() {
                 disabled={tasksLoading || taskPagination.page <= 1}
                 onPress={() => selectedVersionId && void loadTasks(selectedVersionId, Math.max(1, (taskPagination.page || 1) - 1))}
               >
-                <Text style={styles.rowActionText}>Prev</Text>
+                <Text style={styles.rowActionText}>पिछला</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.rowActionBtn, tasksLoading || taskPagination.page >= Math.max(1, taskPagination.totalPages || 1) ? styles.saveBtnDisabled : null]}
                 disabled={tasksLoading || taskPagination.page >= Math.max(1, taskPagination.totalPages || 1)}
                 onPress={() => selectedVersionId && void loadTasks(selectedVersionId, (taskPagination.page || 1) + 1)}
               >
-                <Text style={styles.rowActionText}>Next</Text>
+                <Text style={styles.rowActionText}>अगला</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -3101,32 +3272,57 @@ export default function KaryakariniModuleScreen() {
         {activeTab === 'members' ? (
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Members</Text>
+              <Text style={styles.sectionTitle}>सदस्य</Text>
             </View>
-            {!canManageActivities ? <Text style={styles.modalSub}>No node scope assigned for this user</Text> : null}
-            {memberLevels.length > 0 ? (
-              <>
-                <Text style={styles.sectionLabel}>Filter by Node</Text>
-                <TreeView
-                  levels={memberLevels}
-                  breadcrumb={memberBreadcrumb}
-                  onSelectNode={(levelIndex, node) => void handleMemberNodeSelect(levelIndex, node)}
-                  onOpenMembers={() => {}} // Not needed for members view itself
+            {!canManageActivities ? <Text style={styles.modalSub}>इस उपयोगकर्ता को कोई नोड दायरा आवंटित नहीं है</Text> : null}
+            <View style={styles.filterGrid}>
+              <View style={styles.filterCol}>
+                <Text style={styles.sectionLabel}>पाथ स्तर</Text>
+                <TextInput
+                  style={styles.inputCompact}
+                  value={memberFilterNodeLevel}
+                  onChangeText={setMemberFilterNodeLevel}
+                  placeholder="जैसे: प्रांत, जिला"
                 />
-              </>
-            ) : null}
-
-            {!memberBrowseNodeId ? (
-              <View style={styles.tableEmpty}>
-                <Text style={styles.helper}>Select a node above to view members</Text>
               </View>
-            ) : membersLoading ? (
+              <View style={styles.filterCol}>
+                <Text style={styles.sectionLabel}>श्रेणी</Text>
+                <TextInput
+                  style={styles.inputCompact}
+                  value={memberFilterCategory}
+                  onChangeText={setMemberFilterCategory}
+                  placeholder="श्रेणी फ़िल्टर करें"
+                />
+              </View>
+              <View style={styles.filterCol}>
+                <Text style={styles.sectionLabel}>उप-श्रेणी</Text>
+                <TextInput
+                  style={styles.inputCompact}
+                  value={memberFilterSubcategory}
+                  onChangeText={setMemberFilterSubcategory}
+                  placeholder="उप-श्रेणी फ़िल्टर करें"
+                />
+              </View>
+              <TouchableOpacity
+                style={styles.filterApplyBtn}
+                onPress={() => {
+                  setMemberFilterNodeLevel('');
+                  setMemberFilterCategory('');
+                  setMemberFilterSubcategory('');
+                }}
+              >
+                <MaterialIcons name="close" size={18} color="#fff" />
+                <Text style={styles.filterApplyText}>साफ करें</Text>
+              </TouchableOpacity>
+            </View>
+
+            {membersLoading ? (
               <View style={styles.tableEmpty}>
-                <Text style={styles.helper}>Loading members...</Text>
+                <Text style={styles.helper}>सदस्य लोड हो रहे हैं...</Text>
               </View>
             ) : groupedMembersForTab.length === 0 ? (
               <View style={styles.tableEmpty}>
-                <Text style={styles.helper}>No members found for selected node</Text>
+                <Text style={styles.helper}>चुने गए फ़िल्टर के लिए कोई सदस्य नहीं मिला</Text>
               </View>
             ) : (
               groupedMembersForTab.map((group) => (
@@ -3140,14 +3336,16 @@ export default function KaryakariniModuleScreen() {
                         <ScrollView horizontal showsHorizontalScrollIndicator style={styles.memberTableDataWrap}>
                           <View>
                             <View style={styles.memberTableHeaderRow}>
-                              <Text style={[styles.memberTableHeaderCell, styles.memberColName]}>Name</Text>
-                              <Text style={[styles.memberTableHeaderCell, styles.memberColCategory]}>Category</Text>
-                              <Text style={[styles.memberTableHeaderCell, styles.memberColSubcategory]}>Subcategory</Text>
-                              <Text style={[styles.memberTableHeaderCell, styles.memberColMobile]}>Mobile</Text>
-                              <Text style={[styles.memberTableHeaderCell, styles.memberColGotra]}>Gotra</Text>
-                              <Text style={[styles.memberTableHeaderCell, styles.memberColVillage]}>Village</Text>
-                              <Text style={[styles.memberTableHeaderCell, styles.memberColPeriod]}>Period</Text>
-                              <Text style={[styles.memberTableHeaderCell, styles.memberColPath]}>Path</Text>
+                              <Text style={[styles.memberTableHeaderCell, styles.memberColPhoto]}>फोटो</Text>
+                              <Text style={[styles.memberTableHeaderCell, styles.memberColName]}>नाम</Text>
+                              <Text style={[styles.memberTableHeaderCell, styles.memberColLevel]}>स्तर</Text>
+                              <Text style={[styles.memberTableHeaderCell, styles.memberColCategory]}>श्रेणी</Text>
+                              <Text style={[styles.memberTableHeaderCell, styles.memberColSubcategory]}>उप-श्रेणी</Text>
+                              <Text style={[styles.memberTableHeaderCell, styles.memberColMobile]}>मोबाइल</Text>
+                              <Text style={[styles.memberTableHeaderCell, styles.memberColGotra]}>गोत्र</Text>
+                              <Text style={[styles.memberTableHeaderCell, styles.memberColVillage]}>गांव</Text>
+                              <Text style={[styles.memberTableHeaderCell, styles.memberColPeriod]}>अवधि</Text>
+                              <Text style={[styles.memberTableHeaderCell, styles.memberColPath]}>पाथ</Text>
                             </View>
                             {padGroup.rows.map((member, index) => {
                               const categories = parseLabelList(
@@ -3158,7 +3356,17 @@ export default function KaryakariniModuleScreen() {
                               ).join(', ') || '-';
                               return (
                                 <View key={`member-table-row-${member.id}`} style={[styles.memberTableRow, index % 2 === 1 && styles.memberTableRowEven]}>
+                                  <View style={[styles.memberTableCell, styles.memberColPhoto, styles.memberPhotoCell]}>
+                                    {member.avatar ? (
+                                      <Image source={{ uri: member.avatar }} style={styles.memberTableAvatar} />
+                                    ) : (
+                                      <View style={styles.memberTableAvatarFallback}>
+                                        <Text style={styles.memberTableAvatarFallbackText}>{getInitials(memberName(member))}</Text>
+                                      </View>
+                                    )}
+                                  </View>
                                   <Text style={[styles.memberTableCell, styles.memberColName]} numberOfLines={2}>{memberName(member)}</Text>
+                                  <Text style={[styles.memberTableCell, styles.memberColLevel]} numberOfLines={2}>{formatNodeLevelLabel(member.node_level) || '-'}</Text>
                                   <Text style={[styles.memberTableCell, styles.memberColCategory]} numberOfLines={2}>{categories}</Text>
                                   <Text style={[styles.memberTableCell, styles.memberColSubcategory]} numberOfLines={2}>{subcategories}</Text>
                                   <Text style={[styles.memberTableCell, styles.memberColMobile]} numberOfLines={2}>{member.mobile_number || '-'}</Text>
@@ -3173,12 +3381,12 @@ export default function KaryakariniModuleScreen() {
                         </ScrollView>
                         <View style={styles.memberStickyEditColumn}>
                           <View style={styles.memberStickyEditHeader}>
-                            <Text style={styles.memberStickyEditHeaderText}>Edit</Text>
+                            <Text style={styles.memberStickyEditHeaderText}>संपादित</Text>
                           </View>
                           {padGroup.rows.map((member, index) => (
                             <View key={`member-edit-cell-${member.id}`} style={[styles.memberStickyEditCell, index % 2 === 1 && styles.memberTableRowEven]}>
                               <TouchableOpacity style={styles.rowActionBtn} onPress={() => handleOpenEditMember(member)}>
-                                <Text style={styles.rowActionText}>Edit</Text>
+                                <Text style={styles.rowActionText}>संपादित करें</Text>
                               </TouchableOpacity>
                             </View>
                           ))}
@@ -3190,7 +3398,7 @@ export default function KaryakariniModuleScreen() {
               ))
             )}
             <Text style={styles.tableMeta}>
-              Page {membersPagination.page} / {Math.max(1, membersPagination.totalPages || 1)} • Total {membersPagination.total}
+              पृष्ठ {membersPagination.page} / {Math.max(1, membersPagination.totalPages || 1)} • कुल {membersPagination.total}
             </Text>
             <View style={[styles.optionRow, { justifyContent: 'flex-end' }]}>
               <TouchableOpacity
@@ -3198,14 +3406,14 @@ export default function KaryakariniModuleScreen() {
                 disabled={membersLoading || membersPagination.page <= 1 || !membersNode}
                 onPress={() => membersNode && void loadMembers(membersNode, Math.max(1, (membersPagination.page || 1) - 1))}
               >
-                <Text style={styles.rowActionText}>Prev</Text>
+                <Text style={styles.rowActionText}>पिछला</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.rowActionBtn, membersLoading || membersPagination.page >= Math.max(1, membersPagination.totalPages || 1) ? styles.saveBtnDisabled : null]}
                 disabled={membersLoading || membersPagination.page >= Math.max(1, membersPagination.totalPages || 1) || !membersNode}
                 onPress={() => membersNode && void loadMembers(membersNode, (membersPagination.page || 1) + 1)}
               >
-                <Text style={styles.rowActionText}>Next</Text>
+                <Text style={styles.rowActionText}>अगला</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -3214,35 +3422,35 @@ export default function KaryakariniModuleScreen() {
         {activeTab === 'activities' ? (
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Category Activities</Text>
+              <Text style={styles.sectionTitle}>श्रेणी गतिविधियाँ</Text>
             </View>
 
             <View style={styles.filterGrid}>
               <View style={styles.filterCol}>
-                <Text style={styles.sectionLabel}>Category</Text>
+                <Text style={styles.sectionLabel}>श्रेणी</Text>
                 <TextInput
                   style={styles.inputCompact}
                   value={activityFilterCategory}
                   onChangeText={setActivityFilterCategory}
-                  placeholder="Filter category"
+                  placeholder="श्रेणी फ़िल्टर करें"
                 />
               </View>
               <View style={styles.filterCol}>
-                <Text style={styles.sectionLabel}>Subcategory</Text>
+                <Text style={styles.sectionLabel}>उप-श्रेणी</Text>
                 <TextInput
                   style={styles.inputCompact}
                   value={activityFilterSubcategory}
                   onChangeText={setActivityFilterSubcategory}
-                  placeholder="Filter subcategory"
+                  placeholder="उप-श्रेणी फ़िल्टर करें"
                 />
               </View>
               <View style={styles.filterCol}>
-                <Text style={styles.sectionLabel}>Level</Text>
+                <Text style={styles.sectionLabel}>स्तर</Text>
                 <TextInput
                   style={styles.inputCompact}
                   value={activityFilterNodeLevel}
                   onChangeText={setActivityFilterNodeLevel}
-                  placeholder="Filter node level"
+                  placeholder="नोड स्तर फ़िल्टर करें"
                 />
               </View>
               <TouchableOpacity
@@ -3251,28 +3459,28 @@ export default function KaryakariniModuleScreen() {
                 disabled={!selectedVersionId}
               >
                 <MaterialIcons name="filter-list" size={18} color="#fff" />
-                <Text style={styles.filterApplyText}>Apply</Text>
+                <Text style={styles.filterApplyText}>लागू करें</Text>
               </TouchableOpacity>
             </View>
 
             <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableWrap}>
               <View>
                 <View style={styles.tableHeader}>
-                  <Text style={[styles.tableHeaderCell, styles.colDate]}>Date</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colTitle]}>Title</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colNode]}>Node</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colStatus]}>Category</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colAssignee]}>Subcategory</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colBy]}>By</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colAction]}>Action</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colDate]}>दिनांक</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colTitle]}>शीर्षक</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colNode]}>नोड</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colStatus]}>श्रेणी</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colAssignee]}>उप-श्रेणी</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colBy]}>द्वारा</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colAction]}>कार्य</Text>
                 </View>
                 {activitiesLoading ? (
                   <View style={styles.tableEmpty}>
-                    <Text style={styles.helper}>Loading activities...</Text>
+                    <Text style={styles.helper}>गतिविधियाँ लोड हो रही हैं...</Text>
                   </View>
                 ) : activityRows.length === 0 ? (
                   <View style={styles.tableEmpty}>
-                    <Text style={styles.helper}>No activities found</Text>
+                    <Text style={styles.helper}>कोई गतिविधि नहीं मिली</Text>
                   </View>
                 ) : (
                   activityRows.map((row, index) => (
@@ -3283,7 +3491,7 @@ export default function KaryakariniModuleScreen() {
                         {row.description ? <Text style={styles.tableCellSubText} numberOfLines={2}>{row.description}</Text> : null}
                         {(row.male_count || row.female_count || row.children_count) ? (
                           <Text style={[styles.tableCellSubText, { color: theme.colors.primary, fontWeight: '600', marginTop: 4 }]}>
-                            👥 Total Population: {(Number(row.male_count || 0) + Number(row.female_count || 0) + Number(row.children_count || 0))} (M: {row.male_count || 0}, F: {row.female_count || 0}, C: {row.children_count || 0})
+                            👥 कुल जनसंख्या: {(Number(row.male_count || 0) + Number(row.female_count || 0) + Number(row.children_count || 0))} (पु: {row.male_count || 0}, म: {row.female_count || 0}, ब: {row.children_count || 0})
                           </Text>
                         ) : null}
                       </View>
@@ -3302,7 +3510,7 @@ export default function KaryakariniModuleScreen() {
                       </View>
                       <View style={[styles.tableCell, styles.colAction]}>
                         <TouchableOpacity style={styles.rowActionBtn} onPress={() => setSelectedActivityDetails(row)}>
-                          <Text style={styles.rowActionText}>View</Text>
+                          <Text style={styles.rowActionText}>देखें</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -3311,7 +3519,7 @@ export default function KaryakariniModuleScreen() {
               </View>
             </ScrollView>
             <Text style={styles.tableMeta}>
-              Page {activityPagination.page} / {Math.max(1, activityPagination.totalPages || 1)} • Total {activityPagination.total}
+              पृष्ठ {activityPagination.page} / {Math.max(1, activityPagination.totalPages || 1)} • कुल {activityPagination.total}
             </Text>
           </View>
         ) : null}
@@ -3319,27 +3527,27 @@ export default function KaryakariniModuleScreen() {
         {activeTab === 'roles' ? (
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Role Assignment</Text>
+              <Text style={styles.sectionTitle}>भूमिका आवंटन</Text>
             </View>
             {!canManageActivities ? (
-              <Text style={styles.modalSub}>No node scope assigned for this user</Text>
+              <Text style={styles.modalSub}>इस उपयोगकर्ता को कोई नोड दायरा आवंटित नहीं है</Text>
             ) : roleLevels.length === 0 ? (
-              <Text style={styles.modalSub}>No lower node levels available for role assignment</Text>
+              <Text style={styles.modalSub}>भूमिका आवंटन के लिए नीचे का कोई नोड स्तर उपलब्ध नहीं है</Text>
             ) : (
               <View style={styles.assignCardContent}>
-                <Text style={styles.sectionLabel}>Select Hierarchy Node</Text>
+                <Text style={styles.sectionLabel}>हाइरार्की नोड चुनें</Text>
                 <TreeView
                   levels={roleLevels}
                   breadcrumb={roleBreadcrumb}
                   onSelectNode={(levelIndex, node) => void handleRoleNodeSelect(levelIndex, node)}
-                  onOpenMembers={() => {}}
+                  onOpenMembers={() => { }}
                 />
 
                 <View style={styles.assignmentMemberSection}>
-                  <Text style={styles.sectionLabel}>Select Member to Promote</Text>
+                  <Text style={styles.sectionLabel}>प्रमोट करने के लिए सदस्य चुनें</Text>
                   <View style={styles.selectList}>
                     {loadingRoleMembers ? (
-                      <View style={styles.loadingWrapper}><Text style={styles.modalSub}>Loading members...</Text></View>
+                      <View style={styles.loadingWrapper}><Text style={styles.modalSub}>सदस्य लोड हो रहे हैं...</Text></View>
                     ) : null}
                     {!loadingRoleMembers &&
                       roleMembers
@@ -3358,7 +3566,7 @@ export default function KaryakariniModuleScreen() {
                                   <Text style={styles.memberMiniAvatarText}>{getInitials(member.first_name || '')}</Text>
                                 </View>
                                 <Text style={[styles.selectItemText, selected && styles.selectItemTextActive]}>
-                                  {[member.first_name, member.father_name].filter(Boolean).join(' ') || `User #${userId}`}
+                                  {[member.first_name, member.father_name].filter(Boolean).join(' ') || `उपयोगकर्ता #${userId}`}
                                 </Text>
                               </View>
                               {selected && <MaterialIcons name="check-circle" size={18} color={theme.colors.primary} />}
@@ -3366,7 +3574,7 @@ export default function KaryakariniModuleScreen() {
                           );
                         })}
                     {!loadingRoleMembers && roleMembers.filter((member) => Number(member.user_id || 0) > 0).length === 0 ? (
-                      <View style={styles.loadingWrapper}><Text style={styles.modalSub}>No members found for selected node</Text></View>
+                      <View style={styles.loadingWrapper}><Text style={styles.modalSub}>चुने गए नोड के लिए कोई सदस्य नहीं मिला</Text></View>
                     ) : null}
                   </View>
                 </View>
@@ -3376,7 +3584,7 @@ export default function KaryakariniModuleScreen() {
                   onPress={() => void handleAssignRole()}
                   disabled={assigningRole || !selectedRoleUserId || !selectedRoleNodeId}
                 >
-                  <Text style={styles.primaryActionText}>{assigningRole ? 'Assigning...' : 'Assign Admin Role'}</Text>
+                  <Text style={styles.primaryActionText}>{assigningRole ? 'आवंटित हो रहा है...' : 'एडमिन भूमिका दें'}</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -3398,19 +3606,19 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showEditMemberModal}
         onClose={() => setShowEditMemberModal(false)}
-        title="Edit Member"
-        subtitle={editingMember?.hierarchy_path || editingMember?.node_name || 'Member details'}
+        title="सदस्य संपादित करें"
+        subtitle={editingMember?.hierarchy_path || editingMember?.node_name || 'सदस्य विवरण'}
         footer={
           <>
             <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowEditMemberModal(false)}>
-              <Text style={styles.btnTextDark}>Cancel</Text>
+              <Text style={styles.btnTextDark}>रद्द करें</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.btn, savingMemberEdit && styles.btnDisabled]}
               disabled={savingMemberEdit}
               onPress={() => void handleSubmitMemberEdit()}
             >
-              <Text style={styles.btnText}>{savingMemberEdit ? 'Saving...' : 'Save Changes'}</Text>
+              <Text style={styles.btnText}>{savingMemberEdit ? 'सहेजा जा रहा है...' : 'परिवर्तन सहेजें'}</Text>
             </TouchableOpacity>
           </>
         }
@@ -3418,49 +3626,77 @@ export default function KaryakariniModuleScreen() {
         <View style={styles.formBody}>
           <View style={styles.twoColRow}>
             <View style={styles.twoColField}>
-              <Text style={styles.fieldLabel}>Name</Text>
+              <Text style={styles.fieldLabel}>नाम</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.name}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, name: value }))}
-                placeholder="Enter name"
+                placeholder="नाम दर्ज करें"
               />
             </View>
             <View style={styles.twoColField}>
-              <Text style={styles.fieldLabel}>Father/Husband Name</Text>
+              <Text style={styles.fieldLabel}>पिता/पति का नाम</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.fatherOrHusbandName}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, fatherOrHusbandName: value }))}
-                placeholder="Enter father/husband name"
+                placeholder="पिता/पति का नाम दर्ज करें"
               />
             </View>
           </View>
 
           <View style={styles.twoColRow}>
             <View style={styles.twoColField}>
-              <Text style={styles.fieldLabel}>Mobile Number</Text>
+              <Text style={styles.fieldLabel}>मोबाइल नंबर</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.mobileNumber}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, mobileNumber: value }))}
-                placeholder="Enter mobile"
+                placeholder="मोबाइल नंबर दर्ज करें"
                 keyboardType="phone-pad"
               />
             </View>
             <View style={styles.twoColField}>
-              <Text style={styles.fieldLabel}>Pad</Text>
+              <Text style={styles.fieldLabel}>पद</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.pad}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, pad: value }))}
-                placeholder="Enter pad"
+                placeholder="पद दर्ज करें"
               />
             </View>
           </View>
 
+          <Text style={styles.fieldLabel}>सदस्य फोटो</Text>
+          <View style={styles.photoActionsRow}>
+            {editMemberForm.avatar ? (
+              <Image source={{ uri: editMemberForm.avatar }} style={styles.memberPhotoPreview} />
+            ) : (
+              <View style={[styles.memberPhotoPreview, styles.memberPhotoPlaceholder]}>
+                <MaterialIcons name="image" size={20} color={theme.colors.text.disabled} />
+                <Text style={styles.memberPhotoPlaceholderText}>फोटो प्रीव्यू</Text>
+              </View>
+            )}
+            <View style={styles.photoBtnGroup}>
+              <TouchableOpacity
+                style={[styles.secondaryAction, uploadingMemberPhoto && styles.saveBtnDisabled]}
+                onPress={() => void uploadMemberPhotoFromSource('camera', 'edit')}
+                disabled={uploadingMemberPhoto}
+              >
+                <Text style={styles.secondaryActionText}>फोटो लें</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.secondaryAction, uploadingMemberPhoto && styles.saveBtnDisabled]}
+                onPress={() => void uploadMemberPhotoFromSource('gallery', 'edit')}
+                disabled={uploadingMemberPhoto}
+              >
+                <Text style={styles.secondaryActionText}>अपलोड</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           <View>
-            <Text style={styles.fieldLabel}>User Role</Text>
+            <Text style={styles.fieldLabel}>उपयोगकर्ता भूमिका</Text>
             <View style={[styles.optionRow, { marginTop: 8 }]}>
               {(['user', 'admin'] as const).map((role) => (
                 <TouchableOpacity
@@ -3469,7 +3705,7 @@ export default function KaryakariniModuleScreen() {
                   onPress={() => setEditMemberForm((prev) => ({ ...prev, userRole: role }))}
                 >
                   <Text style={[styles.optionChipText, editMemberForm.userRole === role && styles.optionChipTextActive]}>
-                    {role === 'admin' ? 'Admin' : 'User'}
+                    {role === 'admin' ? 'एडमिन' : 'यूज़र'}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -3477,69 +3713,69 @@ export default function KaryakariniModuleScreen() {
           </View>
 
           <View>
-            <Text style={styles.fieldLabel}>Assign Padbhar</Text>
+            <Text style={styles.fieldLabel}>पदभार आवंटन</Text>
             <TouchableOpacity style={[styles.input, { marginTop: 8 }]} onPress={() => void handleOpenPadbharTransfer('edit')}>
               <Text style={editSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                {editSelectedSubcategories.length ? `${editSelectedSubcategories.length} subcategories selected` : 'Select Padbhar *'}
+                {editSelectedSubcategories.length ? `${editSelectedSubcategories.length} उप-श्रेणियाँ चुनी गईं` : 'पदभार चुनें *'}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setEditMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-              <Text style={[styles.clearLink, { marginTop: 6 }]}>Clear category/subcategory</Text>
+              <Text style={[styles.clearLink, { marginTop: 6 }]}>श्रेणी/उप-श्रेणी साफ करें</Text>
             </TouchableOpacity>
-            {editSelectedCategories.length ? <Text style={styles.helper}>Categories: {editSelectedCategories.join(', ')}</Text> : null}
+            {editSelectedCategories.length ? <Text style={styles.helper}>श्रेणियाँ: {editSelectedCategories.join(', ')}</Text> : null}
             {editSelectedSubcategories.length ? (
-              <Text style={styles.helper}>Subcategories: {editSelectedSubcategories.join(', ')}</Text>
+              <Text style={styles.helper}>उप-श्रेणियाँ: {editSelectedSubcategories.join(', ')}</Text>
             ) : null}
           </View>
 
           <View style={styles.twoColRow}>
             <View style={styles.twoColField}>
-              <Text style={styles.fieldLabel}>State</Text>
+              <Text style={styles.fieldLabel}>राज्य</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.state}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, state: value }))}
-                placeholder="State"
+                placeholder="राज्य"
               />
             </View>
             <View style={styles.twoColField}>
-              <Text style={styles.fieldLabel}>District</Text>
+              <Text style={styles.fieldLabel}>जिला</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.district}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, district: value }))}
-                placeholder="District"
+                placeholder="जिला"
               />
             </View>
           </View>
           <View style={styles.twoColRow}>
             <View style={styles.twoColField}>
-              <Text style={styles.fieldLabel}>Tehsil</Text>
+              <Text style={styles.fieldLabel}>तहसील</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.tehsil}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, tehsil: value }))}
-                placeholder="Tehsil"
+                placeholder="तहसील"
               />
             </View>
             <View style={styles.twoColField}>
-              <Text style={styles.fieldLabel}>Village</Text>
+              <Text style={styles.fieldLabel}>गांव</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.village}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, village: value }))}
-                placeholder="Village"
+                placeholder="गांव"
               />
             </View>
           </View>
           <View style={styles.twoColRow}>
             <View style={styles.twoColField}>
-              <Text style={styles.fieldLabel}>Pincode</Text>
+              <Text style={styles.fieldLabel}>पिनकोड</Text>
               <TextInput
                 style={styles.input}
                 value={editMemberForm.pincode}
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, pincode: value }))}
-                placeholder="Pincode"
+                placeholder="पिनकोड"
                 keyboardType="number-pad"
               />
             </View>
@@ -3551,8 +3787,8 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showAddMemberModal}
         onClose={() => setShowAddMemberModal(false)}
-        title="Add Member"
-        subtitle={addTargetNode?.name || 'Selected Node'}
+        title="सदस्य जोड़ें"
+        subtitle={addTargetNode?.name || 'चयनित नोड'}
         topContent={
           <View style={styles.modalTabRow}>
             <TouchableOpacity
@@ -3560,7 +3796,7 @@ export default function KaryakariniModuleScreen() {
               onPress={() => setMemberModalTab('create')}
             >
               <Text style={[styles.modalTabText, memberModalTab === 'create' && styles.modalTabTextActive]}>
-                Create Member
+                नया सदस्य
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -3568,7 +3804,7 @@ export default function KaryakariniModuleScreen() {
               onPress={() => setMemberModalTab('assign')}
             >
               <Text style={[styles.modalTabText, memberModalTab === 'assign' && styles.modalTabTextActive]}>
-                Existing User
+                मौजूदा उपयोगकर्ता
               </Text>
             </TouchableOpacity>
           </View>
@@ -3576,14 +3812,14 @@ export default function KaryakariniModuleScreen() {
         footer={
           <>
             <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowAddMemberModal(false)}>
-              <Text style={styles.btnTextDark}>Cancel</Text>
+              <Text style={styles.btnTextDark}>रद्द करें</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.btn, addingMember && styles.btnDisabled]}
               disabled={addingMember}
               onPress={() => void handleSubmitMember()}
             >
-              <Text style={styles.btnText}>{addingMember ? 'Saving...' : memberModalTab === 'assign' ? 'Assign Member' : 'Create Member'}</Text>
+              <Text style={styles.btnText}>{addingMember ? 'सहेजा जा रहा है...' : memberModalTab === 'assign' ? 'सदस्य आवंटित करें' : 'सदस्य बनाएं'}</Text>
             </TouchableOpacity>
           </>
         }
@@ -3592,75 +3828,80 @@ export default function KaryakariniModuleScreen() {
           <View style={styles.formBody}>
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>Mobile Number *</Text>
+                <Text style={styles.fieldLabel}>मोबाइल नंबर *</Text>
                 <TextInput
                   style={styles.input}
                   value={memberForm.mobileNumber}
                   onChangeText={(value) => setMemberForm((prev) => ({ ...prev, mobileNumber: value }))}
                   keyboardType="phone-pad"
-                  placeholder="Enter mobile"
+                  placeholder="मोबाइल नंबर दर्ज करें"
                 />
               </View>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>Name *</Text>
+                <Text style={styles.fieldLabel}>नाम *</Text>
                 <TextInput
                   style={styles.input}
                   value={memberForm.name}
                   onChangeText={(value) => setMemberForm((prev) => ({ ...prev, name: value }))}
-                  placeholder="Enter name"
+                  placeholder="नाम दर्ज करें"
                 />
               </View>
             </View>
 
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>Password (Optional)</Text>
+                <Text style={styles.fieldLabel}>पासवर्ड (वैकल्पिक)</Text>
                 <TextInput
                   style={styles.input}
                   value={memberForm.password}
                   onChangeText={(value) => setMemberForm((prev) => ({ ...prev, password: value }))}
-                  placeholder="Enter password"
+                  placeholder="पासवर्ड दर्ज करें"
                   autoCapitalize="none"
                   secureTextEntry
                 />
               </View>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>Father/Husband Name</Text>
+                <Text style={styles.fieldLabel}>पिता/पति का नाम</Text>
                 <TextInput
                   style={styles.input}
                   value={memberForm.fatherOrHusbandName}
                   onChangeText={(value) => setMemberForm((prev) => ({ ...prev, fatherOrHusbandName: value }))}
-                  placeholder="Enter father/husband"
+                  placeholder="पिता/पति का नाम दर्ज करें"
                 />
               </View>
             </View>
 
-            <Text style={styles.fieldLabel}>Member Photo</Text>
+            <Text style={styles.fieldLabel}>सदस्य फोटो</Text>
             <View style={styles.photoActionsRow}>
               {memberForm.avatar ? (
                 <Image source={{ uri: memberForm.avatar }} style={styles.memberPhotoPreview} />
-              ) : null}
+              ) : (
+                <View style={[styles.memberPhotoPreview, styles.memberPhotoPlaceholder]}>
+                  <MaterialIcons name="image" size={20} color={theme.colors.text.disabled} />
+                  <Text style={styles.memberPhotoPlaceholderText}>फोटो प्रीव्यू</Text>
+                </View>
+              )}
               <View style={styles.photoBtnGroup}>
                 <TouchableOpacity
                   style={[styles.secondaryAction, uploadingMemberPhoto && styles.saveBtnDisabled]}
                   onPress={() => void uploadMemberPhotoFromSource('camera')}
                   disabled={uploadingMemberPhoto}
                 >
-                  <Text style={styles.secondaryActionText}>Take Photo</Text>
+                  <Text style={styles.secondaryActionText}>फोटो लें</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.secondaryAction, uploadingMemberPhoto && styles.saveBtnDisabled]}
                   onPress={() => void uploadMemberPhotoFromSource('gallery')}
                   disabled={uploadingMemberPhoto}
                 >
-                  <Text style={styles.secondaryActionText}>Upload</Text>
+                  <Text style={styles.secondaryActionText}>अपलोड</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>Pad</Text>
+                <Text style={styles.fieldLabel}>पद</Text>
                 <TouchableOpacity
                   style={styles.input}
                   onPress={() => {
@@ -3672,21 +3913,21 @@ export default function KaryakariniModuleScreen() {
                   disabled={loadingPads}
                 >
                   <Text style={memberForm.pad ? styles.inputText : styles.inputPlaceholder}>
-                    {memberForm.pad || (loadingPads ? 'Loading...' : 'Select pad')}
+                    {memberForm.pad || (loadingPads ? 'लोड हो रहा है...' : 'पद चुनें')}
                   </Text>
                 </TouchableOpacity>
               </View>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>Assign Padbhar *</Text>
+                <Text style={styles.fieldLabel}>पदभार आवंटन *</Text>
                 <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer()}>
                   <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                    {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} selected` : 'Select Padbhar'}
+                    {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} चयनित` : 'पदभार चुनें'}
                   </Text>
                 </TouchableOpacity>
               </View>
             </View>
 
-            <Text style={styles.fieldLabel}>User Role</Text>
+            <Text style={styles.fieldLabel}>उपयोगकर्ता भूमिका</Text>
             <View style={styles.optionRow}>
               {(['user', 'admin'] as const).map((role) => (
                 <TouchableOpacity
@@ -3695,64 +3936,64 @@ export default function KaryakariniModuleScreen() {
                   onPress={() => setMemberForm((prev) => ({ ...prev, userRole: role }))}
                 >
                   <Text style={[styles.optionChipText, memberForm.userRole === role && styles.optionChipTextActive]}>
-                    {role === 'admin' ? 'Admin' : 'User'}
+                    {role === 'admin' ? 'एडमिन' : 'यूज़र'}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
             <TouchableOpacity onPress={() => setMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-              <Text style={styles.clearLink}>Clear categories</Text>
+              <Text style={styles.clearLink}>श्रेणियाँ साफ करें</Text>
             </TouchableOpacity>
 
-            <Text style={styles.fieldLabel}>Address</Text>
+            <Text style={styles.fieldLabel}>पता</Text>
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>State</Text>
+                <Text style={styles.fieldLabel}>राज्य</Text>
                 <TextInput
                   style={styles.input}
                   value={memberForm.state}
                   onChangeText={(value) => setMemberForm((prev) => ({ ...prev, state: value }))}
-                  placeholder="State"
+                  placeholder="राज्य"
                 />
               </View>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>District</Text>
+                <Text style={styles.fieldLabel}>जिला</Text>
                 <TextInput
                   style={styles.input}
                   value={memberForm.district}
                   onChangeText={(value) => setMemberForm((prev) => ({ ...prev, district: value }))}
-                  placeholder="District"
+                  placeholder="जिला"
                 />
               </View>
             </View>
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>Tehsil</Text>
+                <Text style={styles.fieldLabel}>तहसील</Text>
                 <TextInput
                   style={styles.input}
                   value={memberForm.tehsil}
                   onChangeText={(value) => setMemberForm((prev) => ({ ...prev, tehsil: value }))}
-                  placeholder="Tehsil"
+                  placeholder="तहसील"
                 />
               </View>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>Village</Text>
+                <Text style={styles.fieldLabel}>गांव</Text>
                 <TextInput
                   style={styles.input}
                   value={memberForm.village}
                   onChangeText={(value) => setMemberForm((prev) => ({ ...prev, village: value }))}
-                  placeholder="Village"
+                  placeholder="गांव"
                 />
               </View>
             </View>
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>Pincode</Text>
+                <Text style={styles.fieldLabel}>पिनकोड</Text>
                 <TextInput
                   style={styles.input}
                   value={memberForm.pincode}
                   onChangeText={handleMemberPincodeChange}
-                  placeholder="Pincode"
+                  placeholder="पिनकोड"
                   keyboardType="number-pad"
                 />
               </View>
@@ -3761,13 +4002,13 @@ export default function KaryakariniModuleScreen() {
           </View>
         ) : (
           <View style={styles.formBody}>
-            <Text style={styles.fieldLabel}>Search existing user by mobile/email</Text>
+            <Text style={styles.fieldLabel}>मोबाइल/ईमेल से मौजूदा उपयोगकर्ता खोजें</Text>
             <View style={styles.searchRow}>
               <TextInput
                 style={[styles.input, styles.searchInput]}
                 value={userSearchQuery}
                 onChangeText={setUserSearchQuery}
-                placeholder="Enter mobile or email"
+                placeholder="मोबाइल या ईमेल दर्ज करें"
                 autoCapitalize="none"
               />
               <TouchableOpacity
@@ -3775,25 +4016,66 @@ export default function KaryakariniModuleScreen() {
                 onPress={() => void handleSearchUsers()}
                 disabled={searchingUsers}
               >
-                <Text style={styles.searchBtnText}>{searchingUsers ? '...' : 'Search'}</Text>
+                <Text style={styles.searchBtnText}>{searchingUsers ? '...' : 'खोजें'}</Text>
               </TouchableOpacity>
             </View>
 
             {selectedUser ? (
               <View style={styles.selectedUserBox}>
-                <Text style={styles.fieldLabel}>Selected User</Text>
+                <Text style={styles.fieldLabel}>चयनित उपयोगकर्ता</Text>
                 <View style={styles.memberSelectItemRow}>
-                  <View style={styles.memberMiniAvatar}>
-                    <Text style={styles.memberMiniAvatarText}>{getInitials(fullUserName(selectedUser) || '')}</Text>
-                  </View>
+                  {selectedUser.avatar || assignForm.avatar ? (
+                    <Image source={{ uri: String(selectedUser.avatar || assignForm.avatar) }} style={styles.memberMiniAvatarImage} />
+                  ) : (
+                    <View style={styles.memberMiniAvatar}>
+                      <Text style={styles.memberMiniAvatarText}>{getInitials(fullUserName(selectedUser) || '')}</Text>
+                    </View>
+                  )}
                   <View>
-                    <Text style={styles.infoValue}>{fullUserName(selectedUser) || 'Unnamed User'}</Text>
-                    <Text style={styles.modalSub}>{selectedUser.phone || selectedUser.email || '-'}</Text>
+                    <Text style={styles.infoValue}>{fullUserName(selectedUser) || 'नामहीन उपयोगकर्ता'}</Text>
+                    <Text style={styles.modalSub}>{selectedUser.phone || selectedUser.email || 'कोई डेटा नहीं'}</Text>
                   </View>
                 </View>
-                <TouchableOpacity onPress={() => setSelectedUser(null)}>
-                  <Text style={styles.clearLink}>Clear selection</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setSelectedUser(null);
+                    setAssignForm((prev) => ({ ...prev, avatar: '' }));
+                  }}
+                >
+                  <Text style={styles.clearLink}>चयन हटाएं</Text>
                 </TouchableOpacity>
+              </View>
+            ) : null}
+
+            {selectedUser ? (
+              <View>
+                <Text style={styles.fieldLabel}>सदस्य फोटो</Text>
+                <View style={styles.photoActionsRow}>
+                  {assignForm.avatar || selectedUser.avatar ? (
+                    <Image source={{ uri: String(assignForm.avatar || selectedUser.avatar) }} style={styles.memberPhotoPreview} />
+                  ) : (
+                    <View style={[styles.memberPhotoPreview, styles.memberPhotoPlaceholder]}>
+                      <MaterialIcons name="image" size={20} color={theme.colors.text.disabled} />
+                      <Text style={styles.memberPhotoPlaceholderText}>फोटो प्रीव्यू</Text>
+                    </View>
+                  )}
+                  <View style={styles.photoBtnGroup}>
+                    <TouchableOpacity
+                      style={[styles.secondaryAction, uploadingMemberPhoto && styles.saveBtnDisabled]}
+                      onPress={() => void uploadMemberPhotoFromSource('camera', 'assign')}
+                      disabled={uploadingMemberPhoto}
+                    >
+                      <Text style={styles.secondaryActionText}>फोटो लें</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.secondaryAction, uploadingMemberPhoto && styles.saveBtnDisabled]}
+                      onPress={() => void uploadMemberPhotoFromSource('gallery', 'assign')}
+                      disabled={uploadingMemberPhoto}
+                    >
+                      <Text style={styles.secondaryActionText}>अपलोड</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               </View>
             ) : null}
 
@@ -3802,12 +4084,16 @@ export default function KaryakariniModuleScreen() {
                 {searchResults.map((entry) => (
                   <TouchableOpacity key={`user-${entry.id}`} style={styles.searchResultItem} onPress={() => handlePickUser(entry)}>
                     <View style={styles.memberSelectItemRow}>
-                      <View style={styles.memberMiniAvatar}>
-                        <Text style={styles.memberMiniAvatarText}>{getInitials(fullUserName(entry) || '')}</Text>
-                      </View>
+                      {entry.avatar ? (
+                        <Image source={{ uri: entry.avatar }} style={styles.memberMiniAvatarImage} />
+                      ) : (
+                        <View style={styles.memberMiniAvatar}>
+                          <Text style={styles.memberMiniAvatarText}>{getInitials(fullUserName(entry) || '')}</Text>
+                        </View>
+                      )}
                       <View>
-                        <Text style={styles.searchResultName}>{fullUserName(entry) || `User #${entry.id}`}</Text>
-                        <Text style={styles.searchResultMeta}>{entry.phone || entry.email || '-'}</Text>
+                        <Text style={styles.searchResultName}>{fullUserName(entry) || `उपयोगकर्ता #${entry.id}`}</Text>
+                        <Text style={styles.searchResultMeta}>{entry.phone || entry.email || 'कोई डेटा नहीं'}</Text>
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -3817,7 +4103,7 @@ export default function KaryakariniModuleScreen() {
 
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>Pad</Text>
+                <Text style={styles.fieldLabel}>पद</Text>
                 <TouchableOpacity
                   style={styles.input}
                   onPress={() => {
@@ -3829,21 +4115,21 @@ export default function KaryakariniModuleScreen() {
                   disabled={loadingPads}
                 >
                   <Text style={assignForm.pad ? styles.inputText : styles.inputPlaceholder}>
-                    {assignForm.pad || (loadingPads ? 'Loading...' : 'Select pad')}
+                    {assignForm.pad || (loadingPads ? 'लोड हो रहा है...' : 'पद चुनें')}
                   </Text>
                 </TouchableOpacity>
               </View>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>Assign Padbhar *</Text>
+                <Text style={styles.fieldLabel}>पदभार आवंटन *</Text>
                 <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer()}>
                   <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                    {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} selected` : 'Select Padbhar'}
+                    {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} चयनित` : 'पदभार चुनें'}
                   </Text>
                 </TouchableOpacity>
               </View>
             </View>
-            
-            <Text style={styles.fieldLabel}>User Role</Text>
+
+            <Text style={styles.fieldLabel}>उपयोगकर्ता भूमिका</Text>
             <View style={styles.optionRow}>
               {(['user', 'admin'] as const).map((role) => (
                 <TouchableOpacity
@@ -3852,13 +4138,13 @@ export default function KaryakariniModuleScreen() {
                   onPress={() => setAssignForm((prev) => ({ ...prev, userRole: role }))}
                 >
                   <Text style={[styles.optionChipText, assignForm.userRole === role && styles.optionChipTextActive]}>
-                    {role === 'admin' ? 'Admin' : 'User'}
+                    {role === 'admin' ? 'एडमिन' : 'यूज़र'}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
             <TouchableOpacity onPress={() => setAssignForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-              <Text style={styles.clearLink}>Clear categories</Text>
+              <Text style={styles.clearLink}>श्रेणियाँ साफ करें</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -3867,19 +4153,19 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showAddNodeModal}
         onClose={() => setShowAddNodeModal(false)}
-        title="Add Node"
-        subtitle={addTargetNode?.name || 'Selected Node'}
+        title="नोड जोड़ें"
+        subtitle={addTargetNode?.name || 'चयनित नोड'}
         footer={
           <>
             <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowAddNodeModal(false)}>
-              <Text style={styles.btnTextDark}>Cancel</Text>
+              <Text style={styles.btnTextDark}>रद्द करें</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.btn, (addingNode || allowedNodeLevelOptions.length === 0) && styles.btnDisabled]}
               disabled={addingNode || allowedNodeLevelOptions.length === 0}
               onPress={() => void handleSubmitNode()}
             >
-              <Text style={styles.btnText}>{addingNode ? 'Saving...' : 'Create Node'}</Text>
+              <Text style={styles.btnText}>{addingNode ? 'सहेजा जा रहा है...' : 'नोड बनाएं'}</Text>
             </TouchableOpacity>
           </>
         }
@@ -3888,17 +4174,17 @@ export default function KaryakariniModuleScreen() {
           style={styles.input}
           value={nodeForm.name}
           onChangeText={(value) => setNodeForm((prev) => ({ ...prev, name: value }))}
-          placeholder="Node name *"
+          placeholder="नोड नाम *"
         />
 
-        <Text style={styles.sectionLabel}>Create this as</Text>
+        <Text style={styles.sectionLabel}>इसे इस रूप में बनाएं</Text>
         <View style={styles.optionRow}>
           <TouchableOpacity
             style={[styles.optionChip, nodeForm.relation === 'child' && styles.optionChipActive]}
             onPress={() => setNodeForm((prev) => ({ ...prev, relation: 'child' }))}
           >
             <Text style={[styles.optionChipText, nodeForm.relation === 'child' && styles.optionChipTextActive]}>
-              Child of selected node
+              चयनित नोड का चाइल्ड
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -3906,12 +4192,12 @@ export default function KaryakariniModuleScreen() {
             onPress={() => setNodeForm((prev) => ({ ...prev, relation: 'parent' }))}
           >
             <Text style={[styles.optionChipText, nodeForm.relation === 'parent' && styles.optionChipTextActive]}>
-              Parent of selected node
+              चयनित नोड का पैरेंट
             </Text>
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.sectionLabel}>Node level</Text>
+        <Text style={styles.sectionLabel}>नोड स्तर</Text>
         <View style={styles.optionRow}>
           {allowedNodeLevelOptions.map((option) => (
             <TouchableOpacity
@@ -3926,7 +4212,7 @@ export default function KaryakariniModuleScreen() {
           ))}
         </View>
         {allowedNodeLevelOptions.length === 0 ? (
-          <Text style={styles.modalSub}>No levels available for this relation</Text>
+          <Text style={styles.modalSub}>इस संबंध के लिए कोई स्तर उपलब्ध नहीं है</Text>
         ) : null}
       </StandardModal>
 
@@ -3942,7 +4228,7 @@ export default function KaryakariniModuleScreen() {
           setShowAttendanceTransferModal(false);
           setShowInvitationTransferModal(false);
         }}
-        title={editingMeetingId ? 'Edit Meeting' : 'Create Meeting'}
+        title={editingMeetingId ? 'बैठक संपादित करें' : 'बैठक बनाएं'}
         footer={
           <>
             <TouchableOpacity
@@ -3952,14 +4238,14 @@ export default function KaryakariniModuleScreen() {
                 setEditingMeetingId(null);
               }}
             >
-              <Text style={styles.btnTextDark}>Cancel</Text>
+              <Text style={styles.btnTextDark}>रद्द करें</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.btn, creatingMeeting && styles.btnDisabled]}
               disabled={creatingMeeting}
               onPress={() => void handleSubmitMeeting()}
             >
-              <Text style={styles.btnText}>{creatingMeeting ? 'Saving...' : editingMeetingId ? 'Update Meeting' : 'Create Meeting'}</Text>
+              <Text style={styles.btnText}>{creatingMeeting ? 'सहेजा जा रहा है...' : editingMeetingId ? 'बैठक अपडेट करें' : 'बैठक बनाएं'}</Text>
             </TouchableOpacity>
           </>
         }
@@ -3968,22 +4254,22 @@ export default function KaryakariniModuleScreen() {
           style={styles.input}
           value={meetingForm.title}
           onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, title: value }))}
-          placeholder="Meeting title *"
+          placeholder="बैठक शीर्षक *"
         />
         <TextInput
           style={[styles.input, styles.textArea]}
           multiline
           value={meetingForm.description}
           onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, description: value }))}
-          placeholder="Description"
+          placeholder="विवरण"
         />
         <TextInput
           style={styles.input}
           value={meetingForm.meetingDate}
           onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, meetingDate: value }))}
-          placeholder="Meeting date (YYYY-MM-DD)"
+          placeholder="बैठक दिनांक (वर्ष-माह-दिन)"
         />
-        <Text style={styles.sectionLabel}>Node</Text>
+        <Text style={styles.sectionLabel}>नोड</Text>
         <View style={styles.optionRow}>
           {assignableNodes.map((node) => (
             <TouchableOpacity
@@ -3999,9 +4285,9 @@ export default function KaryakariniModuleScreen() {
         </View>
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionLabel}>Attendance ({meetingTransferSelectedItems.length})</Text>
+          <Text style={styles.sectionLabel}>उपस्थिति ({meetingTransferSelectedItems.length})</Text>
           <TouchableOpacity style={styles.rowActionBtn} onPress={() => setShowAttendanceTransferModal(true)}>
-            <Text style={styles.rowActionText}>Manage</Text>
+            <Text style={styles.rowActionText}>प्रबंधित करें</Text>
           </TouchableOpacity>
         </View>
         {meetingTransferSelectedItems.length > 0 ? (
@@ -4018,13 +4304,13 @@ export default function KaryakariniModuleScreen() {
             ) : null}
           </View>
         ) : (
-          <Text style={styles.modalSub}>No attendees selected yet</Text>
+          <Text style={styles.modalSub}>अभी कोई उपस्थित सदस्य चयनित नहीं है</Text>
         )}
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionLabel}>Invited Members ({meetingInviteSelectedItems.length})</Text>
+          <Text style={styles.sectionLabel}>आमंत्रित सदस्य ({meetingInviteSelectedItems.length})</Text>
           <TouchableOpacity style={styles.rowActionBtn} onPress={() => setShowInvitationTransferModal(true)}>
-            <Text style={styles.rowActionText}>Manage</Text>
+            <Text style={styles.rowActionText}>प्रबंधित करें</Text>
           </TouchableOpacity>
         </View>
         {meetingInviteSelectedItems.length > 0 ? (
@@ -4041,20 +4327,20 @@ export default function KaryakariniModuleScreen() {
             ) : null}
           </View>
         ) : (
-          <Text style={styles.modalSub}>No invited members selected yet</Text>
+          <Text style={styles.modalSub}>अभी कोई आमंत्रित सदस्य चयनित नहीं है</Text>
         )}
 
-        <Text style={styles.sectionLabel}>Attachments</Text>
+        <Text style={styles.sectionLabel}>संलग्नक</Text>
         <View style={styles.searchRow}>
           <TextInput
             style={[styles.input, styles.searchInput]}
             value={meetingForm.attachmentInput}
             onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, attachmentInput: value }))}
-            placeholder="Document URL"
+            placeholder="दस्तावेज़ लिंक"
             autoCapitalize="none"
           />
           <TouchableOpacity style={styles.searchBtn} onPress={addMeetingAttachmentByUrl}>
-            <Text style={styles.searchBtnText}>Add URL</Text>
+            <Text style={styles.searchBtnText}>लिंक जोड़ें</Text>
           </TouchableOpacity>
         </View>
         <TouchableOpacity
@@ -4062,7 +4348,7 @@ export default function KaryakariniModuleScreen() {
           disabled={meetingUploadingAttachment}
           onPress={() => void handleUploadMeetingAttachment()}
         >
-          <Text style={styles.secondaryActionText}>{meetingUploadingAttachment ? 'Uploading...' : 'Upload Photo/Video'}</Text>
+          <Text style={styles.secondaryActionText}>{meetingUploadingAttachment ? 'अपलोड हो रहा है...' : 'फोटो/वीडियो अपलोड करें'}</Text>
         </TouchableOpacity>
         <View style={styles.attachmentList}>
           {meetingForm.attachments.map((item, idx) => (
@@ -4076,7 +4362,7 @@ export default function KaryakariniModuleScreen() {
                   }))
                 }
               >
-                <Text style={styles.removeText}>Remove</Text>
+                <Text style={styles.removeText}>हटाएं</Text>
               </TouchableOpacity>
             </View>
           ))}
@@ -4086,14 +4372,14 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showAttendanceTransferModal}
         onClose={() => setShowAttendanceTransferModal(false)}
-        title="Manage Attendance"
+        title="उपस्थिति प्रबंधन"
         footer={
           <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowAttendanceTransferModal(false)}>
-            <Text style={styles.btnTextDark}>Done</Text>
+            <Text style={styles.btnTextDark}>पूर्ण</Text>
           </TouchableOpacity>
         }
       >
-        <Text style={styles.sectionLabel}>Node</Text>
+        <Text style={styles.sectionLabel}>नोड</Text>
         <View style={styles.optionRow}>
           {assignableNodes.map((node) => (
             <TouchableOpacity
@@ -4108,49 +4394,49 @@ export default function KaryakariniModuleScreen() {
           ))}
         </View>
 
-        <Text style={styles.sectionLabel}>Search guest</Text>
+        <Text style={styles.sectionLabel}>अतिथि खोजें</Text>
         <View style={styles.searchRow}>
           <TextInput
             style={[styles.input, styles.searchInput]}
             value={meetingGuestQuery}
             onChangeText={setMeetingGuestQuery}
-            placeholder="Mobile or email"
+            placeholder="मोबाइल या ईमेल"
           />
           <TouchableOpacity style={styles.searchBtn} onPress={() => void handleSearchMeetingGuests()} disabled={meetingGuestSearching}>
-            <Text style={styles.searchBtnText}>{meetingGuestSearching ? '...' : 'Search'}</Text>
+            <Text style={styles.searchBtnText}>{meetingGuestSearching ? '...' : 'खोजें'}</Text>
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.sectionLabel}>Create guest</Text>
+        <Text style={styles.sectionLabel}>अतिथि बनाएं</Text>
         <TextInput
           style={styles.input}
           value={meetingForm.newGuestName}
           onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, newGuestName: value }))}
-          placeholder="Guest name"
+          placeholder="अतिथि नाम"
         />
         <View style={styles.searchRow}>
           <TextInput
             style={[styles.input, styles.searchInput]}
             value={meetingForm.newGuestMobile}
             onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, newGuestMobile: value }))}
-            placeholder="Guest mobile"
+            placeholder="अतिथि मोबाइल"
             keyboardType="phone-pad"
           />
           <TextInput
             style={[styles.input, styles.searchInput]}
             value={meetingForm.newGuestEmail}
             onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, newGuestEmail: value }))}
-            placeholder="Guest email"
+            placeholder="अतिथि ईमेल"
             autoCapitalize="none"
           />
         </View>
         <TouchableOpacity style={styles.secondaryAction} onPress={() => void handleCreateMeetingGuest()}>
-          <Text style={styles.secondaryActionText}>Create and select guest</Text>
+          <Text style={styles.secondaryActionText}>अतिथि बनाएं और चुनें</Text>
         </TouchableOpacity>
 
         <View style={styles.transferRow}>
           <View style={styles.transferColumn}>
-            <Text style={styles.transferTitle}>Available</Text>
+            <Text style={styles.transferTitle}>उपलब्ध</Text>
             <ScrollView style={styles.transferList}>
               {meetingTransferAvailableItems.map((item) => (
                 <TouchableOpacity key={`available-${item.key}`} style={styles.transferItem} onPress={() => handleAddTransferAttendee(item)}>
@@ -4158,16 +4444,16 @@ export default function KaryakariniModuleScreen() {
                     {item.name}
                   </Text>
                   <Text style={styles.transferItemMeta} numberOfLines={1}>
-                    {item.subtitle || item.attendeeType}
+                    {item.subtitle || (item.attendeeType === 'member' ? 'सदस्य' : 'अतिथि')}
                   </Text>
                 </TouchableOpacity>
               ))}
-              {meetingTransferAvailableItems.length === 0 ? <Text style={styles.modalSub}>No available attendees</Text> : null}
+              {meetingTransferAvailableItems.length === 0 ? <Text style={styles.modalSub}>कोई उपलब्ध उपस्थित सदस्य नहीं</Text> : null}
             </ScrollView>
           </View>
 
           <View style={styles.transferColumn}>
-            <Text style={styles.transferTitle}>Selected</Text>
+            <Text style={styles.transferTitle}>चयनित</Text>
             <ScrollView style={styles.transferList}>
               {meetingTransferSelectedItems.map((item) => (
                 <TouchableOpacity key={`selected-${item.key}`} style={styles.transferItemSelected} onPress={() => handleRemoveTransferAttendee(item)}>
@@ -4175,11 +4461,11 @@ export default function KaryakariniModuleScreen() {
                     {item.subtitle ? `${item.name} (${item.subtitle})` : item.name}
                   </Text>
                   <Text style={styles.transferItemMeta} numberOfLines={1}>
-                    {item.subtitle || item.attendeeType}
+                    {item.subtitle || (item.attendeeType === 'member' ? 'सदस्य' : 'अतिथि')}
                   </Text>
                 </TouchableOpacity>
               ))}
-              {meetingTransferSelectedItems.length === 0 ? <Text style={styles.modalSub}>No selected attendees</Text> : null}
+              {meetingTransferSelectedItems.length === 0 ? <Text style={styles.modalSub}>कोई चयनित उपस्थित सदस्य नहीं</Text> : null}
             </ScrollView>
           </View>
         </View>
@@ -4188,10 +4474,10 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showMeetingAttachmentModal}
         onClose={() => setShowMeetingAttachmentModal(false)}
-        title={meetingAttachmentTitle || 'Meeting Attachments'}
+        title={meetingAttachmentTitle || 'बैठक संलग्नक'}
         footer={
           <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowMeetingAttachmentModal(false)}>
-            <Text style={styles.btnTextDark}>Close</Text>
+            <Text style={styles.btnTextDark}>बंद करें</Text>
           </TouchableOpacity>
         }
       >
@@ -4205,29 +4491,29 @@ export default function KaryakariniModuleScreen() {
                 <Text style={styles.attachmentText} numberOfLines={1}>
                   {item.name || item.url}
                 </Text>
-                <Text style={styles.modalSub}>{item.type || 'attachment'}</Text>
+                <Text style={styles.modalSub}>{item.type || 'संलग्नक'}</Text>
               </View>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 <TouchableOpacity style={styles.rowActionBtn} onPress={() => void handleOpenAttachmentUrl(item.url)}>
-                  <Text style={styles.rowActionText}>Open</Text>
+                  <Text style={styles.rowActionText}>खोलें</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.rowActionBtn, { backgroundColor: theme.colors.primary }]} onPress={() => void handleDownloadAttachment(item.url, item.name)}>
-                  <Text style={[styles.rowActionText, { color: '#fff' }]}>Download</Text>
+                  <Text style={[styles.rowActionText, { color: '#fff' }]}>डाउनलोड</Text>
                 </TouchableOpacity>
               </View>
             </View>
           ))}
-          {meetingAttachmentItems.length === 0 ? <Text style={styles.modalSub}>No attachments found</Text> : null}
+          {meetingAttachmentItems.length === 0 ? <Text style={styles.modalSub}>कोई संलग्नक नहीं मिला</Text> : null}
         </ScrollView>
       </StandardModal>
 
       <StandardModal
         visible={showTaskAttachmentModal}
         onClose={() => setShowTaskAttachmentModal(false)}
-        title={taskAttachmentTitle || 'Task Attachments'}
+        title={taskAttachmentTitle || 'कार्य संलग्नक'}
         footer={
           <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowTaskAttachmentModal(false)}>
-            <Text style={styles.btnTextDark}>Close</Text>
+            <Text style={styles.btnTextDark}>बंद करें</Text>
           </TouchableOpacity>
         }
       >
@@ -4241,33 +4527,33 @@ export default function KaryakariniModuleScreen() {
                 <Text style={styles.attachmentText} numberOfLines={1}>
                   {item.name || item.url.split('/').pop() || item.url}
                 </Text>
-                <Text style={styles.modalSub}>{item.type || 'attachment'}</Text>
+                <Text style={styles.modalSub}>{item.type || 'संलग्नक'}</Text>
               </View>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 <TouchableOpacity style={styles.rowActionBtn} onPress={() => void handleOpenAttachmentUrl(item.url)}>
-                  <Text style={styles.rowActionText}>Open</Text>
+                  <Text style={styles.rowActionText}>खोलें</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.rowActionBtn, { backgroundColor: theme.colors.primary }]} onPress={() => void handleDownloadAttachment(item.url, item.name)}>
-                  <Text style={[styles.rowActionText, { color: '#fff' }]}>Download</Text>
+                  <Text style={[styles.rowActionText, { color: '#fff' }]}>डाउनलोड</Text>
                 </TouchableOpacity>
               </View>
             </View>
           ))}
-          {taskAttachmentItems.length === 0 ? <Text style={styles.modalSub}>No attachments found</Text> : null}
+          {taskAttachmentItems.length === 0 ? <Text style={styles.modalSub}>कोई संलग्नक नहीं मिला</Text> : null}
         </ScrollView>
       </StandardModal>
 
       <StandardModal
         visible={showInvitationTransferModal}
         onClose={() => setShowInvitationTransferModal(false)}
-        title="Manage Invited Members"
+        title="आमंत्रित सदस्यों का प्रबंधन"
         footer={
           <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowInvitationTransferModal(false)}>
-            <Text style={styles.btnTextDark}>Done</Text>
+            <Text style={styles.btnTextDark}>पूर्ण</Text>
           </TouchableOpacity>
         }
       >
-        <Text style={styles.sectionLabel}>Node</Text>
+        <Text style={styles.sectionLabel}>नोड</Text>
         <View style={styles.optionRow}>
           {assignableNodes.map((node) => (
             <TouchableOpacity
@@ -4284,7 +4570,7 @@ export default function KaryakariniModuleScreen() {
 
         <View style={styles.transferRow}>
           <View style={styles.transferColumn}>
-            <Text style={styles.transferTitle}>Available Members</Text>
+            <Text style={styles.transferTitle}>उपलब्ध सदस्य</Text>
             <ScrollView style={styles.transferList}>
               {meetingInviteAvailableItems.map((item) => (
                 <TouchableOpacity key={`invite-available-${item.key}`} style={styles.transferItem} onPress={() => handleAddInviteMember(item)}>
@@ -4292,16 +4578,16 @@ export default function KaryakariniModuleScreen() {
                     {item.name}
                   </Text>
                   <Text style={styles.transferItemMeta} numberOfLines={1}>
-                    {item.subtitle || 'member'}
+                    {item.subtitle || 'सदस्य'}
                   </Text>
                 </TouchableOpacity>
               ))}
-              {meetingInviteAvailableItems.length === 0 ? <Text style={styles.modalSub}>No available members</Text> : null}
+              {meetingInviteAvailableItems.length === 0 ? <Text style={styles.modalSub}>कोई उपलब्ध सदस्य नहीं</Text> : null}
             </ScrollView>
           </View>
 
           <View style={styles.transferColumn}>
-            <Text style={styles.transferTitle}>Invited Members</Text>
+            <Text style={styles.transferTitle}>आमंत्रित सदस्य</Text>
             <ScrollView style={styles.transferList}>
               {meetingInviteSelectedItems.map((item) => (
                 <TouchableOpacity key={`invite-selected-${item.key}`} style={styles.transferItemSelected} onPress={() => handleRemoveInviteMember(item)}>
@@ -4309,11 +4595,11 @@ export default function KaryakariniModuleScreen() {
                     {item.subtitle ? `${item.name} (${item.subtitle})` : item.name}
                   </Text>
                   <Text style={styles.transferItemMeta} numberOfLines={1}>
-                    {item.subtitle || 'member'}
+                    {item.subtitle || 'सदस्य'}
                   </Text>
                 </TouchableOpacity>
               ))}
-              {meetingInviteSelectedItems.length === 0 ? <Text style={styles.modalSub}>No invited members</Text> : null}
+              {meetingInviteSelectedItems.length === 0 ? <Text style={styles.modalSub}>कोई आमंत्रित सदस्य नहीं</Text> : null}
             </ScrollView>
           </View>
         </View>
@@ -4322,25 +4608,25 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showActivityModal}
         onClose={() => setShowActivityModal(false)}
-        title="गतिविधि असाइन करें (Assign Activity)"
+        title="गतिविधि असाइन करें"
         subtitle={activitySelectedPathLabel}
         footer={
           <>
             <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowActivityModal(false)}>
-              <Text style={styles.btnTextDark}>Cancel</Text>
+              <Text style={styles.btnTextDark}>रद्द करें</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.btn, submittingActivity && styles.saveBtnDisabled]}
               disabled={submittingActivity}
               onPress={() => void handleSubmitActivity()}
             >
-              <Text style={styles.btnText}>{submittingActivity ? 'Saving...' : 'Submit Activity'}</Text>
+              <Text style={styles.btnText}>{submittingActivity ? 'सहेजा जा रहा है...' : 'गतिविधि जमा करें'}</Text>
             </TouchableOpacity>
           </>
         }
       >
         <View style={styles.formBody}>
-          <Text style={styles.sectionLabel}>Node Hierarchy (Select Location Level) *</Text>
+          <Text style={styles.sectionLabel}>नोड हाइरार्की (स्थान स्तर चुनें) *</Text>
           <View style={{ marginBottom: 16 }}>
             <TreeView
               levels={activityLevels}
@@ -4350,39 +4636,39 @@ export default function KaryakariniModuleScreen() {
             />
           </View>
 
-          <Text style={styles.fieldLabel}>Activity Categories *</Text>
+          <Text style={styles.fieldLabel}>गतिविधि श्रेणियाँ *</Text>
           <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('activity')}>
             <Text style={activitySelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
               {activitySelectedSubcategories.length
-                ? `${activitySelectedSubcategories.length} subcategories selected`
-                : 'Select activity subcategories *'}
+                ? `${activitySelectedSubcategories.length} उप-श्रेणियाँ चयनित`
+                : 'गतिविधि उप-श्रेणियाँ चुनें *'}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setActivityForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-            <Text style={styles.clearLink}>Clear categories</Text>
+            <Text style={styles.clearLink}>श्रेणियाँ साफ करें</Text>
           </TouchableOpacity>
           {activitySelectedCategories.length ? (
-            <Text style={styles.helper}>Categories: {activitySelectedCategories.join(', ')}</Text>
+            <Text style={styles.helper}>श्रेणियाँ: {activitySelectedCategories.join(', ')}</Text>
           ) : null}
           {activitySelectedSubcategories.length ? (
-            <Text style={styles.helper}>Subcategories: {activitySelectedSubcategories.join(', ')}</Text>
+            <Text style={styles.helper}>उप-श्रेणियाँ: {activitySelectedSubcategories.join(', ')}</Text>
           ) : null}
 
-          <Text style={styles.fieldLabel}>Activity Title *</Text>
+          <Text style={styles.fieldLabel}>गतिविधि शीर्षक *</Text>
           <TextInput
             style={styles.input}
             value={activityForm.title}
             onChangeText={(value) => setActivityForm((prev) => ({ ...prev, title: value }))}
-            placeholder="Enter activity title"
+            placeholder="गतिविधि शीर्षक दर्ज करें"
           />
 
-          <Text style={styles.fieldLabel}>Description</Text>
+          <Text style={styles.fieldLabel}>विवरण</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             multiline
             value={activityForm.description}
             onChangeText={(value) => setActivityForm((prev) => ({ ...prev, description: value }))}
-            placeholder="Enter activity details and outcomes"
+            placeholder="गतिविधि का विवरण और परिणाम दर्ज करें"
           />
 
           <View style={{ marginTop: 12, marginBottom: 8, padding: 12, backgroundColor: theme.colors.surfaceContainerHighest, borderRadius: 12 }}>
@@ -4392,7 +4678,7 @@ export default function KaryakariniModuleScreen() {
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <MaterialIcons name="people-outline" size={20} color={theme.colors.primary} />
-                <Text style={{ fontSize: 14, fontWeight: '700', color: theme.colors.text.primary }}>Demographic Population Count</Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: theme.colors.text.primary }}>जनसंख्या गणना</Text>
               </View>
               <MaterialIcons name={activityForm.includePopulation ? 'check-box' : 'check-box-outline-blank'} size={24} color={theme.colors.primary} />
             </TouchableOpacity>
@@ -4400,7 +4686,7 @@ export default function KaryakariniModuleScreen() {
             {activityForm.includePopulation ? (
               <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Purush (Male)</Text>
+                  <Text style={styles.fieldLabel}>पुरुष</Text>
                   <TextInput
                     style={styles.input}
                     value={activityForm.maleCount}
@@ -4410,7 +4696,7 @@ export default function KaryakariniModuleScreen() {
                   />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Mahila (Female)</Text>
+                  <Text style={styles.fieldLabel}>महिला</Text>
                   <TextInput
                     style={styles.input}
                     value={activityForm.femaleCount}
@@ -4420,7 +4706,7 @@ export default function KaryakariniModuleScreen() {
                   />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Bache (Children)</Text>
+                  <Text style={styles.fieldLabel}>बच्चे</Text>
                   <TextInput
                     style={styles.input}
                     value={activityForm.childrenCount}
@@ -4433,17 +4719,17 @@ export default function KaryakariniModuleScreen() {
             ) : null}
           </View>
 
-          <Text style={styles.sectionLabel}>Attachments</Text>
+          <Text style={styles.sectionLabel}>संलग्नक</Text>
           <View style={styles.searchRow}>
             <TextInput
               style={[styles.input, styles.searchInput]}
               value={activityForm.attachmentInput}
               onChangeText={(value) => setActivityForm((prev) => ({ ...prev, attachmentInput: value }))}
-              placeholder="Document URL"
+              placeholder="दस्तावेज़ लिंक"
               autoCapitalize="none"
             />
             <TouchableOpacity style={styles.searchBtn} onPress={addActivityAttachmentByUrl}>
-              <Text style={styles.searchBtnText}>Add URL</Text>
+              <Text style={styles.searchBtnText}>लिंक जोड़ें</Text>
             </TouchableOpacity>
           </View>
           <TouchableOpacity
@@ -4451,7 +4737,7 @@ export default function KaryakariniModuleScreen() {
             disabled={uploadingActivityAttachment}
             onPress={() => void pickAndUploadActivityAttachment()}
           >
-            <Text style={styles.secondaryActionText}>{uploadingActivityAttachment ? 'Uploading...' : 'Upload File (PDF, DOCX, XLSX, Images)'}</Text>
+            <Text style={styles.secondaryActionText}>{uploadingActivityAttachment ? 'अपलोड हो रहा है...' : 'फाइल अपलोड करें (PDF, DOCX, XLSX, Images)'}</Text>
           </TouchableOpacity>
           <View style={styles.attachmentList}>
             {activityForm.attachments.map((item, idx) => (
@@ -4467,7 +4753,7 @@ export default function KaryakariniModuleScreen() {
                     }))
                   }
                 >
-                  <Text style={styles.removeText}>Remove</Text>
+                  <Text style={styles.removeText}>हटाएं</Text>
                 </TouchableOpacity>
               </View>
             ))}
@@ -4478,19 +4764,19 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showTaskModal}
         onClose={() => setShowTaskModal(false)}
-        title={editingTaskId ? 'Edit Task' : isTaskAssignMode ? 'Assign Task' : 'Create Task'}
+        title={editingTaskId ? 'कार्य संपादित करें' : isTaskAssignMode ? 'कार्य असाइन करें' : 'कार्य बनाएं'}
         subtitle={taskSelectedPathLabel}
         footer={
           <>
             <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowTaskModal(false)}>
-              <Text style={styles.btnTextDark}>Cancel</Text>
+              <Text style={styles.btnTextDark}>रद्द करें</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.btn, creatingTask && styles.saveBtnDisabled]}
               disabled={creatingTask}
               onPress={() => void handleSubmitTask()}
             >
-              <Text style={styles.btnText}>{creatingTask ? 'Saving...' : editingTaskId ? 'Update Task' : isTaskAssignMode ? 'Assign Task' : 'Create Task'}</Text>
+              <Text style={styles.btnText}>{creatingTask ? 'सहेजा जा रहा है...' : editingTaskId ? 'कार्य अपडेट करें' : isTaskAssignMode ? 'कार्य असाइन करें' : 'कार्य बनाएं'}</Text>
             </TouchableOpacity>
           </>
         }
@@ -4500,16 +4786,16 @@ export default function KaryakariniModuleScreen() {
             <>
               <View style={styles.twoColRow}>
                 <View style={styles.twoColField}>
-                  <Text style={styles.fieldLabel}>Task Title *</Text>
+                  <Text style={styles.fieldLabel}>कार्य शीर्षक *</Text>
                   <TextInput
                     style={styles.input}
                     value={taskForm.title}
                     onChangeText={(value) => setTaskForm((prev) => ({ ...prev, title: value }))}
-                    placeholder="Enter task title"
+                    placeholder="कार्य शीर्षक दर्ज करें"
                   />
                 </View>
                 <View style={styles.twoColField}>
-                  <Text style={styles.fieldLabel}>Status *</Text>
+                  <Text style={styles.fieldLabel}>स्थिति *</Text>
                   <View style={[styles.optionRow, { marginTop: 4 }]}>
                     {['open', 'in_progress', 'completed'].map((status) => (
                       <TouchableOpacity
@@ -4518,7 +4804,7 @@ export default function KaryakariniModuleScreen() {
                         onPress={() => setTaskForm((prev) => ({ ...prev, status }))}
                       >
                         <Text style={[styles.optionChipText, taskForm.status === status && styles.optionChipTextActive]}>
-                          {status === 'in_progress' ? 'In Progress' : status.charAt(0).toUpperCase() + status.slice(1)}
+                          {status === 'open' ? 'खुला' : status === 'in_progress' ? 'प्रगति में' : 'पूर्ण'}
                         </Text>
                       </TouchableOpacity>
                     ))}
@@ -4526,57 +4812,57 @@ export default function KaryakariniModuleScreen() {
                 </View>
               </View>
 
-              <Text style={styles.fieldLabel}>Description</Text>
+              <Text style={styles.fieldLabel}>विवरण</Text>
               <TextInput
                 style={[styles.input, styles.textArea]}
                 multiline
                 value={taskForm.description}
                 onChangeText={(value) => setTaskForm((prev) => ({ ...prev, description: value }))}
-                placeholder="Enter task description"
+                placeholder="कार्य विवरण दर्ज करें"
               />
 
               <View style={styles.twoColRow}>
                 <View style={styles.twoColField}>
-                  <Text style={styles.fieldLabel}>Task Date (YYYY-MM-DD)</Text>
+                  <Text style={styles.fieldLabel}>कार्य दिनांक (वर्ष-माह-दिन)</Text>
                   <TextInput
                     style={styles.input}
                     value={taskForm.taskDate}
                     onChangeText={(value) => setTaskForm((prev) => ({ ...prev, taskDate: value }))}
-                    placeholder="YYYY-MM-DD"
+                    placeholder="वर्ष-माह-दिन"
                   />
                 </View>
                 <View style={styles.twoColField}>
-                  <Text style={styles.fieldLabel}>Due Date (Optional)</Text>
+                  <Text style={styles.fieldLabel}>अंतिम दिनांक (वैकल्पिक)</Text>
                   <TextInput
                     style={styles.input}
                     value={taskForm.dueDate}
                     onChangeText={(value) => setTaskForm((prev) => ({ ...prev, dueDate: value }))}
-                    placeholder="YYYY-MM-DD"
+                    placeholder="वर्ष-माह-दिन"
                   />
                 </View>
               </View>
             </>
           ) : null}
 
-          <Text style={styles.fieldLabel}>Task Categories *</Text>
+          <Text style={styles.fieldLabel}>कार्य श्रेणियाँ *</Text>
           <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('task')}>
             <Text style={taskSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
               {taskSelectedSubcategories.length
-                ? `${taskSelectedSubcategories.length} subcategories selected`
-                : 'Select task subcategories *'}
+                ? `${taskSelectedSubcategories.length} उप-श्रेणियाँ चयनित`
+                : 'कार्य उप-श्रेणियाँ चुनें *'}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setTaskForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-            <Text style={styles.clearLink}>Clear categories</Text>
+            <Text style={styles.clearLink}>श्रेणियाँ साफ करें</Text>
           </TouchableOpacity>
           {taskSelectedCategories.length ? (
-            <Text style={styles.helper}>Categories: {taskSelectedCategories.join(', ')}</Text>
+            <Text style={styles.helper}>श्रेणियाँ: {taskSelectedCategories.join(', ')}</Text>
           ) : null}
           {taskSelectedSubcategories.length ? (
-            <Text style={styles.helper}>Subcategories: {taskSelectedSubcategories.join(', ')}</Text>
+            <Text style={styles.helper}>उप-श्रेणियाँ: {taskSelectedSubcategories.join(', ')}</Text>
           ) : null}
 
-          <Text style={styles.sectionLabel}>Node Hierarchy</Text>
+          <Text style={styles.sectionLabel}>नोड हाइरार्की</Text>
           <View style={{ marginBottom: 16 }}>
             <TreeView
               levels={taskLevels}
@@ -4586,11 +4872,11 @@ export default function KaryakariniModuleScreen() {
             />
           </View>
           {selectedTaskNodeIsScopeRoot ? (
-            <Text style={styles.errorInline}>Warning: You cannot create task at assigned level. Select a child node below.</Text>
+            <Text style={styles.errorInline}>चेतावनी: आप आवंटित स्तर पर कार्य नहीं बना सकते। नीचे का चाइल्ड नोड चुनें।</Text>
           ) : null}
 
-          <Text style={styles.sectionLabel}>Assign Members</Text>
-          <Text style={styles.fieldLabel}>Assigned Users ({taskForm.assignedUserIds.length})</Text>
+          <Text style={styles.sectionLabel}>सदस्य आवंटित करें</Text>
+          <Text style={styles.fieldLabel}>आवंटित उपयोगकर्ता ({taskForm.assignedUserIds.length})</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4, marginBottom: 12 }}>
             {taskForm.assignedUserIds.map((userId) => {
               const userObj = taskMemberSearchResults.find((u) => u.id === userId);
@@ -4602,7 +4888,7 @@ export default function KaryakariniModuleScreen() {
                   ? [memObj.first_name, memObj.father_name].filter(Boolean).join(' ')
                   : editObj
                     ? [editObj.name, editObj.father_name].filter(Boolean).join(' ')
-                    : `User #${userId}`;
+                    : `उपयोगकर्ता #${userId}`;
               const mobileStr = userObj?.phone || userObj?.email || memObj?.mobile_number || editObj?.mobile_number || '';
               const positionStr = userObj
                 ? formatAssignableUserPosition(userObj)
@@ -4622,7 +4908,7 @@ export default function KaryakariniModuleScreen() {
                   }
                 >
                   <View>
-                    <Text style={[styles.optionChipTextActive, { fontSize: 13 }]}>{nameStr || `User #${userId}`}</Text>
+                    <Text style={[styles.optionChipTextActive, { fontSize: 13 }]}>{nameStr || `उपयोगकर्ता #${userId}`}</Text>
                     {metaLine ? <Text style={{ fontSize: 10, color: theme.colors.text.secondary }}>{metaLine}</Text> : null}
                   </View>
                   <Text style={{ color: theme.colors.primary, fontSize: 16, fontWeight: '700', marginLeft: 4 }}>×</Text>
@@ -4630,17 +4916,17 @@ export default function KaryakariniModuleScreen() {
               );
             })}
             {taskForm.assignedUserIds.length === 0 ? (
-              <Text style={styles.modalSub}>No members assigned. Search users or select below to assign.</Text>
+              <Text style={styles.modalSub}>कोई सदस्य आवंटित नहीं। उपयोगकर्ता खोजें या नीचे से चुनें।</Text>
             ) : null}
           </View>
 
-          <Text style={styles.fieldLabel}>Search & Select Users (Multi-select)</Text>
+          <Text style={styles.fieldLabel}>उपयोगकर्ता खोजें और चुनें (मल्टी-सेलेक्ट)</Text>
           <View style={styles.searchRow}>
             <TextInput
               style={[styles.input, styles.searchInput]}
               value={taskMemberSearchQuery}
               onChangeText={setTaskMemberSearchQuery}
-              placeholder="Select node, then search by name/mobile..."
+              placeholder="पहले नोड चुनें, फिर नाम/मोबाइल से खोजें..."
               autoCapitalize="none"
             />
             {taskMemberSearchQuery.length > 0 ? (
@@ -4662,15 +4948,15 @@ export default function KaryakariniModuleScreen() {
                 <>
                   <View style={{ paddingHorizontal: 12, paddingVertical: 8, backgroundColor: theme.colors.surfaceContainerHigh, borderBottomWidth: 1, borderBottomColor: theme.colors.borderLight }}>
                     <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.text.secondary }}>
-                      NODE MEMBERS ({taskMembers.length}) — Type 3+ chars to search eligible users below assigned level
+                      नोड सदस्य ({taskMembers.length}) — आवंटित स्तर के नीचे योग्य उपयोगकर्ता खोजने के लिए 3+ अक्षर लिखें
                     </Text>
                   </View>
                   {taskMembers.map((member) => {
                     const userId = Number(member.user_id || 0);
                     if (!userId) return null;
                     const selected = taskForm.assignedUserIds.includes(userId);
-                    const nameStr = [member.first_name, member.father_name].filter(Boolean).join(' ') || `User #${userId}`;
-                    const mobileStr = member.mobile_number || 'No mobile number';
+                    const nameStr = [member.first_name, member.father_name].filter(Boolean).join(' ') || `उपयोगकर्ता #${userId}`;
+                    const mobileStr = member.mobile_number || 'मोबाइल नंबर उपलब्ध नहीं';
                     const positionStr = formatMemberPosition(member);
                     const metaLine = [mobileStr, positionStr].filter(Boolean).join(' • ');
                     return (
@@ -4701,7 +4987,7 @@ export default function KaryakariniModuleScreen() {
                   })}
                   {taskMembers.length === 0 ? (
                     <Text style={{ padding: 12, color: theme.colors.text.disabled, fontStyle: 'italic', fontSize: 12 }}>
-                      No members in selected node. Search above to find eligible users within your lower-level scope.
+                      चुने गए नोड में कोई सदस्य नहीं। ऊपर खोजकर अपने निचले स्तर के योग्य उपयोगकर्ता खोजें।
                     </Text>
                   ) : null}
                 </>
@@ -4709,13 +4995,13 @@ export default function KaryakariniModuleScreen() {
                 <>
                   <View style={{ paddingHorizontal: 12, paddingVertical: 8, backgroundColor: theme.colors.surfaceContainerHigh, borderBottomWidth: 1, borderBottomColor: theme.colors.borderLight }}>
                     <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.text.secondary }}>
-                      {taskMemberSearching ? 'SEARCHING...' : `SEARCH RESULTS (${taskMemberSearchResults.length})`}
+                      {taskMemberSearching ? 'खोज जारी है...' : `खोज परिणाम (${taskMemberSearchResults.length})`}
                     </Text>
                   </View>
                   {taskMemberSearchResults.map((entry) => {
                     const selected = taskForm.assignedUserIds.includes(entry.id);
-                    const nameStr = fullUserName(entry) || [entry.first_name, entry.father_name].filter(Boolean).join(' ') || `User #${entry.id}`;
-                    const mobileStr = entry.phone || entry.email || 'No mobile number';
+                    const nameStr = fullUserName(entry) || [entry.first_name, entry.father_name].filter(Boolean).join(' ') || `उपयोगकर्ता #${entry.id}`;
+                    const mobileStr = entry.phone || entry.email || 'मोबाइल नंबर उपलब्ध नहीं';
                     const positionStr = formatAssignableUserPosition(entry);
                     const metaLine = [mobileStr, positionStr].filter(Boolean).join(' • ');
                     return (
@@ -4746,7 +5032,7 @@ export default function KaryakariniModuleScreen() {
                   })}
                   {!taskMemberSearching && taskMemberSearchResults.length === 0 ? (
                     <Text style={{ padding: 12, color: theme.colors.text.disabled, fontStyle: 'italic', fontSize: 12 }}>
-                      No matching users found for &quot;{taskMemberSearchQuery}&quot;
+                      &quot;{taskMemberSearchQuery}&quot; के लिए कोई उपयोगकर्ता नहीं मिला
                     </Text>
                   ) : null}
                 </>
@@ -4757,17 +5043,17 @@ export default function KaryakariniModuleScreen() {
 
         {!isTaskAssignMode ? (
           <>
-            <Text style={styles.sectionLabel}>Attachments</Text>
+            <Text style={styles.sectionLabel}>संलग्नक</Text>
             <View style={styles.searchRow}>
               <TextInput
                 style={[styles.input, styles.searchInput]}
                 value={taskForm.attachmentInput}
                 onChangeText={(value) => setTaskForm((prev) => ({ ...prev, attachmentInput: value }))}
-                placeholder="Document URL"
+                placeholder="दस्तावेज़ लिंक"
                 autoCapitalize="none"
               />
               <TouchableOpacity style={styles.searchBtn} onPress={addTaskAttachmentByUrl}>
-                <Text style={styles.searchBtnText}>Add URL</Text>
+                <Text style={styles.searchBtnText}>लिंक जोड़ें</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity
@@ -4775,7 +5061,7 @@ export default function KaryakariniModuleScreen() {
               disabled={taskUploadingAttachment}
               onPress={() => void handleUploadTaskAttachment()}
             >
-              <Text style={styles.secondaryActionText}>{taskUploadingAttachment ? 'Uploading...' : 'Upload Photo/Video'}</Text>
+              <Text style={styles.secondaryActionText}>{taskUploadingAttachment ? 'अपलोड हो रहा है...' : 'फोटो/वीडियो अपलोड करें'}</Text>
             </TouchableOpacity>
             <View style={styles.attachmentList}>
               {taskForm.attachments.map((item, idx) => (
@@ -4791,7 +5077,7 @@ export default function KaryakariniModuleScreen() {
                       }))
                     }
                   >
-                    <Text style={styles.removeText}>Remove</Text>
+                    <Text style={styles.removeText}>हटाएं</Text>
                   </TouchableOpacity>
                 </View>
               ))}
@@ -4802,10 +5088,10 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={Boolean(selectedActivityDetails)}
         onClose={() => setSelectedActivityDetails(null)}
-        title="Activity Details"
+        title="गतिविधि विवरण"
         footer={
           <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setSelectedActivityDetails(null)}>
-            <Text style={styles.btnTextDark}>Close</Text>
+            <Text style={styles.btnTextDark}>बंद करें</Text>
           </TouchableOpacity>
         }
       >
@@ -4820,22 +5106,22 @@ export default function KaryakariniModuleScreen() {
         <View style={styles.infoCard}>
           <View style={styles.infoRow}>
             <View style={styles.infoCol}>
-              <Text style={styles.infoLabel}>Category</Text>
+              <Text style={styles.infoLabel}>श्रेणी</Text>
               <Text style={styles.infoValue}>{selectedActivityDetails?.category || '-'}</Text>
             </View>
             <View style={styles.infoCol}>
-              <Text style={styles.infoLabel}>Subcategory</Text>
+              <Text style={styles.infoLabel}>उप-श्रेणी</Text>
               <Text style={styles.infoValue}>{selectedActivityDetails?.subcategory || '-'}</Text>
             </View>
           </View>
           <View style={styles.infoDivider} />
           <View style={styles.infoCol}>
-            <Text style={styles.infoLabel}>Node / Location</Text>
+            <Text style={styles.infoLabel}>नोड / स्थान</Text>
             <Text style={styles.infoValue}>{selectedActivityDetails?.hierarchy_path || selectedActivityDetails?.node_name || '-'}</Text>
           </View>
           <View style={styles.infoDivider} />
           <View style={styles.infoCol}>
-            <Text style={styles.infoLabel}>Submitted By</Text>
+            <Text style={styles.infoLabel}>जमा करने वाले</Text>
             <View style={styles.byCellWrap}>
               {selectedActivityDetails?.submitted_by_avatar ? (
                 <Image source={{ uri: selectedActivityDetails.submitted_by_avatar }} style={styles.byAvatar} />
@@ -4851,18 +5137,18 @@ export default function KaryakariniModuleScreen() {
             <>
               <View style={styles.infoDivider} />
               <View style={styles.infoCol}>
-                <Text style={styles.infoLabel}>Demographic Population Counts</Text>
+                <Text style={styles.infoLabel}>जनसंख्या गणना</Text>
                 <View style={{ flexDirection: 'row', gap: 16, marginTop: 8 }}>
                   <View style={{ flex: 1, backgroundColor: theme.colors.surfaceContainerHighest, padding: 10, borderRadius: 10, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 11, color: theme.colors.text.secondary, fontWeight: '600' }}>Purush (Male)</Text>
+                    <Text style={{ fontSize: 11, color: theme.colors.text.secondary, fontWeight: '600' }}>पुरुष</Text>
                     <Text style={{ fontSize: 18, color: theme.colors.primary, fontWeight: '700', marginTop: 4 }}>{selectedActivityDetails?.male_count || 0}</Text>
                   </View>
                   <View style={{ flex: 1, backgroundColor: theme.colors.surfaceContainerHighest, padding: 10, borderRadius: 10, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 11, color: theme.colors.text.secondary, fontWeight: '600' }}>Mahila (Female)</Text>
+                    <Text style={{ fontSize: 11, color: theme.colors.text.secondary, fontWeight: '600' }}>महिला</Text>
                     <Text style={{ fontSize: 18, color: theme.colors.primary, fontWeight: '700', marginTop: 4 }}>{selectedActivityDetails?.female_count || 0}</Text>
                   </View>
                   <View style={{ flex: 1, backgroundColor: theme.colors.surfaceContainerHighest, padding: 10, borderRadius: 10, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 11, color: theme.colors.text.secondary, fontWeight: '600' }}>Bache (Children)</Text>
+                    <Text style={{ fontSize: 11, color: theme.colors.text.secondary, fontWeight: '600' }}>बच्चे</Text>
                     <Text style={{ fontSize: 18, color: theme.colors.primary, fontWeight: '700', marginTop: 4 }}>{selectedActivityDetails?.children_count || 0}</Text>
                   </View>
                 </View>
@@ -4871,12 +5157,12 @@ export default function KaryakariniModuleScreen() {
           )}
         </View>
 
-        <Text style={styles.sectionLabel}>Description</Text>
+        <Text style={styles.sectionLabel}>विवरण</Text>
         <View style={styles.descriptionBox}>
-          <Text style={styles.descriptionText}>{selectedActivityDetails?.description || 'No description provided.'}</Text>
+          <Text style={styles.descriptionText}>{selectedActivityDetails?.description || 'कोई विवरण उपलब्ध नहीं।'}</Text>
         </View>
 
-        <Text style={styles.sectionLabel}>Attachments</Text>
+        <Text style={styles.sectionLabel}>संलग्नक</Text>
         <View style={styles.attachmentPreviewList}>
           {Array.isArray(selectedActivityDetails?.attachments) && selectedActivityDetails.attachments.length > 0 ? (
             selectedActivityDetails.attachments.map((attachment, index) => (
@@ -4887,7 +5173,7 @@ export default function KaryakariniModuleScreen() {
                 <View style={styles.attachmentThumb}>
                   <MaterialIcons name="insert-drive-file" size={24} color={theme.colors.primary} />
                 </View>
-                <Text style={[styles.attachmentText, { flex: 1 }]} numberOfLines={1}>{attachment?.name || `Attachment ${index + 1}`}</Text>
+                <Text style={[styles.attachmentText, { flex: 1 }]} numberOfLines={1}>{attachment?.name || `संलग्नक ${index + 1}`}</Text>
                 <TouchableOpacity style={{ padding: 4 }} onPress={() => void handleOpenAttachmentUrl(attachment?.url)}>
                   <MaterialIcons name="open-in-new" size={20} color={theme.colors.primary} />
                 </TouchableOpacity>
@@ -4897,7 +5183,7 @@ export default function KaryakariniModuleScreen() {
               </View>
             ))
           ) : (
-            <Text style={styles.modalSub}>No attachments available</Text>
+            <Text style={styles.modalSub}>कोई संलग्नक उपलब्ध नहीं</Text>
           )}
         </View>
       </StandardModal>
@@ -4905,7 +5191,7 @@ export default function KaryakariniModuleScreen() {
       <Modal visible={padPickerVisible} transparent animationType="fade" onRequestClose={() => setPadPickerVisible(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select Pad</Text>
+            <Text style={styles.modalTitle}>पद चुनें</Text>
             <ScrollView style={{ maxHeight: 300 }}>
               {padOptions.map((pad) => (
                 <TouchableOpacity
@@ -4923,10 +5209,10 @@ export default function KaryakariniModuleScreen() {
                   <Text style={styles.padOptionText}>{pad}</Text>
                 </TouchableOpacity>
               ))}
-              {padOptions.length === 0 ? <Text style={styles.modalSub}>No pad options found</Text> : null}
+              {padOptions.length === 0 ? <Text style={styles.modalSub}>कोई पद विकल्प नहीं मिला</Text> : null}
             </ScrollView>
             <TouchableOpacity style={styles.closeBtn} onPress={() => setPadPickerVisible(false)}>
-              <Text style={styles.closeText}>Close</Text>
+              <Text style={styles.closeText}>बंद करें</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -4935,11 +5221,11 @@ export default function KaryakariniModuleScreen() {
       <Modal visible={padbharTransferVisible} transparent animationType="slide" onRequestClose={() => setPadbharTransferVisible(false)}>
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCard, styles.memberModalCard]}>
-            <Text style={styles.modalTitle}>{padbharTransferMode === 'task' ? 'Select Task Subcategories' : padbharTransferMode === 'activity' ? 'Select Activity Subcategories' : 'Assign Padbhar'}</Text>
-            <Text style={styles.modalSub}>Transfer subcategories from left to right</Text>
+            <Text style={styles.modalTitle}>{padbharTransferMode === 'task' ? 'कार्य उप-श्रेणियाँ चुनें' : padbharTransferMode === 'activity' ? 'गतिविधि उप-श्रेणियाँ चुनें' : 'पदभार आवंटन'}</Text>
+            <Text style={styles.modalSub}>उप-श्रेणियाँ बाएँ से दाएँ स्थानांतरित करें</Text>
             <View style={styles.transferContainer}>
               <View style={styles.transferPanel}>
-                <Text style={styles.transferTitle}>Available</Text>
+                <Text style={styles.transferTitle}>उपलब्ध</Text>
                 <ScrollView style={styles.transferScroll}>
                   {CATEGORY_SUBCATEGORY_OPTIONS.map((entry) => {
                     const expanded = transferExpandedCategories.includes(entry.category);
@@ -4972,7 +5258,7 @@ export default function KaryakariniModuleScreen() {
               </View>
 
               <View style={styles.transferPanel}>
-                <Text style={styles.transferTitle}>Selected</Text>
+                <Text style={styles.transferTitle}>चयनित</Text>
                 <ScrollView style={styles.transferScroll}>
                   {transferDraftSubcategories.map((subcategory) => (
                     <TouchableOpacity
@@ -4983,19 +5269,19 @@ export default function KaryakariniModuleScreen() {
                       <Text style={styles.transferSelectedText}>{subcategory}</Text>
                     </TouchableOpacity>
                   ))}
-                  {transferDraftSubcategories.length === 0 ? <Text style={styles.modalSub}>No subcategories selected</Text> : null}
+                  {transferDraftSubcategories.length === 0 ? <Text style={styles.modalSub}>कोई उप-श्रेणी चयनित नहीं</Text> : null}
                 </ScrollView>
               </View>
             </View>
             <Text style={styles.helper}>
-              Categories auto-derived: {deriveCategoriesFromSubcategories(transferDraftSubcategories).join(', ') || 'None'}
+              स्वतः निर्धारित श्रेणियाँ: {deriveCategoriesFromSubcategories(transferDraftSubcategories).join(', ') || 'कोई नहीं'}
             </Text>
             <View style={[styles.modalActions, styles.memberModalStickyActions]}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setPadbharTransferVisible(false)}>
-                <Text style={styles.cancelText}>Cancel</Text>
+                <Text style={styles.cancelText}>रद्द करें</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveBtn} onPress={() => handleApplyPadbharTransfer()}>
-                <Text style={styles.saveText}>Apply</Text>
+                <Text style={styles.saveText}>लागू करें</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -5005,18 +5291,18 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showAssigneesModal}
         onClose={() => setShowAssigneesModal(false)}
-        title="Assigned Karyakartas"
+        title="आवंटित कार्यकर्ता"
         subtitle={selectedTaskForAssignees?.title || '-'}
         footer={
           <TouchableOpacity style={[styles.btn, styles.btnLight, { flex: 1 }]} onPress={() => setShowAssigneesModal(false)}>
-            <Text style={styles.btnTextDark}>Close</Text>
+            <Text style={styles.btnTextDark}>बंद करें</Text>
           </TouchableOpacity>
         }
       >
         <ScrollView style={{ maxHeight: 350 }}>
           <View style={{ gap: 12, paddingVertical: 8 }}>
             {selectedTaskForAssignees?.assignees?.map((assignee, index) => {
-              const nameStr = [assignee.name, assignee.father_name].filter(Boolean).join(' ') || `User #${assignee.id}`;
+              const nameStr = [assignee.name, assignee.father_name].filter(Boolean).join(' ') || `उपयोगकर्ता #${assignee.id}`;
               return (
                 <View key={`modal-assignee-${assignee.id}-${index}`} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: theme.colors.surfaceContainer, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.borderLight }}>
                   <View style={[styles.userAvatar, { width: 36, height: 36, borderRadius: 18 }]}>
@@ -5032,7 +5318,7 @@ export default function KaryakariniModuleScreen() {
               );
             })}
             {(!selectedTaskForAssignees?.assignees || selectedTaskForAssignees.assignees.length === 0) ? (
-              <Text style={{ color: theme.colors.text.disabled, fontStyle: 'italic', padding: 12, textAlign: 'center' }}>No users assigned to this task.</Text>
+              <Text style={{ color: theme.colors.text.disabled, fontStyle: 'italic', padding: 12, textAlign: 'center' }}>इस कार्य में कोई उपयोगकर्ता आवंटित नहीं है।</Text>
             ) : null}
           </View>
         </ScrollView>
@@ -5212,6 +5498,16 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     backgroundColor: theme.colors.surfaceContainerHigh,
   },
+  memberPhotoPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  memberPhotoPlaceholderText: {
+    fontSize: 11,
+    color: theme.colors.text.secondary,
+    fontWeight: '600',
+  },
   tableWrap: {
     borderWidth: 1,
     borderColor: '#E2E8F0',
@@ -5339,8 +5635,14 @@ const styles = StyleSheet.create({
     borderRightColor: '#F1F5F9',
     fontWeight: '600',
   },
+  memberColPhoto: {
+    width: 76,
+  },
   memberColName: {
     width: 150,
+  },
+  memberColLevel: {
+    width: 120,
   },
   memberColCategory: {
     width: 170,
@@ -5362,6 +5664,31 @@ const styles = StyleSheet.create({
   },
   memberColPath: {
     width: 230,
+  },
+  memberPhotoCell: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberTableAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceContainerHigh,
+  },
+  memberTableAvatarFallback: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surfaceContainerHigh,
+  },
+  memberTableAvatarFallbackText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: theme.colors.text.secondary,
   },
   memberStickyEditColumn: {
     width: 94,
@@ -6268,6 +6595,14 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surfaceContainerHigh,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  memberMiniAvatarImage: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceContainerHigh,
   },
   memberMiniAvatarText: {
     fontSize: 10,
