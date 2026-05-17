@@ -272,6 +272,9 @@ export default function KaryakariniModuleScreen() {
   const [activityFilterCategory, setActivityFilterCategory] = useState('');
   const [activityFilterSubcategory, setActivityFilterSubcategory] = useState('');
   const [activityFilterNodeLevel, setActivityFilterNodeLevel] = useState('');
+  const [taskFilterCategory, setTaskFilterCategory] = useState('');
+  const [taskFilterSubcategory, setTaskFilterSubcategory] = useState('');
+  const [taskFilterNodeLevel, setTaskFilterNodeLevel] = useState('');
   const [selectedActivityDetails, setSelectedActivityDetails] = useState<KaryakariniCategoryActivity | null>(null);
 
   const [membersVisible, setMembersVisible] = useState(false);
@@ -819,6 +822,9 @@ export default function KaryakariniModuleScreen() {
             versionId,
             page,
             limit: 20,
+            category: taskFilterCategory.trim() || undefined,
+            subcategory: taskFilterSubcategory.trim() || undefined,
+            nodeLevel: taskFilterNodeLevel.trim() || undefined,
           },
         });
         setTaskRows((response?.data?.data?.tasks || []) as KaryakariniTask[]);
@@ -834,7 +840,7 @@ export default function KaryakariniModuleScreen() {
         setTasksLoading(false);
       }
     },
-    []
+    [taskFilterCategory, taskFilterSubcategory, taskFilterNodeLevel]
   );
 
   const loadCategoryActivities = useCallback(
@@ -2708,8 +2714,8 @@ export default function KaryakariniModuleScreen() {
         }
       } else {
         const safeFileName = (fileName || safeUrl.split('/').pop() || 'file').replace(/[^a-zA-Z0-9.\-_]/g, '_');
-        const fileUri = `${FileSystem.documentDirectory}${safeFileName}`;
-        const downloadResult = await FileSystem.downloadAsync(safeUrl, fileUri);
+        const fileUri = `${(FileSystem as any).documentDirectory}${safeFileName}`;
+        const downloadResult = await (FileSystem as any).downloadAsync(safeUrl, fileUri);
         if (downloadResult.status === 200) {
           Alert.alert('Download Complete', `File saved to: ${downloadResult.uri}`);
         } else {
@@ -2935,15 +2941,46 @@ export default function KaryakariniModuleScreen() {
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Tasks</Text>
-              <TouchableOpacity
-                style={styles.primaryAction}
-                onPress={() => void handleOpenTaskModal()}
-                disabled={!canManageActivities || assignableNodesLoading}
-              >
-                <Text style={styles.primaryActionText}>Create Task</Text>
-              </TouchableOpacity>
             </View>
             {!canManageActivities ? <Text style={styles.modalSub}>No node scope assigned for this user</Text> : null}
+
+            <View style={styles.filterGrid}>
+              <View style={styles.filterCol}>
+                <Text style={styles.sectionLabel}>Category</Text>
+                <TextInput
+                  style={styles.inputCompact}
+                  value={taskFilterCategory}
+                  onChangeText={setTaskFilterCategory}
+                  placeholder="Filter category"
+                />
+              </View>
+              <View style={styles.filterCol}>
+                <Text style={styles.sectionLabel}>Subcategory</Text>
+                <TextInput
+                  style={styles.inputCompact}
+                  value={taskFilterSubcategory}
+                  onChangeText={setTaskFilterSubcategory}
+                  placeholder="Filter subcategory"
+                />
+              </View>
+              <View style={styles.filterCol}>
+                <Text style={styles.sectionLabel}>Level</Text>
+                <TextInput
+                  style={styles.inputCompact}
+                  value={taskFilterNodeLevel}
+                  onChangeText={setTaskFilterNodeLevel}
+                  placeholder="Filter node level"
+                />
+              </View>
+              <TouchableOpacity
+                style={styles.filterApplyBtn}
+                onPress={() => selectedVersionId && void loadTasks(selectedVersionId, 1)}
+                disabled={!selectedVersionId}
+              >
+                <MaterialIcons name="filter-list" size={18} color="#fff" />
+                <Text style={styles.filterApplyText}>Apply</Text>
+              </TouchableOpacity>
+            </View>
             {taskHierarchyFilterOptions.length > 0 ? (
               <>
                 <Text style={styles.sectionLabel}>Filter by L1</Text>
@@ -3042,6 +3079,22 @@ export default function KaryakariniModuleScreen() {
             <Text style={styles.tableMeta}>
               Page {taskPagination.page} / {Math.max(1, taskPagination.totalPages || 1)} • Total {taskPagination.total}
             </Text>
+            <View style={[styles.optionRow, { justifyContent: 'flex-end', marginTop: 10 }]}>
+              <TouchableOpacity
+                style={[styles.rowActionBtn, tasksLoading || taskPagination.page <= 1 ? styles.saveBtnDisabled : null]}
+                disabled={tasksLoading || taskPagination.page <= 1}
+                onPress={() => selectedVersionId && void loadTasks(selectedVersionId, Math.max(1, (taskPagination.page || 1) - 1))}
+              >
+                <Text style={styles.rowActionText}>Prev</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.rowActionBtn, tasksLoading || taskPagination.page >= Math.max(1, taskPagination.totalPages || 1) ? styles.saveBtnDisabled : null]}
+                disabled={tasksLoading || taskPagination.page >= Math.max(1, taskPagination.totalPages || 1)}
+                onPress={() => selectedVersionId && void loadTasks(selectedVersionId, (taskPagination.page || 1) + 1)}
+              >
+                <Text style={styles.rowActionText}>Next</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         ) : null}
 
@@ -3162,9 +3215,6 @@ export default function KaryakariniModuleScreen() {
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Category Activities</Text>
-              <TouchableOpacity style={styles.rowActionBtn} onPress={() => void handleOpenCreateActivity()}>
-                <Text style={styles.rowActionText}>गतिविधि असाइन करें</Text>
-              </TouchableOpacity>
             </View>
 
             <View style={styles.filterGrid}>
@@ -5091,6 +5141,23 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     padding: 10,
     gap: 10,
+  },
+  card: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 12,
+    backgroundColor: theme.colors.surface,
+    padding: 10,
+    gap: 6,
+  },
+  cardTitle: {
+    fontSize: 14,
+    color: theme.colors.text.primary,
+    fontWeight: '700',
+  },
+  cardMeta: {
+    fontSize: 12,
+    color: theme.colors.text.secondary,
   },
   sectionHeader: {
     flexDirection: 'row',

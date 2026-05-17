@@ -2,6 +2,84 @@ const KaryakariniModel = require('../models/KaryakariniModel');
 const { isAdminRole } = require('../middleware/auth');
 const { uploadBufferToS3, sanitizeFileName } = require('../config/s3');
 const ablyService = require('../services/ablyService');
+const pool = require('../config/database');
+
+const LEVEL_WEIGHTS = {
+  'prant': 1,
+  'sambhag': 2,
+  'vibhag': 3,
+  'jila': 4,
+  'khand': 5,
+  'nagar': 6,
+  'nagar_mohalla': 7
+};
+
+async function notifySubcategoryUsers({ versionId, nodeId, subcategory, creatorUserId, type, title, message, entityType, entityId, metadata }) {
+  try {
+    const creatorNode = await pool.query(
+      `SELECT level FROM karyakarini_nodes WHERE id = $1 AND version_id = $2`,
+      [Number(nodeId), Number(versionId)]
+    );
+    const creatorLevel = creatorNode.rows[0]?.level || 'nagar_mohalla';
+    const creatorWeight = LEVEL_WEIGHTS[creatorLevel] || 7;
+
+    const membersRes = await pool.query(
+      `SELECT DISTINCT m.user_id, n.level
+       FROM karyakarini_members m
+       JOIN karyakarini_nodes n ON n.id = m.node_id
+       WHERE m.version_id = $1
+         AND m.is_active = true
+         AND m.user_id != $2
+         AND EXISTS (
+           SELECT 1
+           FROM jsonb_array_elements_text(
+             CASE
+               WHEN m.subcategories IS NOT NULL AND jsonb_typeof(m.subcategories) = 'array' AND jsonb_array_length(m.subcategories) > 0
+                 THEN m.subcategories
+               WHEN NULLIF(trim(COALESCE(m.subcategory, '')), '') IS NOT NULL
+                 THEN jsonb_build_array(trim(m.subcategory))
+               ELSE '[]'::jsonb
+             END
+           ) AS ms(value)
+           WHERE lower(trim(ms.value)) = lower(trim($3))
+         )`,
+      [Number(versionId), Number(creatorUserId), String(subcategory).trim()]
+    );
+
+    const targetUsers = membersRes.rows.filter(member => {
+      const memberWeight = LEVEL_WEIGHTS[member.level] || 7;
+      return memberWeight <= creatorWeight;
+    });
+
+    for (const target of targetUsers) {
+      await KaryakariniModel.createNotification({
+        userId: target.user_id,
+        versionId,
+        category: type === 'task-created' ? 'tasks' : 'activities',
+        type,
+        title,
+        message,
+        entityType,
+        entityId,
+        metadata
+      });
+
+      try {
+        await ablyService.publishNotification(Number(target.user_id), {
+          type,
+          title,
+          message,
+          entityId,
+          versionId
+        });
+      } catch (ablyErr) {
+        console.error('Failed to publish Ably notification to user:', target.user_id, ablyErr);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to send subcategory notifications:', error);
+  }
+}
 
 const parsePositiveNumber = (value) => {
   const parsed = Number(value);
@@ -1237,6 +1315,31 @@ exports.createTask = async (req, res) => {
       }
     }
 
+    // Broadcast notifications to all users assigned to the task's subcategories at equal or higher level scope
+    const subcategoryLabel = Array.isArray(taskSubcategories)
+      ? taskSubcategories.map((entry) => String(entry || '').trim()).filter(Boolean).join(', ')
+      : '';
+    const taskTitle = String(req.body.title || 'Task').trim();
+    const broadcastMessage = `New Task: ${taskTitle} created under ${subcategoryLabel}`;
+    
+    for (const subcategory of taskSubcategories) {
+      void notifySubcategoryUsers({
+        versionId,
+        nodeId,
+        subcategory,
+        creatorUserId: req.user?.id,
+        type: 'task-created',
+        title: 'New Subcategory Task',
+        message: broadcastMessage,
+        entityType: 'task',
+        entityId: Number(createdTasks[0]?.id || 0),
+        metadata: {
+          taskStatus: 'open',
+          taskSubcategories
+        }
+      });
+    }
+
     return res.status(201).json({
       success: true,
       message: createdTasks.length > 1 ? `${createdTasks.length} tasks created successfully` : 'Task created successfully',
@@ -1744,6 +1847,26 @@ exports.createMyCategoryActivity = async (req, res) => {
       maleCount: parsePositiveNumber(req.body?.maleCount) || 0,
       femaleCount: parsePositiveNumber(req.body?.femaleCount) || 0,
       childrenCount: parsePositiveNumber(req.body?.childrenCount) || 0,
+      fromDate: req.body?.fromDate ? String(req.body.fromDate).trim() : null,
+      toDate: req.body?.toDate ? String(req.body.toDate).trim() : null,
+      status: req.body?.status ? String(req.body.status).trim() : 'open',
+    });
+
+    // Broadcast notification for activity creation
+    void notifySubcategoryUsers({
+      versionId,
+      nodeId,
+      subcategory,
+      creatorUserId: req.user?.id,
+      type: 'activity-created',
+      title: 'New Subcategory Activity',
+      message: `New Activity: ${title} submitted under ${subcategory}`,
+      entityType: 'activity',
+      entityId: Number(created?.id || 0),
+      metadata: {
+        activityStatus: created?.status || 'open',
+        subcategory
+      }
     });
 
     return res.status(201).json({
@@ -1756,6 +1879,76 @@ exports.createMyCategoryActivity = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error?.message || 'Failed to submit category activity',
+    });
+  }
+};
+
+exports.updateMyCategoryActivity = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.query?.versionId || 'current');
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const activityId = parsePositiveNumber(req.params.activityId);
+    if (!activityId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Activity ID is required',
+      });
+    }
+
+    const existingActivity = await KaryakariniModel.getCategoryActivityById({ activityId, versionId });
+    if (!existingActivity) {
+      return res.status(404).json({
+        success: false,
+        message: 'Activity not found',
+      });
+    }
+
+    const userRole = normalizeRole(req.userRole || req.user?.role);
+    if (userRole !== 'superadmin' && Number(existingActivity.submitted_by) !== Number(req.user?.id)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to edit this activity',
+      });
+    }
+
+    const title = String(req.body?.title || '').trim();
+    if (!title) {
+      return res.status(400).json({
+        success: false,
+        message: 'Activity title is required',
+      });
+    }
+
+    const updated = await KaryakariniModel.updateCategoryActivity({
+      activityId,
+      versionId,
+      title,
+      description: req.body?.description ? String(req.body.description).trim() : null,
+      attachments: Array.isArray(req.body?.attachments) ? req.body.attachments : [],
+      maleCount: parsePositiveNumber(req.body?.maleCount) || 0,
+      femaleCount: parsePositiveNumber(req.body?.femaleCount) || 0,
+      childrenCount: parsePositiveNumber(req.body?.childrenCount) || 0,
+      fromDate: req.body?.fromDate ? String(req.body.fromDate).trim() : null,
+      toDate: req.body?.toDate ? String(req.body.toDate).trim() : null,
+      status: req.body?.status ? String(req.body.status).trim() : 'open',
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Category activity updated successfully',
+      data: updated,
+    });
+  } catch (error) {
+    console.error('Failed to update category activity:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Failed to update category activity',
     });
   }
 };
@@ -1814,20 +2007,14 @@ exports.getMyCategoryActivities = async (req, res) => {
       });
     }
 
-    const visibleNodeIds = await KaryakariniModel.getMemberVisibleNodeIds({
+    const result = await KaryakariniModel.getCategoryActivitiesForUser({
       userId: req.user?.id,
       versionId,
-    });
-
-    const result = await KaryakariniModel.getCategoryActivities({
-      versionId,
-      visibleNodeIds,
       page: Number(req.query.page || 1),
-      limit: Number(req.query.limit || 20),
+      limit: Number(req.query.limit || 100),
       category: String(req.query.category || ''),
       subcategory: String(req.query.subcategory || ''),
       nodeLevel: String(req.query.nodeLevel || req.query.level || ''),
-      submittedBy: req.user?.id,
     });
 
     return res.status(200).json({
@@ -2665,6 +2852,102 @@ exports.getScopes = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to load admin scopes',
+    });
+  }
+};
+
+exports.deleteTask = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.query?.versionId || 'current');
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const taskId = parsePositiveNumber(req.params.taskId);
+    if (!taskId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Task ID is required',
+      });
+    }
+
+    const existingTask = await KaryakariniModel.getTaskById({ taskId, versionId });
+    if (!existingTask) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found',
+      });
+    }
+
+    if (Number(existingTask.created_by) !== Number(req.user?.id)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to delete this task',
+      });
+    }
+
+    await KaryakariniModel.deleteTask({ taskId, versionId });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Task deleted successfully',
+    });
+  } catch (error) {
+    console.error('Failed to delete task:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Failed to delete task',
+    });
+  }
+};
+
+exports.deleteMyCategoryActivity = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.query?.versionId || 'current');
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const activityId = parsePositiveNumber(req.params.activityId);
+    if (!activityId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Activity ID is required',
+      });
+    }
+
+    const existingActivity = await KaryakariniModel.getCategoryActivityById({ activityId, versionId });
+    if (!existingActivity) {
+      return res.status(404).json({
+        success: false,
+        message: 'Activity not found',
+      });
+    }
+
+    if (Number(existingActivity.submitted_by) !== Number(req.user?.id)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to delete this activity',
+      });
+    }
+
+    await KaryakariniModel.deleteCategoryActivity({ activityId, versionId });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Activity deleted successfully',
+    });
+  } catch (error) {
+    console.error('Failed to delete activity:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Failed to delete activity',
     });
   }
 };

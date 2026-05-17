@@ -11,9 +11,8 @@ import { karyakariniClient } from '../../api/client';
 import { theme } from '../../theme';
 import { MaterialIcons } from '@expo/vector-icons';
 import type {
-  KaryakariniActivityAssignment,
-  KaryakariniActivitySubmission,
   KaryakariniAttachment,
+  KaryakariniCategoryActivity,
   KaryakariniInvitation,
   KaryakariniMyTeam,
   KaryakariniTask,
@@ -33,7 +32,7 @@ type AssignmentCard = {
   pad: string;
   lastActivityAt: number;
   count: number;
-  source: 'team' | 'task' | 'invitation';
+  source: 'team' | 'task' | 'invitation' | 'activity';
 };
 
 const toDateText = (value?: string | null) => {
@@ -59,12 +58,25 @@ const parseLabelList = (value?: string | string[] | null) => {
   return [...new Set(raw.split(',').map((entry) => entry.trim()).filter(Boolean))];
 };
 
+const normalizePath = (p?: string | null) => {
+  return String(p || '').split('>').map((part) => part.trim().toLowerCase()).filter(Boolean).join(' > ');
+};
+
 const sanitizeCountInput = (value: string) => String(value || '').replace(/[^\d]/g, '').slice(0, 5);
 const readCountValue = (value: string) => Math.max(0, Number(String(value || '').replace(/[^\d]/g, '')) || 0);
+const deriveCategoriesFromSubcategories = (subcategories: string[]) => {
+  const normalized = subcategories.map((s) => String(s || '').trim()).filter(Boolean);
+  if (!normalized.length) return [] as string[];
+  // Derive category from subcategory name heuristically (first word / capitalize)
+  return [normalized[0]];
+};
 
 export default function KaryakariniMemberScreen() {
   const { tab } = useLocalSearchParams<{ tab?: string }>();
   const { user, logout } = useProfile();
+  const isAdmin = useMemo(() => {
+    return ['admin', 'superadmin', 'templeadmin'].includes(String(user?.role || '').toLowerCase());
+  }, [user]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<MemberTab>('tasks');
@@ -72,14 +84,18 @@ export default function KaryakariniMemberScreen() {
   const [teams, setTeams] = useState<KaryakariniMyTeam[]>([]);
   const [invitations, setInvitations] = useState<KaryakariniInvitation[]>([]);
   const [tasks, setTasks] = useState<KaryakariniTask[]>([]);
-  const [activityAssignments, setActivityAssignments] = useState<KaryakariniActivityAssignment[]>([]);
-  const [activitySubmissions, setActivitySubmissions] = useState<KaryakariniActivitySubmission[]>([]);
+  const [activities, setActivities] = useState<KaryakariniCategoryActivity[]>([]);
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [savingActivity, setSavingActivity] = useState(false);
   const [activityUploadingAttachment, setActivityUploadingAttachment] = useState(false);
+  const [activityContext, setActivityContext] = useState<AssignmentCard | null>(null);
+  const [editingActivity, setEditingActivity] = useState<KaryakariniCategoryActivity | null>(null);
   const [activityForm, setActivityForm] = useState({
-    assignmentId: '',
+    title: '',
     description: '',
+    fromDate: new Date().toISOString().slice(0, 10),
+    toDate: new Date().toISOString().slice(0, 10),
+    status: 'open',
     includePopulation: false,
     maleCount: '0',
     femaleCount: '0',
@@ -119,18 +135,16 @@ export default function KaryakariniMemberScreen() {
       setTeams([]);
       setInvitations([]);
       setTasks([]);
-      setActivityAssignments([]);
-      setActivitySubmissions([]);
+      setActivities([]);
       return;
     }
 
-    const [teamsRes, invitationRes, taskRes, unreadRes, assignmentRes, submissionRes] = await Promise.allSettled([
+    const [teamsRes, invitationRes, taskRes, unreadRes, assignmentRes] = await Promise.allSettled([
       karyakariniClient.get('/karyakarini/my/teams', { params: { versionId: selectedVersionId } }),
       karyakariniClient.get('/karyakarini/my/invitations', { params: { versionId: selectedVersionId, limit: 100 } }),
       karyakariniClient.get('/karyakarini/my/tasks', { params: { versionId: selectedVersionId, limit: 100 } }),
       karyakariniClient.get('/karyakarini/my/notifications/unread-count', { params: { versionId: selectedVersionId } }),
-      karyakariniClient.get('/karyakarini/my/activity-assignments', { params: { versionId: selectedVersionId, limit: 100 } }),
-      karyakariniClient.get('/karyakarini/my/activity-submissions', { params: { versionId: selectedVersionId, limit: 100 } }),
+      karyakariniClient.get('/karyakarini/my/category-activities', { params: { versionId: selectedVersionId, limit: 100 } }),
     ]);
 
     const getValue = (result: PromiseSettledResult<any>) =>
@@ -141,8 +155,7 @@ export default function KaryakariniMemberScreen() {
     setTeams(loadedTeams);
     setInvitations((getValue(invitationRes)?.data?.data?.invitations || []) as KaryakariniInvitation[]);
     setTasks(loadedTasks);
-    setActivityAssignments((getValue(assignmentRes)?.data?.data?.assignments || []) as KaryakariniActivityAssignment[]);
-    setActivitySubmissions((getValue(submissionRes)?.data?.data?.submissions || []) as KaryakariniActivitySubmission[]);
+    setActivities((getValue(assignmentRes)?.data?.data?.activities || []) as KaryakariniCategoryActivity[]);
     setNotificationUnreadCount(Number(getValue(unreadRes)?.data?.data?.total || 0));
   }, []);
 
@@ -158,9 +171,7 @@ export default function KaryakariniMemberScreen() {
   useEffect(() => {
     if (tab === 'tasks' || tab === 'myteams' || tab === 'activities') {
       setActiveTab(tab);
-      return;
     }
-    setActiveTab('tasks');
   }, [tab]);
 
   useEffect(() => {
@@ -174,6 +185,10 @@ export default function KaryakariniMemberScreen() {
     };
     void boot();
   }, [loadData]);
+
+  useEffect(() => {
+    void loadData();
+  }, [activeTab, selectedCategoryKey, loadData]);
 
   const handleRefresh = useCallback(async () => {
     try {
@@ -211,8 +226,8 @@ export default function KaryakariniMemberScreen() {
         }
       } else {
         const safeFileName = (fileName || safeUrl.split('/').pop() || 'file').replace(/[^a-zA-Z0-9.\-_]/g, '_');
-        const fileUri = `${FileSystem.documentDirectory}${safeFileName}`;
-        const downloadResult = await FileSystem.downloadAsync(safeUrl, fileUri);
+        const fileUri = `${(FileSystem as any).documentDirectory}${safeFileName}`;
+        const downloadResult = await (FileSystem as any).downloadAsync(safeUrl, fileUri);
         if (downloadResult.status === 200) {
           Alert.alert('Download Complete', `File saved to: ${downloadResult.uri}`);
         } else {
@@ -485,41 +500,105 @@ export default function KaryakariniMemberScreen() {
   }, [activityForm.attachmentInput]);
 
   const handleSaveActivity = useCallback(async () => {
-    if (!versionId) return;
-    if (!activityForm.assignmentId) {
-      Alert.alert('Required', 'Select assigned activity');
+    if (!versionId || !activityContext) return;
+    if (!activityForm.title.trim()) {
+      Alert.alert('Required', 'Activity title is required');
       return;
     }
     try {
       setSavingActivity(true);
-      await karyakariniClient.post('/karyakarini/my/activity-submissions', {
+      const payload = {
         versionId,
-        assignmentId: Number(activityForm.assignmentId),
+        nodeId: activityContext.nodeId,
+        category: activityContext.category,
+        subcategory: activityContext.subcategory,
+        title: activityForm.title.trim(),
         description: activityForm.description.trim() || null,
+        fromDate: activityForm.fromDate,
+        toDate: activityForm.toDate,
+        status: activityForm.status,
         maleCount: activityForm.includePopulation ? Number(activityForm.maleCount || 0) : 0,
         femaleCount: activityForm.includePopulation ? Number(activityForm.femaleCount || 0) : 0,
         childrenCount: activityForm.includePopulation ? Number(activityForm.childrenCount || 0) : 0,
         attachments: activityForm.attachments,
-      });
+      };
+
+      if (editingActivity?.id) {
+        await karyakariniClient.put(`/karyakarini/my/category-activities/${editingActivity.id}`, payload);
+      } else {
+        await karyakariniClient.post('/karyakarini/my/category-activities', payload);
+      }
+
       setShowActivityModal(false);
-      setActivityForm((prev) => ({
-        ...prev,
+      setActivityContext(null);
+      setEditingActivity(null);
+      setActivityForm({
+        title: '',
         description: '',
+        fromDate: new Date().toISOString().slice(0, 10),
+        toDate: new Date().toISOString().slice(0, 10),
+        status: 'open',
         includePopulation: false,
         maleCount: '0',
         femaleCount: '0',
         childrenCount: '0',
         attachmentInput: '',
         attachments: [],
-      }));
+      });
       await loadData();
-      Alert.alert('Success', 'Activity submitted successfully');
+      Alert.alert('Success', editingActivity?.id ? 'Activity updated successfully' : 'Activity submitted successfully');
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to submit activity');
+      Alert.alert('Error', err?.response?.data?.message || `Failed to ${editingActivity?.id ? 'update' : 'submit'} activity`);
     } finally {
       setSavingActivity(false);
     }
-  }, [activityForm, loadData, versionId]);
+  }, [activityForm, activityContext, loadData, versionId, editingActivity?.id]);
+
+  const handleDeleteTask = useCallback(async (taskId: number) => {
+    Alert.alert(
+      'कार्य हटाएं',
+      'क्या आप वाकई इस कार्य को हटाना चाहते हैं?',
+      [
+        { text: 'रद्द करें', style: 'cancel' },
+        {
+          text: 'हटाएं',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await karyakariniClient.delete(`/karyakarini/tasks/${taskId}`);
+              await loadData();
+              Alert.alert('Success', 'कार्य सफलता से हटा दिया गया है');
+            } catch (err: any) {
+              Alert.alert('Error', err?.response?.data?.message || 'कार्य हटाने में विफल');
+            }
+          }
+        }
+      ]
+    );
+  }, [loadData]);
+
+  const handleDeleteActivity = useCallback(async (activityId: number) => {
+    Alert.alert(
+      'गतिविधि हटाएं',
+      'क्या आप वाकई इस गतिविधि को हटाना चाहते हैं?',
+      [
+        { text: 'रद्द करें', style: 'cancel' },
+        {
+          text: 'हटाएं',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await karyakariniClient.delete(`/karyakarini/my/category-activities/${activityId}`);
+              await loadData();
+              Alert.alert('Success', 'गतिविधि सफलता से हटा दी गई है');
+            } catch (err: any) {
+              Alert.alert('Error', err?.response?.data?.message || 'गतिविधि हटाने में विफल');
+            }
+          }
+        }
+      ]
+    );
+  }, [loadData]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -605,6 +684,66 @@ export default function KaryakariniMemberScreen() {
     return subcategoryCards.some((entry) => entry.key === selectedCategoryKey);
   }, [selectedCategoryKey, subcategoryCards]);
 
+  const handleOpenActivityCreate = useCallback(() => {
+    if (!hasSelectedSubcategory) {
+      Alert.alert('Required', 'Please select a subcategory first');
+      return;
+    }
+    const selectedAssignment = assignmentCards.find(
+      (c) => c.key === selectedCategoryKey && c.source !== 'invitation'
+    );
+    if (!selectedAssignment) return;
+    setActivityContext(selectedAssignment);
+    setEditingActivity(null);
+    setActivityForm({
+      title: '',
+      description: '',
+      fromDate: new Date().toISOString().slice(0, 10),
+      toDate: new Date().toISOString().slice(0, 10),
+      status: 'open',
+      includePopulation: false,
+      maleCount: '0',
+      femaleCount: '0',
+      childrenCount: '0',
+      attachmentInput: '',
+      attachments: [],
+    });
+    setShowActivityModal(true);
+  }, [assignmentCards, hasSelectedSubcategory, selectedCategoryKey]);
+
+  const handleOpenActivityEditor = useCallback((activity: KaryakariniCategoryActivity) => {
+    const nextContext: AssignmentCard = {
+      key: `activity-context-${activity.id}`,
+      nodeId: Number(activity.node_id || 0),
+      path: String(activity.hierarchy_path || activity.node_name || '').trim() || '-',
+      nodeName: String(activity.node_name || '').trim() || undefined,
+      nodeLevel: String(activity.node_level || '').trim() || undefined,
+      category: activity.category || 'General',
+      subcategory: activity.subcategory || '',
+      pad: 'Activity Submitter',
+      lastActivityAt: new Date(activity.updated_at || activity.created_at || 0).getTime(),
+      count: 1,
+      source: 'activity',
+    };
+
+    setActivityContext(nextContext);
+    setEditingActivity(activity);
+    setActivityForm({
+      title: String(activity.title || '').trim(),
+      description: String(activity.description || '').trim(),
+      fromDate: activity.from_date || new Date().toISOString().slice(0, 10),
+      toDate: activity.to_date || new Date().toISOString().slice(0, 10),
+      status: String(activity.status || 'open').toLowerCase() || 'open',
+      includePopulation: Number(activity.male_count || 0) > 0 || Number(activity.female_count || 0) > 0 || Number(activity.children_count || 0) > 0,
+      maleCount: String(Number(activity.male_count || 0)),
+      femaleCount: String(Number(activity.female_count || 0)),
+      childrenCount: String(Number(activity.children_count || 0)),
+      attachmentInput: '',
+      attachments: Array.isArray(activity.attachments) ? [...activity.attachments] : [],
+    });
+    setShowActivityModal(true);
+  }, []);
+
   useEffect(() => {
     if (!selectedCategoryKey && subcategoryCards.length > 0) {
       setSelectedCategoryKey(subcategoryCards[0].key);
@@ -676,9 +815,12 @@ export default function KaryakariniMemberScreen() {
         .map((entry) => String(entry || '').trim().toLowerCase())
         .filter(Boolean);
 
+      const actPath = normalizePath(task.hierarchy_path);
+      const selPath = normalizePath(selectedAssignment.path);
       const nodeMatch =
         Number(task.node_id || 0) === Number(selectedAssignment.nodeId || 0) ||
-        (Boolean(selectedAssignment.path) && Boolean(task.hierarchy_path) && String(task.hierarchy_path).startsWith(String(selectedAssignment.path)));
+        (Boolean(selPath) && Boolean(actPath) && (actPath === selPath || actPath.startsWith(selPath + ' > ')));
+
       if (!nodeMatch) return false;
       const selectedCategory = String(selectedAssignment.category || '').trim().toLowerCase();
       const selectedSubcategory = String(selectedAssignment.subcategory || '').trim().toLowerCase();
@@ -710,9 +852,12 @@ export default function KaryakariniMemberScreen() {
       groupNames.forEach((subName) => {
         const normalizedSub = String(subName || '').trim().toLowerCase();
         if (allowedCategory) {
+          const actPath = normalizePath(task.hierarchy_path);
+          const selPath = normalizePath(allowedCategory.path);
           const matchedNode =
             allowedCategory.nodeId === Number(task.node_id || 0) ||
-            (Boolean(allowedCategory.path) && Boolean(task.hierarchy_path) && String(task.hierarchy_path).startsWith(String(allowedCategory.path)));
+            (Boolean(selPath) && Boolean(actPath) && (actPath === selPath || actPath.startsWith(selPath + ' > ')));
+
           if (!matchedNode) return;
           if (allowedCategory.sub && allowedCategory.sub !== normalizedSub) return;
           if (!allowedCategory.sub && allowedCategory.cat) {
@@ -730,6 +875,27 @@ export default function KaryakariniMemberScreen() {
     });
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [filteredTasks, selectedCategoryKey, assignmentCards]);
+
+  const filteredActivities = useMemo(() => {
+    if (selectedCategoryKey === 'all' || !selectedCategoryKey) return activities;
+    const selectedAssignment = assignmentCards.find(
+      (c) => c.key === selectedCategoryKey && c.source !== 'invitation'
+    );
+    if (!selectedAssignment) return activities;
+    return activities.filter((activity) => {
+      const actPath = normalizePath(activity.hierarchy_path);
+      const selPath = normalizePath(selectedAssignment.path);
+      const nodeMatch =
+        Number(activity.node_id || 0) === Number(selectedAssignment.nodeId || 0) ||
+        (Boolean(selPath) && Boolean(actPath) && (actPath === selPath || actPath.startsWith(selPath + ' > ')));
+
+      const selectedSub = String(selectedAssignment.subcategory || '').trim().toLowerCase();
+      const actSub = String(activity.subcategory || '').trim().toLowerCase();
+      if (!nodeMatch) return false;
+      if (selectedSub) return actSub === selectedSub;
+      return true;
+    });
+  }, [activities, assignmentCards, selectedCategoryKey]);
 
   if (loading) {
     return (
@@ -775,7 +941,6 @@ export default function KaryakariniMemberScreen() {
                     style={[styles.assignmentCard, isSelected && styles.assignmentCardActive]}
                     onPress={() => {
                       setSelectedCategoryKey(entry.key);
-                      setActiveTab('tasks');
                     }}
                   >
                     <Text style={[styles.assignmentCardTitle, isSelected && styles.assignmentCardTitleActive]}>
@@ -813,7 +978,7 @@ export default function KaryakariniMemberScreen() {
           </TouchableOpacity>
           <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'activities' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('activities')}>
             <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>
-              कार्यक्रम ({activityAssignments.length}){'\n'}Karyakaram
+              कार्यक्रम ({filteredActivities.length}){'\n'}Karyakaram
             </Text>
           </TouchableOpacity>
         </View>
@@ -924,9 +1089,19 @@ export default function KaryakariniMemberScreen() {
                         ) : (
                           <Text style={styles.cardMeta}>संलग्नक: 0</Text>
                         )}
-                        <TouchableOpacity style={styles.taskEditBtn} onPress={() => handleOpenTaskEditor(task)}>
-                          <Text style={styles.taskEditBtnText}>कार्य अपडेट करें</Text>
-                        </TouchableOpacity>
+                        {Number(task.created_by) === Number(user?.id) ? (
+                          <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+                            <TouchableOpacity style={[styles.taskEditBtn, { flex: 1, marginTop: 0 }]} onPress={() => handleOpenTaskEditor(task)}>
+                              <Text style={styles.taskEditBtnText}>कार्य अपडेट करें</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                              style={[styles.taskEditBtn, { flex: 1, marginTop: 0, borderColor: '#ff4d4f', backgroundColor: '#fff5f5' }]} 
+                              onPress={() => handleDeleteTask(task.id)}
+                            >
+                              <Text style={[styles.taskEditBtnText, { color: '#ff4d4f' }]}>हटाएं</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : null}
                       </View>
                     ))}
                   </View>
@@ -939,55 +1114,89 @@ export default function KaryakariniMemberScreen() {
         {activeTab === 'activities' ? (
           <View style={styles.listWrap}>
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.sectionTitle}>गतिविधि प्रविष्टियाँ</Text>
-              <TouchableOpacity
-                style={styles.taskEditBtn}
-                onPress={() => {
-                  setActivityForm((prev) => ({
-                    ...prev,
-                    assignmentId: prev.assignmentId || String(activityAssignments[0]?.id || ''),
-                    description: '',
-                    includePopulation: false,
-                    maleCount: '0',
-                    femaleCount: '0',
-                    childrenCount: '0',
-                    attachmentInput: '',
-                    attachments: [],
-                  }));
-                  setShowActivityModal(true);
-                }}
-              >
-                <Text style={styles.taskEditBtnText}>गतिविधि बनाएं</Text>
-              </TouchableOpacity>
+              <Text style={styles.sectionTitle}>गतिविधियाँ</Text>
+              {hasSelectedSubcategory ? (
+                <TouchableOpacity style={styles.taskEditBtn} onPress={() => handleOpenActivityCreate()}>
+                  <Text style={styles.taskEditBtnText}>+ गतिविधि बनाएं</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
-
-            {activitySubmissions.length === 0 ? (
-              <Text style={styles.helper}>अभी तक कोई गतिविधि जमा नहीं की गई।</Text>
+            {hasSelectedSubcategory ? (
+              <Text style={styles.subHeading}>चुनी गई श्रेणी के अनुसार फ़िल्टर</Text>
+            ) : null}
+            {filteredActivities.length === 0 ? (
+              <Text style={styles.helper}>अभी तक कोई गतिविधि नहीं मिली।</Text>
             ) : (
-              <ScrollView horizontal style={styles.tableWrap} showsHorizontalScrollIndicator>
-                <View>
-                  <View style={styles.tableHeader}>
-                    <Text style={[styles.tableHeaderCell, styles.colDate]}>तिथि</Text>
-                    <Text style={[styles.tableHeaderCell, styles.colTitle]}>गतिविधि</Text>
-                    <Text style={[styles.tableHeaderCell, styles.colNode]}>विवरण</Text>
-                    <Text style={[styles.tableHeaderCell, styles.colCount]}>पुरुष</Text>
-                    <Text style={[styles.tableHeaderCell, styles.colCount]}>महिला</Text>
-                    <Text style={[styles.tableHeaderCell, styles.colCount]}>बच्चे</Text>
-                    <Text style={[styles.tableHeaderCell, styles.colCount]}>फाइलें</Text>
-                  </View>
-                  {activitySubmissions.map((entry) => (
-                    <View key={`activity-submission-${entry.id}`} style={styles.tableRow}>
-                      <Text style={[styles.tableCell, styles.colDate]}>{String(entry.created_at || '').slice(0, 10) || '-'}</Text>
-                      <Text style={[styles.tableCell, styles.colTitle]} numberOfLines={2}>{entry.activity_name || entry.assigned_activity_name || '-'}</Text>
-                      <Text style={[styles.tableCell, styles.colNode]} numberOfLines={2}>{entry.description || '-'}</Text>
-                      <Text style={[styles.tableCell, styles.colCount]}>{Number(entry.male_count || 0)}</Text>
-                      <Text style={[styles.tableCell, styles.colCount]}>{Number(entry.female_count || 0)}</Text>
-                      <Text style={[styles.tableCell, styles.colCount]}>{Number(entry.children_count || 0)}</Text>
-                      <Text style={[styles.tableCell, styles.colCount]}>{Array.isArray(entry.attachments) ? entry.attachments.length : 0}</Text>
+              <View style={{ gap: 12 }}>
+                {filteredActivities.map((entry) => (
+                  <View key={`activity-${entry.id}`} style={styles.card}>
+                    <View style={styles.cardHeaderRow}>
+                      <Text style={styles.cardTitle}>{entry.title}</Text>
+                      <Text style={[styles.statusBadge, { color: statusColor(entry.status) }]}>{String(entry.status || 'open')}</Text>
                     </View>
-                  ))}
-                </View>
-              </ScrollView>
+                    <Text style={styles.cardMeta}>{entry.hierarchy_path || entry.node_name || '-'}</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 4 }}>
+                      {entry.category ? (
+                        <View style={{ backgroundColor: theme.colors.primarySoft, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 11, color: theme.colors.primary, fontWeight: '700' }}>{entry.category}</Text>
+                        </View>
+                      ) : null}
+                      {entry.subcategory ? (
+                        <View style={{ backgroundColor: '#EFEFEF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 11, color: theme.colors.text.secondary, fontWeight: '700' }}>{entry.subcategory}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    {entry.description ? (
+                      <Text style={styles.cardMeta}>{entry.description}</Text>
+                    ) : null}
+                    <Text style={styles.cardMeta}>
+                      📅 से: {toDateText(entry.from_date)} • तक: {toDateText(entry.to_date)}
+                    </Text>
+                    <Text style={styles.cardMeta}>
+                      जनसंख्या: पुरुष {Number(entry.male_count || 0)} • महिला {Number(entry.female_count || 0)} • बच्चे {Number(entry.children_count || 0)}
+                    </Text>
+                    {Array.isArray(entry.attachments) && entry.attachments.length > 0 ? (
+                      <View style={{ marginTop: 6, gap: 4 }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: theme.colors.text.secondary }}>संलग्नक ({entry.attachments.length}):</Text>
+                        {entry.attachments.map((att, attIdx) => (
+                          <View key={`act-${entry.id}-att-${attIdx}`} style={styles.attachmentBadge}>
+                            <MaterialIcons
+                              name={att.type?.startsWith('image') ? 'image' : att.type?.startsWith('video') ? 'videocam' : 'insert-drive-file'}
+                              size={15}
+                              color={theme.colors.primary}
+                            />
+                            <Text style={styles.attachmentBadgeText} numberOfLines={1}>
+                              {att.name || att.url.split('/').pop() || 'Attachment'}
+                            </Text>
+                            <TouchableOpacity style={{ padding: 4 }} onPress={() => Linking.openURL(att.url)}>
+                              <MaterialIcons name="open-in-new" size={16} color={theme.colors.primary} />
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
+                      <Text style={{ fontSize: 10, color: theme.colors.text.disabled }}>
+                        {toDateText(entry.created_at)}
+                      </Text>
+                      {Number(entry.submitted_by) === Number(user?.id) ? (
+                        <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+                          <TouchableOpacity style={[styles.taskEditBtn, { flex: 1, marginTop: 0 }]} onPress={() => handleOpenActivityEditor(entry)}>
+                            <Text style={styles.taskEditBtnText}>गतिविधि अपडेट करें</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity 
+                            style={[styles.taskEditBtn, { flex: 1, marginTop: 0, borderColor: '#ff4d4f', backgroundColor: '#fff5f5' }]} 
+                            onPress={() => handleDeleteActivity(entry.id)}
+                          >
+                            <Text style={[styles.taskEditBtnText, { color: '#ff4d4f' }]}>हटाएं</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                ))}
+              </View>
             )}
           </View>
         ) : null}
@@ -995,35 +1204,41 @@ export default function KaryakariniMemberScreen() {
 
       <StandardModal
         visible={showActivityModal}
-        onClose={() => setShowActivityModal(false)}
-        title="गतिविधि बनाएं"
-        subtitle="सौंपी गई गतिविधि जमा करें"
+        onClose={() => {
+          setShowActivityModal(false);
+          setActivityContext(null);
+          setEditingActivity(null);
+        }}
+        title={editingActivity ? 'गतिविधि अपडेट करें' : 'गतिविधि बनाएं'}
+        subtitle={activityContext?.subcategory || activityContext?.category || '-'}
         footer={
           <>
-            <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowActivityModal(false)}>
+            <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => { setShowActivityModal(false); setActivityContext(null); setEditingActivity(null); }}>
               <Text style={styles.btnTextDark}>रद्द करें</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.btn, savingActivity && styles.btnDisabled]} disabled={savingActivity} onPress={() => void handleSaveActivity()}>
-              <Text style={styles.btnText}>{savingActivity ? 'सेव हो रहा है...' : 'गतिविधि सेव करें'}</Text>
+              <Text style={styles.btnText}>{savingActivity ? 'सेव हो रहा है...' : editingActivity ? 'गतिविधि अपडेट करें' : 'गतिविधि सेव करें'}</Text>
             </TouchableOpacity>
           </>
         }
       >
-        <Text style={styles.sectionTitle}>गतिविधि नाम</Text>
-        <View style={styles.statusRow}>
-          {activityAssignments.map((entry) => {
-            const selected = String(entry.id) === String(activityForm.assignmentId);
-            return (
-              <TouchableOpacity
-                key={`activity-assignment-${entry.id}`}
-                style={[styles.statusChip, selected && styles.statusChipActive]}
-                onPress={() => setActivityForm((prev) => ({ ...prev, assignmentId: String(entry.id) }))}
-              >
-                <Text style={[styles.statusChipText, selected && styles.statusChipTextActive]}>{entry.activity_name}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        {activityContext ? (
+          <View style={{ backgroundColor: '#FFF9F7', borderRadius: 12, padding: 12, gap: 4, marginBottom: 12, borderWidth: 1, borderColor: '#FCEFE6' }}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: theme.colors.primary }}>
+              उप-श्रेणी: {activityContext.subcategory || '-'}
+            </Text>
+            <Text style={styles.cardMeta}>श्रेणी: {activityContext.category || '-'}</Text>
+            <Text style={styles.cardMeta}>स्थान: {activityContext.nodeName || activityContext.path || `#${activityContext.nodeId}`}</Text>
+          </View>
+        ) : null}
+
+        <Text style={styles.sectionTitle}>गतिविधि शीर्षक *</Text>
+        <TextInput
+          style={styles.input}
+          value={activityForm.title}
+          onChangeText={(value) => setActivityForm((prev) => ({ ...prev, title: value }))}
+          placeholder="गतिविधि का शीर्षक दर्ज करें"
+        />
 
         <Text style={[styles.sectionTitle, { marginTop: 10 }]}>विवरण</Text>
         <TextInput
@@ -1031,8 +1246,51 @@ export default function KaryakariniMemberScreen() {
           multiline
           value={activityForm.description}
           onChangeText={(value) => setActivityForm((prev) => ({ ...prev, description: value }))}
-          placeholder="की गई गतिविधि का विवरण लिखें"
+          placeholder="गतिविधि का विवरण लिखें"
         />
+
+        <View style={[styles.inlineRow, { marginTop: 10 }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sectionTitle}>प्रारंभ तिथि</Text>
+            <TextInput
+              style={styles.input}
+              value={activityForm.fromDate}
+              onChangeText={(value) => setActivityForm((prev) => ({ ...prev, fromDate: value }))}
+              placeholder="YYYY-MM-DD"
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sectionTitle}>समाप्ति तिथि</Text>
+            <TextInput
+              style={styles.input}
+              value={activityForm.toDate}
+              onChangeText={(value) => setActivityForm((prev) => ({ ...prev, toDate: value }))}
+              placeholder="YYYY-MM-DD"
+            />
+          </View>
+        </View>
+
+        <Text style={[styles.sectionTitle, { marginTop: 10 }]}>स्थिति</Text>
+        <View style={styles.statusRow}>
+          {(['open', 'in_progress', 'completed', 'cancelled'] as const).map((status) => {
+            const active = activityForm.status === status;
+            const labels: Record<string, string> = { open: 'खुला', in_progress: 'प्रगति में', completed: 'पूर्ण', cancelled: 'रद्द' };
+            return (
+              <TouchableOpacity
+                key={`act-status-${status}`}
+                style={[styles.statusChip, active && styles.statusChipActive, { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 14 }]}
+                onPress={() => setActivityForm((prev) => ({ ...prev, status }))}
+              >
+                <MaterialIcons
+                  name={status === 'completed' ? 'check-circle' : status === 'in_progress' ? 'timelapse' : status === 'cancelled' ? 'cancel' : 'radio-button-unchecked'}
+                  size={16}
+                  color={active ? '#fff' : theme.colors.text.secondary}
+                />
+                <Text style={[styles.statusChipText, active && styles.statusChipTextActive, { fontSize: 13 }]}>{labels[status]}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
         <TouchableOpacity
           style={[styles.inlineRow, { marginTop: 10 }]}
@@ -1043,7 +1301,7 @@ export default function KaryakariniMemberScreen() {
             size={20}
             color={theme.colors.primary}
           />
-          <Text style={styles.sectionTitle}>जनसंख्या (add-on)</Text>
+          <Text style={styles.sectionTitle}>जनसंख्या</Text>
         </TouchableOpacity>
 
         {activityForm.includePopulation ? (
@@ -1102,7 +1360,7 @@ export default function KaryakariniMemberScreen() {
           </View>
         ) : null}
 
-        <Text style={[styles.sectionTitle, { marginTop: 10 }]}>फोटो/दस्तावेज़ अपलोड करें</Text>
+        <Text style={[styles.sectionTitle, { marginTop: 10 }]}>दस्तावेज़ / फोटो अपलोड करें</Text>
         <View style={styles.inlineRow}>
           <TextInput
             style={[styles.input, styles.inputFlex]}
@@ -1125,7 +1383,7 @@ export default function KaryakariniMemberScreen() {
 
         <View style={styles.attachmentList}>
           {activityForm.attachments.length === 0 ? (
-            <Text style={styles.attachmentEmpty}>No files attached yet</Text>
+            <Text style={styles.attachmentEmpty}>कोई फाइल संलग्न नहीं</Text>
           ) : (
             activityForm.attachments.map((entry, idx) => (
               <View key={`activity-attachment-${idx}`} style={styles.attachmentRow}>
