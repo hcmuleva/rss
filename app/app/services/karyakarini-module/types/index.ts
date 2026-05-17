@@ -248,6 +248,9 @@ export type KaryakariniCategoryActivity = {
   male_count?: number;
   female_count?: number;
   children_count?: number;
+  from_date?: string | null;
+  to_date?: string | null;
+  status?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };

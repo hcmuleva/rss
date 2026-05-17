@@ -305,6 +305,9 @@ class KaryakariniModel {
     await pool.query(`ALTER TABLE karyakarini_category_activities ADD COLUMN IF NOT EXISTS male_count INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE karyakarini_category_activities ADD COLUMN IF NOT EXISTS female_count INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE karyakarini_category_activities ADD COLUMN IF NOT EXISTS children_count INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE karyakarini_category_activities ADD COLUMN IF NOT EXISTS from_date DATE`);
+    await pool.query(`ALTER TABLE karyakarini_category_activities ADD COLUMN IF NOT EXISTS to_date DATE`);
+    await pool.query(`ALTER TABLE karyakarini_category_activities ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'open'`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS karyakarini_activity_assignments (
         id BIGSERIAL PRIMARY KEY,
@@ -2133,12 +2136,16 @@ class KaryakariniModel {
          WHERE user_id = $1
            AND version_id = $2
            AND is_active = true
+         UNION
+         SELECT DISTINCT node_id
+         FROM karyakarini_admin_scopes
+         WHERE user_id = $1
+           AND version_id = $2
+           AND is_active = true
        ),
        subtree AS (
-         SELECT n.id
-         FROM karyakarini_nodes n
-         JOIN roots r ON r.node_id = n.id
-         WHERE n.version_id = $2
+         SELECT node_id AS id
+         FROM roots
          UNION
          SELECT c.id
          FROM karyakarini_nodes c
@@ -3842,7 +3849,7 @@ class KaryakariniModel {
     }
   }
 
-  static async getTasks({ versionId, visibleNodeIds = [], nodeId, hierarchy = {}, page = 1, limit = 20 }) {
+  static async getTasks({ versionId, visibleNodeIds = [], nodeId, hierarchy = {}, page = 1, limit = 20, category = '', subcategory = '', nodeLevel = '' }) {
     if (!visibleNodeIds.length) {
       return {
         rows: [],
@@ -3887,11 +3894,39 @@ class KaryakariniModel {
       );
     }
 
+    if (category) {
+      queryValues.push(String(category).trim());
+      filters.push(
+        `EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(COALESCE(t.task_categories, '[]'::jsonb)) AS cat(value)
+          WHERE lower(cat.value) = lower($${queryValues.length})
+        )`
+      );
+    }
+
+    if (subcategory) {
+      queryValues.push(String(subcategory).trim());
+      filters.push(
+        `EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(COALESCE(t.task_subcategories, '[]'::jsonb)) AS sub(value)
+          WHERE lower(sub.value) = lower($${queryValues.length})
+        )`
+      );
+    }
+
+    if (nodeLevel) {
+      queryValues.push(String(nodeLevel).trim());
+      filters.push(`lower(COALESCE(n.level, '')) = lower($${queryValues.length})`);
+    }
+
     const whereClause = filters.join('\n         AND ');
 
     const countResult = await pool.query(
       `SELECT COUNT(*)::int AS total
        FROM karyakarini_tasks t
+       JOIN karyakarini_nodes n ON n.id = t.node_id
        WHERE ${whereClause}`,
       queryValues
     );
@@ -4622,13 +4657,16 @@ class KaryakariniModel {
     maleCount = 0,
     femaleCount = 0,
     childrenCount = 0,
+    fromDate = null,
+    toDate = null,
+    status = 'open',
   }) {
     const result = await pool.query(
       `INSERT INTO karyakarini_category_activities (
-         version_id, node_id, submitted_by, category, subcategory, title, description, attachments, male_count, female_count, children_count
+         version_id, node_id, submitted_by, category, subcategory, title, description, attachments, male_count, female_count, children_count, from_date, to_date, status
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)
-       RETURNING id, version_id, node_id, submitted_by, category, subcategory, title, description, attachments, male_count, female_count, children_count, created_at, updated_at`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14)
+       RETURNING id, version_id, node_id, submitted_by, category, subcategory, title, description, attachments, male_count, female_count, children_count, from_date, to_date, status, created_at, updated_at`,
       [
         Number(versionId),
         Number(nodeId),
@@ -4641,9 +4679,238 @@ class KaryakariniModel {
         Number(maleCount) || 0,
         Number(femaleCount) || 0,
         Number(childrenCount) || 0,
+        fromDate ? String(fromDate).trim() : null,
+        toDate ? String(toDate).trim() : null,
+        String(status || 'open'),
       ]
     );
     return result.rows[0] || null;
+  }
+
+  static async getCategoryActivitiesForUser({
+    userId,
+    versionId,
+    page = 1,
+    limit = 20,
+    category = '',
+    subcategory = '',
+    nodeLevel = '',
+  }) {
+    const safeUserId = Number(userId);
+    if (!Number.isFinite(safeUserId) || safeUserId <= 0) {
+      return {
+        rows: [],
+        pagination: { page: 1, limit: Math.max(1, Number(limit) || 20), total: 0, totalPages: 0 },
+      };
+    }
+
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+    const offset = (safePage - 1) * safeLimit;
+
+    const normalizedCategory = String(category || '').trim().toLowerCase();
+    const normalizedSubcategory = String(subcategory || '').trim().toLowerCase();
+    const normalizedNodeLevel = String(nodeLevel || '').trim().toLowerCase();
+    const hasCategory = Boolean(normalizedCategory);
+    const hasSubcategory = Boolean(normalizedSubcategory);
+    const hasNodeLevel = Boolean(normalizedNodeLevel);
+
+    const countQuery = `
+      WITH RECURSIVE user_assigned_nodes AS (
+        SELECT m.node_id AS id, m.node_id AS root_node_id, m.subcategories, m.subcategory, false AS is_admin_scope
+        FROM karyakarini_members m
+        WHERE m.user_id = $2
+          AND m.version_id = $1
+          AND m.is_active = true
+        UNION
+        SELECT s.node_id AS id, s.node_id AS root_node_id, NULL::jsonb AS subcategories, NULL::varchar AS subcategory, true AS is_admin_scope
+        FROM karyakarini_admin_scopes s
+        WHERE s.user_id = $2
+          AND s.version_id = $1
+          AND s.is_active = true
+        UNION ALL
+        SELECT c.id, u.root_node_id, u.subcategories, u.subcategory, u.is_admin_scope
+        FROM karyakarini_nodes c
+        JOIN user_assigned_nodes u ON c.parent_id = u.id
+        WHERE c.version_id = $1
+      )
+      SELECT COUNT(*)::int AS total
+      FROM karyakarini_category_activities a
+      JOIN karyakarini_nodes n ON n.id = a.node_id
+      WHERE a.version_id = $1
+        AND a.is_active = true
+        AND (
+          a.submitted_by = $2
+          OR EXISTS (
+            SELECT 1
+            FROM user_assigned_nodes un
+            WHERE un.id = a.node_id
+              AND (
+                un.is_admin_scope = true
+                OR EXISTS (
+                  SELECT 1
+                  FROM unnest(string_to_array(COALESCE(a.subcategory, ''), ',')) AS act_sub(value)
+                  WHERE EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements_text(
+                      CASE
+                        WHEN un.subcategories IS NOT NULL
+                          AND jsonb_typeof(un.subcategories) = 'array'
+                          AND jsonb_array_length(un.subcategories) > 0
+                          THEN un.subcategories
+                        WHEN NULLIF(trim(COALESCE(un.subcategory, '')), '') IS NOT NULL
+                          THEN jsonb_build_array(trim(un.subcategory))
+                        ELSE '[]'::jsonb
+                      END
+                    ) AS ms(value)
+                    WHERE lower(trim(ms.value)) = lower(trim(act_sub.value))
+                  )
+                )
+              )
+          )
+        )
+        AND ($3::boolean = false OR lower(COALESCE(a.category, '')) = $4)
+        AND ($5::boolean = false OR lower(COALESCE(a.subcategory, '')) = $6)
+        AND ($7::boolean = false OR lower(COALESCE(n.level, '')) = $8)
+    `;
+
+    const countParams = [
+      Number(versionId),
+      safeUserId,
+      hasCategory,
+      normalizedCategory,
+      hasSubcategory,
+      normalizedSubcategory,
+      hasNodeLevel,
+      normalizedNodeLevel,
+    ];
+
+    const countResult = await pool.query(countQuery, countParams);
+    const total = Number(countResult.rows[0]?.total || 0);
+
+    const rowsQuery = `
+      WITH RECURSIVE node_paths AS (
+        SELECT n.id, n.parent_id, n.name, n.level, n.version_id, n.name::text AS path
+        FROM karyakarini_nodes n
+        WHERE n.version_id = $1
+          AND n.parent_id IS NULL
+        UNION ALL
+        SELECT c.id, c.parent_id, c.name, c.level, c.version_id, np.path || ' > ' || c.name AS path
+        FROM karyakarini_nodes c
+        JOIN node_paths np ON c.parent_id = np.id
+        WHERE c.version_id = $1
+      ),
+      user_assigned_nodes AS (
+        SELECT m.node_id AS id, m.node_id AS root_node_id, m.subcategories, m.subcategory, false AS is_admin_scope
+        FROM karyakarini_members m
+        WHERE m.user_id = $2
+          AND m.version_id = $1
+          AND m.is_active = true
+        UNION
+        SELECT s.node_id AS id, s.node_id AS root_node_id, NULL::jsonb AS subcategories, NULL::varchar AS subcategory, true AS is_admin_scope
+        FROM karyakarini_admin_scopes s
+        WHERE s.user_id = $2
+          AND s.version_id = $1
+          AND s.is_active = true
+        UNION ALL
+        SELECT c.id, u.root_node_id, u.subcategories, u.subcategory, u.is_admin_scope
+        FROM karyakarini_nodes c
+        JOIN user_assigned_nodes u ON c.parent_id = u.id
+        WHERE c.version_id = $1
+      )
+      SELECT
+        a.id,
+        a.version_id,
+        a.node_id,
+        n.name AS node_name,
+        n.level AS node_level,
+        COALESCE(np.path, n.name) AS hierarchy_path,
+        a.submitted_by,
+        COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name', ('User #' || a.submitted_by::text)) AS submitted_by_name,
+        COALESCE(to_jsonb(u) ->> 'profile_photo_url', to_jsonb(u) ->> 'avatar', to_jsonb(u) ->> 'photo_url') AS submitted_by_avatar,
+        a.category,
+        a.subcategory,
+        a.title,
+        a.description,
+        COALESCE(a.attachments, '[]'::jsonb) AS attachments,
+        a.male_count,
+        a.female_count,
+        a.children_count,
+        a.from_date,
+        a.to_date,
+        COALESCE(a.status, 'open') AS status,
+        a.created_at,
+        a.updated_at
+      FROM karyakarini_category_activities a
+      JOIN karyakarini_nodes n ON n.id = a.node_id
+      LEFT JOIN node_paths np ON np.id = n.id
+      LEFT JOIN users u ON u.id = a.submitted_by
+      WHERE a.version_id = $1
+        AND a.is_active = true
+        AND (
+          a.submitted_by = $2
+          OR EXISTS (
+            SELECT 1
+            FROM user_assigned_nodes un
+            WHERE un.id = a.node_id
+              AND (
+                un.is_admin_scope = true
+                OR EXISTS (
+                  SELECT 1
+                  FROM unnest(string_to_array(COALESCE(a.subcategory, ''), ',')) AS act_sub(value)
+                  WHERE EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements_text(
+                      CASE
+                        WHEN un.subcategories IS NOT NULL
+                          AND jsonb_typeof(un.subcategories) = 'array'
+                          AND jsonb_array_length(un.subcategories) > 0
+                          THEN un.subcategories
+                        WHEN NULLIF(trim(COALESCE(un.subcategory, '')), '') IS NOT NULL
+                          THEN jsonb_build_array(trim(un.subcategory))
+                        ELSE '[]'::jsonb
+                      END
+                    ) AS ms(value)
+                    WHERE lower(trim(ms.value)) = lower(trim(act_sub.value))
+                  )
+                )
+              )
+          )
+        )
+        AND ($3::boolean = false OR lower(COALESCE(a.category, '')) = $4)
+        AND ($5::boolean = false OR lower(COALESCE(a.subcategory, '')) = $6)
+        AND ($7::boolean = false OR lower(COALESCE(n.level, '')) = $8)
+      ORDER BY a.created_at DESC, a.id DESC
+      LIMIT $9 OFFSET $10
+    `;
+
+    const rowsParams = [
+      Number(versionId),
+      safeUserId,
+      hasCategory,
+      normalizedCategory,
+      hasSubcategory,
+      normalizedSubcategory,
+      hasNodeLevel,
+      normalizedNodeLevel,
+      safeLimit,
+      offset,
+    ];
+
+    const rowsResult = await pool.query(rowsQuery, rowsParams);
+
+    return {
+      rows: rowsResult.rows.map((row) => ({
+        ...row,
+        id: Number(row.id),
+      })),
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.ceil(total / safeLimit),
+      },
+    };
   }
 
   static async getCategoryActivities({
@@ -4731,6 +4998,9 @@ class KaryakariniModel {
          a.male_count,
          a.female_count,
          a.children_count,
+         a.from_date,
+         a.to_date,
+         COALESCE(a.status, 'open') AS status,
          a.created_at,
          a.updated_at
        FROM karyakarini_category_activities a
@@ -4771,6 +5041,92 @@ class KaryakariniModel {
         totalPages: Math.ceil(total / safeLimit),
       },
     };
+  }
+
+  static async getCategoryActivityById({ activityId, versionId }) {
+    const result = await pool.query(
+      `SELECT id, version_id, node_id, submitted_by, category, subcategory, title, description, attachments, male_count, female_count, children_count, from_date, to_date, status, created_at, updated_at
+       FROM karyakarini_category_activities
+       WHERE id = $1
+         AND version_id = $2
+         AND is_active = true`,
+      [Number(activityId), Number(versionId)]
+    );
+    return result.rows[0] || null;
+  }
+
+  static async updateCategoryActivity({
+    activityId,
+    versionId,
+    title,
+    description = null,
+    fromDate = null,
+    toDate = null,
+    status = 'open',
+    maleCount = 0,
+    femaleCount = 0,
+    childrenCount = 0,
+    attachments = [],
+  }) {
+    const result = await pool.query(
+      `UPDATE karyakarini_category_activities
+       SET title = $3,
+           description = $4,
+           from_date = $5,
+           to_date = $6,
+           status = $7,
+           male_count = $8,
+           female_count = $9,
+           children_count = $10,
+           attachments = $11::jsonb,
+           updated_at = NOW()
+       WHERE id = $1
+         AND version_id = $2
+         AND is_active = true
+       RETURNING id, version_id, node_id, submitted_by, category, subcategory, title, description, attachments, male_count, female_count, children_count, from_date, to_date, status, created_at, updated_at`,
+      [
+        Number(activityId),
+        Number(versionId),
+        String(title || '').trim(),
+        description ? String(description).trim() : null,
+        fromDate ? String(fromDate).trim() : null,
+        toDate ? String(toDate).trim() : null,
+        String(status || 'open'),
+        Number(maleCount) || 0,
+        Number(femaleCount) || 0,
+        Number(childrenCount) || 0,
+        JSON.stringify(Array.isArray(attachments) ? attachments : []),
+      ]
+    );
+    return result.rows[0] || null;
+  }
+
+  static async deleteTask({ taskId, versionId }) {
+    const result = await pool.query(
+      `UPDATE karyakarini_tasks
+       SET is_active = false,
+           updated_at = NOW()
+       WHERE id = $1
+         AND version_id = $2
+         AND is_active = true
+       RETURNING id`,
+      [Number(taskId), Number(versionId)]
+    );
+    return result.rows[0] || null;
+  }
+
+  static async deleteCategoryActivity({ activityId, versionId }) {
+    const result = await pool.query(
+      `UPDATE karyakarini_category_activities
+       SET is_active = false,
+           updated_at = NOW()
+       WHERE id = $1
+         AND version_id = $2
+         AND is_active = true
+       RETURNING id`,
+      [Number(activityId), Number(versionId)]
+    );
+    return result.rows[0] || null;
   }
 }
 
