@@ -69,6 +69,23 @@ class KaryakariniModel {
     await pool.query(`ALTER TABLE karyakarini_members ADD COLUMN IF NOT EXISTS subcategory VARCHAR(120)`);
     await pool.query(`ALTER TABLE karyakarini_members ADD COLUMN IF NOT EXISTS categories JSONB DEFAULT '[]'::jsonb`);
     await pool.query(`ALTER TABLE karyakarini_members ADD COLUMN IF NOT EXISTS subcategories JSONB DEFAULT '[]'::jsonb`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS karyakarini_category_teams (
+        id BIGSERIAL PRIMARY KEY,
+        version_id INTEGER NOT NULL REFERENCES karyakarini_versions(id) ON DELETE CASCADE,
+        node_id BIGINT NOT NULL REFERENCES karyakarini_nodes(id) ON DELETE CASCADE,
+        created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        category VARCHAR(160) NOT NULL,
+        subcategory VARCHAR(160),
+        team_members JSONB NOT NULL DEFAULT '[]'::jsonb,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_karyakarini_category_teams_scope ON karyakarini_category_teams(version_id, node_id, category)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_karyakarini_category_teams_creator ON karyakarini_category_teams(created_by, version_id)`);
     await pool.query(`
       UPDATE karyakarini_members
       SET categories = CASE
@@ -512,26 +529,71 @@ class KaryakariniModel {
                 sortOrder: k,
               });
 
-              const mandals = Array.isArray(khand['मण्डल']) ? khand['मण्डल'] : [];
+              const mandals = Array.isArray(khand['मण्डल'])
+                ? khand['मण्डल']
+                : Array.isArray(khand['मंडल'])
+                  ? khand['मंडल']
+                  : [];
               for (let m = 0; m < mandals.length; m += 1) {
                 const mandal = mandals[m] || {};
-                const nagarId = await this.findOrCreateNode({
+                const mandalId = await this.findOrCreateNode({
                   versionId,
                   parentId: khandId,
-                  name: mandal['नाम'] || `नगर ${m + 1}`,
-                  level: 'nagar',
+                  name: mandal['नाम'] || `मंडल ${m + 1}`,
+                  level: 'mandal',
                   sortOrder: m,
                 });
 
-                const mohallas = Array.isArray(mandal['ग्राम_मोहल्ला']) ? mandal['ग्राम_मोहल्ला'] : [];
-                for (let x = 0; x < mohallas.length; x += 1) {
+                const grams = Array.isArray(mandal['ग्राम'])
+                  ? mandal['ग्राम']
+                  : Array.isArray(mandal['ग्राम_मोहल्ला'])
+                    ? mandal['ग्राम_मोहल्ला']
+                    : [];
+                for (let x = 0; x < grams.length; x += 1) {
                   await this.findOrCreateNode({
                     versionId,
-                    parentId: nagarId,
-                    name: String(mohallas[x] || '').trim() || `मोहल्ला ${x + 1}`,
-                    level: 'nagar_mohalla',
+                    parentId: mandalId,
+                    name: String(grams[x] || '').trim() || `ग्राम ${x + 1}`,
+                    level: 'gram',
                     sortOrder: x,
                   });
+                }
+              }
+
+              const nagars = Array.isArray(khand['नगर']) ? khand['नगर'] : [];
+              for (let n = 0; n < nagars.length; n += 1) {
+                const nagar = nagars[n] || {};
+                const nagarId = await this.findOrCreateNode({
+                  versionId,
+                  parentId: khandId,
+                  name: nagar['नाम'] || `नगर ${n + 1}`,
+                  level: 'nagar',
+                  sortOrder: n,
+                });
+                const bastiRows = Array.isArray(nagar['बस्ती']) ? nagar['बस्ती'] : [];
+                for (let b = 0; b < bastiRows.length; b += 1) {
+                  const basti = bastiRows[b] || {};
+                  const bastiId = await this.findOrCreateNode({
+                    versionId,
+                    parentId: nagarId,
+                    name: basti['नाम'] || `बस्ती ${b + 1}`,
+                    level: 'basti',
+                    sortOrder: b,
+                  });
+                  const mohallas = Array.isArray(basti['मोहल्ला'])
+                    ? basti['मोहल्ला']
+                    : Array.isArray(basti['वार्ड'])
+                      ? basti['वार्ड']
+                      : [];
+                  for (let w = 0; w < mohallas.length; w += 1) {
+                    await this.findOrCreateNode({
+                      versionId,
+                      parentId: bastiId,
+                      name: String(mohallas[w] || '').trim() || `मोहल्ला ${w + 1}`,
+                      level: 'mohalla',
+                      sortOrder: w,
+                    });
+                  }
                 }
               }
             }
@@ -539,13 +601,27 @@ class KaryakariniModel {
             const bastis = Array.isArray(jila['बस्ती']) ? jila['बस्ती'] : [];
             for (let b = 0; b < bastis.length; b += 1) {
               const basti = bastis[b] || {};
-              await this.findOrCreateNode({
+              const bastiId = await this.findOrCreateNode({
                 versionId,
                 parentId: jilaId,
-                name: basti['नाम'] || `मण्डल बस्ती ${b + 1}`,
-                level: 'mandal_basti',
+                name: basti['नाम'] || `बस्ती ${b + 1}`,
+                level: 'basti',
                 sortOrder: b,
               });
+              const mohallas = Array.isArray(basti['मोहल्ला'])
+                ? basti['मोहल्ला']
+                : Array.isArray(basti['वार्ड'])
+                  ? basti['वार्ड']
+                  : [];
+              for (let w = 0; w < mohallas.length; w += 1) {
+                await this.findOrCreateNode({
+                  versionId,
+                  parentId: bastiId,
+                  name: String(mohallas[w] || '').trim() || `मोहल्ला ${w + 1}`,
+                  level: 'mohalla',
+                  sortOrder: w,
+                });
+              }
             }
           }
         }
@@ -2213,6 +2289,327 @@ class KaryakariniModel {
       [safeUserId, versionId]
     );
     return result.rows;
+  }
+
+  static sanitizeCategoryTeamMembers(members) {
+    if (!Array.isArray(members)) return [];
+    return members
+      .map((entry) => {
+        const fullName = String(entry?.fullName || entry?.full_name || entry?.name || '').trim();
+        const mobileNumber = String(entry?.mobileNumber || entry?.mobile_number || entry?.mobile || '').replace(/\D/g, '').slice(0, 15);
+        const profilePhotoUrl = String(entry?.profilePhotoUrl || entry?.profile_photo_url || entry?.avatar || '').trim();
+        if (!fullName || !mobileNumber) return null;
+        return {
+          fullName,
+          mobileNumber,
+          profilePhotoUrl: profilePhotoUrl || null,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 200);
+  }
+
+  static async userHasCategoryAccessInNodeScope({ userId, versionId, nodeId, category }) {
+    const safeUserId = Number(userId);
+    const safeVersionId = Number(versionId);
+    const safeNodeId = Number(nodeId);
+    const normalizedCategory = String(category || '').trim().toLowerCase();
+    if (!safeUserId || !safeVersionId || !safeNodeId || !normalizedCategory) return false;
+
+    const result = await pool.query(
+      `WITH RECURSIVE user_scope AS (
+         SELECT m.node_id AS id, m.categories, m.category
+         FROM karyakarini_members m
+         WHERE m.user_id = $1
+           AND m.version_id = $2
+           AND m.is_active = true
+         UNION ALL
+         SELECT c.id, u.categories, u.category
+         FROM karyakarini_nodes c
+         JOIN user_scope u ON c.parent_id = u.id
+         WHERE c.version_id = $2
+       )
+       SELECT 1
+       FROM user_scope u
+       WHERE u.id = $3
+         AND EXISTS (
+           SELECT 1
+           FROM jsonb_array_elements_text(
+             CASE
+               WHEN u.categories IS NOT NULL
+                 AND jsonb_typeof(u.categories) = 'array'
+                 AND jsonb_array_length(u.categories) > 0
+                 THEN u.categories
+               WHEN NULLIF(trim(COALESCE(u.category, '')), '') IS NOT NULL
+                 THEN jsonb_build_array(trim(u.category))
+               ELSE '[]'::jsonb
+             END
+           ) AS cats(value)
+           WHERE lower(trim(cats.value)) = $4
+         )
+       LIMIT 1`,
+      [safeUserId, safeVersionId, safeNodeId, normalizedCategory]
+    );
+    return Boolean(result.rows[0]);
+  }
+
+  static async getCategoryTeamById({ teamId, versionId }) {
+    const safeTeamId = Number(teamId);
+    const safeVersionId = Number(versionId);
+    if (!safeTeamId || !safeVersionId) return null;
+
+    const result = await pool.query(
+      `WITH RECURSIVE node_paths AS (
+         SELECT n.id, n.parent_id, n.name, n.level, n.version_id, n.name::text AS path
+         FROM karyakarini_nodes n
+         WHERE n.version_id = $2
+           AND n.parent_id IS NULL
+         UNION ALL
+         SELECT c.id, c.parent_id, c.name, c.level, c.version_id, np.path || ' > ' || c.name AS path
+         FROM karyakarini_nodes c
+         JOIN node_paths np ON c.parent_id = np.id
+         WHERE c.version_id = $2
+       )
+       SELECT
+         t.id,
+         t.version_id,
+         t.node_id,
+         n.name AS node_name,
+         n.level AS node_level,
+         COALESCE(np.path, n.name) AS hierarchy_path,
+         t.created_by,
+         COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name', ('User #' || t.created_by::text)) AS created_by_name,
+         COALESCE(to_jsonb(u) ->> 'profile_photo_url', to_jsonb(u) ->> 'avatar', to_jsonb(u) ->> 'photo_url') AS created_by_avatar,
+         t.category,
+         t.subcategory,
+         COALESCE(t.team_members, '[]'::jsonb) AS team_members,
+         t.created_at,
+         t.updated_at
+       FROM karyakarini_category_teams t
+       JOIN karyakarini_nodes n ON n.id = t.node_id
+       LEFT JOIN node_paths np ON np.id = n.id
+       LEFT JOIN users u ON u.id = t.created_by
+       WHERE t.id = $1
+         AND t.version_id = $2
+         AND t.is_active = true
+       LIMIT 1`,
+      [safeTeamId, safeVersionId]
+    );
+    return result.rows[0] || null;
+  }
+
+  static async upsertMyCategoryTeam({
+    teamId = null,
+    userId,
+    versionId,
+    nodeId,
+    category,
+    subcategory = null,
+    members = [],
+  }) {
+    const safeUserId = Number(userId);
+    const safeVersionId = Number(versionId);
+    const safeNodeId = Number(nodeId);
+    const normalizedCategory = String(category || '').trim();
+    const normalizedSubcategory = String(subcategory || '').trim();
+    const safeMembers = this.sanitizeCategoryTeamMembers(members);
+    if (!safeUserId || !safeVersionId || !safeNodeId || !normalizedCategory) return null;
+
+    let resolvedTeamId = Number(teamId || 0);
+    if (resolvedTeamId > 0) {
+      const updated = await pool.query(
+        `UPDATE karyakarini_category_teams
+         SET node_id = $1,
+             category = $2,
+             subcategory = $3,
+             team_members = $4::jsonb,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $5
+           AND version_id = $6
+           AND created_by = $7
+           AND is_active = true
+         RETURNING id`,
+        [
+          safeNodeId,
+          normalizedCategory,
+          normalizedSubcategory || null,
+          JSON.stringify(safeMembers),
+          resolvedTeamId,
+          safeVersionId,
+          safeUserId,
+        ]
+      );
+      if (updated.rows[0]?.id) {
+        resolvedTeamId = Number(updated.rows[0].id);
+      } else {
+        resolvedTeamId = 0;
+      }
+    }
+
+    if (!resolvedTeamId) {
+      const existing = await pool.query(
+        `SELECT id
+         FROM karyakarini_category_teams
+         WHERE version_id = $1
+           AND node_id = $2
+           AND created_by = $3
+           AND lower(trim(category)) = lower(trim($4))
+           AND lower(trim(COALESCE(subcategory, ''))) = lower(trim($5))
+           AND is_active = true
+         ORDER BY id DESC
+         LIMIT 1`,
+        [safeVersionId, safeNodeId, safeUserId, normalizedCategory, normalizedSubcategory]
+      );
+
+      if (existing.rows[0]?.id) {
+        resolvedTeamId = Number(existing.rows[0].id);
+        await pool.query(
+          `UPDATE karyakarini_category_teams
+           SET team_members = $1::jsonb,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2`,
+          [JSON.stringify(safeMembers), resolvedTeamId]
+        );
+      } else {
+        const created = await pool.query(
+          `INSERT INTO karyakarini_category_teams (
+             version_id, node_id, created_by, category, subcategory, team_members
+           )
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+           RETURNING id`,
+          [
+            safeVersionId,
+            safeNodeId,
+            safeUserId,
+            normalizedCategory,
+            normalizedSubcategory || null,
+            JSON.stringify(safeMembers),
+          ]
+        );
+        resolvedTeamId = Number(created.rows[0]?.id || 0);
+      }
+    }
+
+    if (!resolvedTeamId) return null;
+    return this.getCategoryTeamById({ teamId: resolvedTeamId, versionId: safeVersionId });
+  }
+
+  static async getVisibleCategoryTeams({
+    userId,
+    versionId,
+    category = '',
+    subcategory = '',
+  }) {
+    const safeUserId = Number(userId);
+    const safeVersionId = Number(versionId);
+    if (!safeUserId || !safeVersionId) return [];
+
+    const normalizedCategory = String(category || '').trim().toLowerCase();
+    const normalizedSubcategory = String(subcategory || '').trim().toLowerCase();
+    const hasCategory = Boolean(normalizedCategory);
+    const hasSubcategory = Boolean(normalizedSubcategory);
+
+    const levelWeightCase = (alias) => `CASE lower(trim(COALESCE(${alias}, '')))
+      WHEN 'rashtriya' THEN 1
+      WHEN 'prant' THEN 2
+      WHEN 'sambhag' THEN 3
+      WHEN 'vibhag' THEN 4
+      WHEN 'jila' THEN 5
+      WHEN 'khand' THEN 6
+      WHEN 'mandal' THEN 7
+      WHEN 'nagar' THEN 7
+      WHEN 'gram' THEN 8
+      WHEN 'basti' THEN 8
+      WHEN 'mohalla' THEN 9
+      WHEN 'mandal_basti' THEN 8
+      WHEN 'nagar_mohalla' THEN 9
+      ELSE 99
+    END`;
+
+    const result = await pool.query(
+      `WITH RECURSIVE node_paths AS (
+         SELECT n.id, n.parent_id, n.name, n.level, n.version_id, n.name::text AS path
+         FROM karyakarini_nodes n
+         WHERE n.version_id = $1
+           AND n.parent_id IS NULL
+         UNION ALL
+         SELECT c.id, c.parent_id, c.name, c.level, c.version_id, np.path || ' > ' || c.name AS path
+         FROM karyakarini_nodes c
+         JOIN node_paths np ON c.parent_id = np.id
+         WHERE c.version_id = $1
+       ),
+       user_assigned_nodes AS (
+         SELECT m.node_id AS id, m.node_id AS root_node_id, m.categories, m.category, n.level AS root_level
+         FROM karyakarini_members m
+         JOIN karyakarini_nodes n ON n.id = m.node_id
+         WHERE m.user_id = $2
+           AND m.version_id = $1
+           AND m.is_active = true
+         UNION ALL
+         SELECT c.id, u.root_node_id, u.categories, u.category, u.root_level
+         FROM karyakarini_nodes c
+         JOIN user_assigned_nodes u ON c.parent_id = u.id
+         WHERE c.version_id = $1
+       )
+       SELECT
+         t.id,
+         t.version_id,
+         t.node_id,
+         n.name AS node_name,
+         n.level AS node_level,
+         COALESCE(np.path, n.name) AS hierarchy_path,
+         t.created_by,
+         COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name', ('User #' || t.created_by::text)) AS created_by_name,
+         COALESCE(to_jsonb(u) ->> 'profile_photo_url', to_jsonb(u) ->> 'avatar', to_jsonb(u) ->> 'photo_url') AS created_by_avatar,
+         t.category,
+         t.subcategory,
+         COALESCE(t.team_members, '[]'::jsonb) AS team_members,
+         t.created_at,
+         t.updated_at
+       FROM karyakarini_category_teams t
+       JOIN karyakarini_nodes n ON n.id = t.node_id
+       LEFT JOIN node_paths np ON np.id = n.id
+       LEFT JOIN users u ON u.id = t.created_by
+       WHERE t.version_id = $1
+         AND t.is_active = true
+         AND ($3::boolean = false OR lower(COALESCE(t.category, '')) = $4)
+         AND ($5::boolean = false OR lower(COALESCE(t.subcategory, '')) = $6)
+         AND (
+           t.created_by = $2
+           OR EXISTS (
+             SELECT 1
+             FROM user_assigned_nodes un
+             WHERE un.id = t.node_id
+               AND ${levelWeightCase('un.root_level')} < ${levelWeightCase('n.level')}
+               AND EXISTS (
+                 SELECT 1
+                 FROM jsonb_array_elements_text(
+                   CASE
+                     WHEN un.categories IS NOT NULL
+                       AND jsonb_typeof(un.categories) = 'array'
+                       AND jsonb_array_length(un.categories) > 0
+                       THEN un.categories
+                     WHEN NULLIF(trim(COALESCE(un.category, '')), '') IS NOT NULL
+                       THEN jsonb_build_array(trim(un.category))
+                     ELSE '[]'::jsonb
+                   END
+                 ) AS cats(value)
+                 WHERE lower(trim(cats.value)) = lower(trim(COALESCE(t.category, '')))
+               )
+           )
+         )
+       ORDER BY t.updated_at DESC, t.id DESC`,
+      [safeVersionId, safeUserId, hasCategory, normalizedCategory, hasSubcategory, normalizedSubcategory]
+    );
+
+    return result.rows.map((row) => ({
+      ...row,
+      id: Number(row.id),
+      version_id: Number(row.version_id),
+      node_id: Number(row.node_id),
+      created_by: Number(row.created_by),
+      team_members: Array.isArray(row.team_members) ? row.team_members : [],
+    }));
   }
 
   static async createActivityAssignment({

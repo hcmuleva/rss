@@ -37,6 +37,7 @@ router.delete('/tasks/:taskId', controller.deleteTask);
 router.post('/task-assignments', requireAdmin, controller.assignTaskUsers);
 router.patch('/my/tasks/:taskId/status', controller.updateMyTaskStatus);
 router.get('/my/teams', controller.getMyTeams);
+router.post('/my/teams', controller.saveMyTeam);
 router.post('/activity-assignments', requireAdmin, controller.createActivityAssignment);
 router.get('/activity-assignments', requireAdmin, controller.getActivityAssignments);
 router.get('/my/activity-assignments', controller.getMyActivityAssignments);

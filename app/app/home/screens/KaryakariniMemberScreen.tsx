@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Linking, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { ScreenHeader } from '../../core/components/ScreenHeader';
@@ -13,9 +14,9 @@ import { theme } from '../../theme';
 import { MaterialIcons } from '@expo/vector-icons';
 import type {
   KaryakariniAttachment,
+  KaryakariniCategoryTeam,
   KaryakariniCategoryActivity,
   KaryakariniInvitation,
-  KaryakariniMember,
   KaryakariniMyTeam,
   KaryakariniTask,
   KaryakariniVersion,
@@ -37,13 +38,10 @@ type AssignmentCard = {
   source: 'team' | 'task' | 'invitation' | 'activity';
 };
 
-type TeamNodeGroup = {
-  nodeId: number;
-  nodeName: string;
-  nodeLevel: string;
-  path: string;
-  assignments: KaryakariniMyTeam[];
-  members: KaryakariniMember[];
+type TeamMemberDraft = {
+  fullName: string;
+  mobileNumber: string;
+  profilePhotoUrl: string;
 };
 
 const HINDI_NO_DATA = 'कोई डेटा नहीं';
@@ -123,20 +121,23 @@ const formatNodeLevelLabel = (value?: string | null) => {
   const normalized = raw.toLowerCase().replace(/\s+/g, '_');
   const labels: Record<string, string> = {
     rashtriya: 'राष्ट्रीय',
-    prant: 'प्रांत',
+    prant: 'प्रान्त',
     sambhag: 'संभाग',
     vibhag: 'विभाग',
     jila: 'जिला',
     khand: 'खंड',
-    mandal_basti: 'मंडल बस्ती',
-    nagar_mohalla: 'नगर मोहल्ला',
+    mandal: 'मंडल',
+    nagar: 'नगर',
+    gram: 'ग्राम',
+    basti: 'बस्ती',
+    mohalla: 'मोहल्ला',
+    // Legacy values kept for display compatibility
+    mandal_basti: 'बस्ती',
+    nagar_mohalla: 'मोहल्ला',
   };
   if (!raw) return HINDI_NO_DATA;
   return labels[normalized] || raw;
 };
-
-const memberName = (member: KaryakariniMember) =>
-  [member.first_name, member.father_name].filter(Boolean).join(' ').trim() || `सदस्य #${member.id}`;
 
 const parseLabelList = (value?: string | string[] | null) => {
   if (Array.isArray(value)) {
@@ -210,10 +211,17 @@ export default function KaryakariniMemberScreen() {
   const [activeTab, setActiveTab] = useState<MemberTab>('tasks');
   const [versionId, setVersionId] = useState<number | null>(null);
   const [teams, setTeams] = useState<KaryakariniMyTeam[]>([]);
+  const [categoryTeams, setCategoryTeams] = useState<KaryakariniCategoryTeam[]>([]);
   const [invitations, setInvitations] = useState<KaryakariniInvitation[]>([]);
-  const [teamMembersByNode, setTeamMembersByNode] = useState<Record<number, KaryakariniMember[]>>({});
-  const [teamMembersLoading, setTeamMembersLoading] = useState(false);
   const [teamLevelFilter, setTeamLevelFilter] = useState<'all' | string>('all');
+  const [showTeamModal, setShowTeamModal] = useState(false);
+  const [savingTeam, setSavingTeam] = useState(false);
+  const [teamContext, setTeamContext] = useState<AssignmentCard | null>(null);
+  const [editingTeam, setEditingTeam] = useState<KaryakariniCategoryTeam | null>(null);
+  const [teamMembersForm, setTeamMembersForm] = useState<TeamMemberDraft[]>([
+    { fullName: '', mobileNumber: '', profilePhotoUrl: '' },
+  ]);
+  const [uploadingTeamMemberIndex, setUploadingTeamMemberIndex] = useState<number | null>(null);
   const [tasks, setTasks] = useState<KaryakariniTask[]>([]);
   const [activities, setActivities] = useState<KaryakariniCategoryActivity[]>([]);
   const [showActivityModal, setShowActivityModal] = useState(false);
@@ -269,8 +277,8 @@ export default function KaryakariniMemberScreen() {
     setVersionId(selectedVersionId);
     if (!selectedVersionId) {
       setTeams([]);
+      setCategoryTeams([]);
       setInvitations([]);
-      setTeamMembersByNode({});
       setTasks([]);
       setActivities([]);
       return;
@@ -287,9 +295,11 @@ export default function KaryakariniMemberScreen() {
     const getValue = (result: PromiseSettledResult<any>) =>
       result.status === 'fulfilled' ? result.value : null;
 
-    const loadedTeams = (getValue(teamsRes)?.data?.data?.teams || []) as KaryakariniMyTeam[];
+    const loadedAssignments = ((getValue(teamsRes)?.data?.data?.assignments || getValue(teamsRes)?.data?.data?.teams || []) as KaryakariniMyTeam[]);
+    const loadedCategoryTeams = (getValue(teamsRes)?.data?.data?.teams || []) as KaryakariniCategoryTeam[];
     const loadedTasks = (getValue(taskRes)?.data?.data?.tasks || []) as KaryakariniTask[];
-    setTeams(loadedTeams);
+    setTeams(loadedAssignments);
+    setCategoryTeams(loadedCategoryTeams);
     setInvitations((getValue(invitationRes)?.data?.data?.invitations || []) as KaryakariniInvitation[]);
     setTasks(loadedTasks);
     setActivities((getValue(assignmentRes)?.data?.data?.activities || []) as KaryakariniCategoryActivity[]);
@@ -304,63 +314,6 @@ export default function KaryakariniMemberScreen() {
       setError(err?.response?.data?.message || 'कार्यकारिणी डेटा लोड करने में विफल');
     }
   }, [loadAll]);
-
-  const loadTeamMembersByNodes = useCallback(
-    async (targetVersionId: number | null, teamRows: KaryakariniMyTeam[]) => {
-      if (!targetVersionId || teamRows.length === 0) {
-        setTeamMembersByNode({});
-        setTeamMembersLoading(false);
-        return;
-      }
-
-      const nodeIds = [...new Set(teamRows.map((row) => Number(row.node_id || 0)).filter((id) => id > 0))];
-      if (!nodeIds.length) {
-        setTeamMembersByNode({});
-        setTeamMembersLoading(false);
-        return;
-      }
-
-      try {
-        setTeamMembersLoading(true);
-        const responses = await Promise.all(
-          nodeIds.map(async (nodeId) => {
-            try {
-              const response = await karyakariniClient.get('/karyakarini/members', {
-                params: {
-                  nodeId,
-                  versionId: targetVersionId,
-                  page: 1,
-                  limit: 300,
-                },
-              });
-              return {
-                nodeId,
-                members: (response?.data?.data?.members || []) as KaryakariniMember[],
-              };
-            } catch {
-              return {
-                nodeId,
-                members: [] as KaryakariniMember[],
-              };
-            }
-          })
-        );
-
-        const nextMap: Record<number, KaryakariniMember[]> = {};
-        responses.forEach(({ nodeId, members }) => {
-          const memberMap = new Map<number, KaryakariniMember>();
-          members.forEach((member) => {
-            memberMap.set(Number(member.id), member);
-          });
-          nextMap[nodeId] = Array.from(memberMap.values());
-        });
-        setTeamMembersByNode(nextMap);
-      } finally {
-        setTeamMembersLoading(false);
-      }
-    },
-    []
-  );
 
   useEffect(() => {
     if (tab === 'tasks' || tab === 'myteams' || tab === 'activities') {
@@ -383,10 +336,6 @@ export default function KaryakariniMemberScreen() {
   useEffect(() => {
     void loadData();
   }, [activeTab, selectedCategoryKey, loadData]);
-
-  useEffect(() => {
-    void loadTeamMembersByNodes(versionId, teams);
-  }, [loadTeamMembersByNodes, teams, versionId]);
 
   const handleRefresh = useCallback(async () => {
     try {
@@ -432,6 +381,95 @@ export default function KaryakariniMemberScreen() {
       Alert.alert('त्रुटि', 'डाउनलोड नहीं हो पाया');
     }
   }, []);
+
+  const handleAddTeamMemberRow = useCallback(() => {
+    setTeamMembersForm((prev) => [...prev, { fullName: '', mobileNumber: '', profilePhotoUrl: '' }]);
+  }, []);
+
+  const handleRemoveTeamMemberRow = useCallback((index: number) => {
+    setTeamMembersForm((prev) => {
+      const next = prev.filter((_, idx) => idx !== index);
+      return next.length ? next : [{ fullName: '', mobileNumber: '', profilePhotoUrl: '' }];
+    });
+  }, []);
+
+  const handleUploadTeamMemberPhoto = useCallback(async (index: number) => {
+    try {
+      setUploadingTeamMemberIndex(index);
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.85,
+      });
+      if (picked.canceled || !picked.assets?.[0]) return;
+      const asset = picked.assets[0];
+      const form = new FormData();
+      form.append('folder', 'karyakarini');
+      form.append('category', 'team-member-photo');
+      const assetFile = (asset as any)?.file;
+      if (assetFile) {
+        form.append('file', assetFile);
+      } else {
+        form.append('file', {
+          uri: asset.uri,
+          name: asset.fileName || `team-member-${Date.now()}.jpg`,
+          type: asset.mimeType || 'image/jpeg',
+        } as any);
+      }
+      const response = await karyakariniClient.post('/karyakarini/upload/attachment', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const url = String(response?.data?.data?.url || '').trim();
+      if (!url) {
+        Alert.alert('त्रुटि', 'फोटो अपलोड करने में विफल');
+        return;
+      }
+      setTeamMembersForm((prev) =>
+        prev.map((row, idx) => (idx === index ? { ...row, profilePhotoUrl: url } : row))
+      );
+    } catch (err: any) {
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'फोटो अपलोड नहीं हुई');
+    } finally {
+      setUploadingTeamMemberIndex(null);
+    }
+  }, []);
+
+  const handleSaveTeam = useCallback(async () => {
+    if (!versionId || !teamContext) return;
+    const members = teamMembersForm
+      .map((entry) => ({
+        fullName: String(entry.fullName || '').trim(),
+        mobileNumber: String(entry.mobileNumber || '').replace(/\D/g, '').slice(0, 15),
+        profilePhotoUrl: String(entry.profilePhotoUrl || '').trim() || null,
+      }))
+      .filter((entry) => entry.fullName && entry.mobileNumber);
+    if (!members.length) {
+      Alert.alert('आवश्यक', 'कम से कम एक सदस्य का नाम और मोबाइल आवश्यक है');
+      return;
+    }
+
+    try {
+      setSavingTeam(true);
+      await karyakariniClient.post('/karyakarini/my/teams', {
+        teamId: editingTeam?.id || null,
+        versionId,
+        nodeId: Number(teamContext.nodeId || 0),
+        category: teamContext.category || null,
+        subcategory: teamContext.subcategory || null,
+        members,
+      });
+      await loadData();
+      setShowTeamModal(false);
+      setEditingTeam(null);
+      setTeamContext(null);
+      setTeamMembersForm([{ fullName: '', mobileNumber: '', profilePhotoUrl: '' }]);
+      Alert.alert('सफल', 'टीम सफलतापूर्वक सेव हो गई');
+    } catch (err: any) {
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'टीम सेव नहीं हो सकी');
+    } finally {
+      setSavingTeam(false);
+    }
+  }, [editingTeam?.id, loadData, teamContext, teamMembersForm, versionId]);
 
   const applyPickedDateTime = useCallback((target: 'taskDate' | 'dueDate' | 'fromDate' | 'toDate', date: Date) => {
     const nextValue = toDateTimeInput(date.toISOString());
@@ -867,52 +905,35 @@ export default function KaryakariniMemberScreen() {
       .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   }, [teams]);
 
-  const teamNodeGroups = useMemo<TeamNodeGroup[]>(() => {
-    const byNode = new Map<number, TeamNodeGroup>();
-    teams.forEach((team) => {
-      const nodeId = Number(team.node_id || 0);
-      if (nodeId <= 0) return;
-      const existing = byNode.get(nodeId);
-      if (existing) {
-        existing.assignments.push(team);
-        return;
-      }
-      byNode.set(nodeId, {
-        nodeId,
-        nodeName: String(team.node_name || '').trim(),
-        nodeLevel: String(team.node_level || '').trim(),
-        path: String(team.hierarchy_path || team.node_name || '').trim(),
-        assignments: [team],
-        members: teamMembersByNode[nodeId] || [],
-      });
-    });
-
-    return Array.from(byNode.values())
-      .map((entry) => ({
-        ...entry,
-        members: teamMembersByNode[entry.nodeId] || [],
-      }))
-      .sort((a, b) => String(a.path || a.nodeName || '').localeCompare(String(b.path || b.nodeName || '')));
-  }, [teamMembersByNode, teams]);
-
   const teamLevelOptions = useMemo(() => {
     const map = new Map<string, string>();
-    teamNodeGroups.forEach((group) => {
-      const value = String(group.nodeLevel || '').trim().toLowerCase();
+    categoryTeams.forEach((group) => {
+      const value = String(group.node_level || '').trim().toLowerCase();
       if (!value) return;
       if (!map.has(value)) {
-        map.set(value, formatNodeLevelLabel(group.nodeLevel));
+        map.set(value, formatNodeLevelLabel(group.node_level));
       }
     });
     return Array.from(map.entries())
       .map(([value, label]) => ({ value, label }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [teamNodeGroups]);
+  }, [categoryTeams]);
 
-  const filteredTeamNodeGroups = useMemo(() => {
-    if (teamLevelFilter === 'all') return teamNodeGroups;
-    return teamNodeGroups.filter((entry) => String(entry.nodeLevel || '').trim().toLowerCase() === teamLevelFilter);
-  }, [teamLevelFilter, teamNodeGroups]);
+  const filteredCategoryTeams = useMemo(() => {
+    const selectedAssignment = assignmentCards.find((c) => c.key === selectedCategoryKey && c.source !== 'invitation');
+    return categoryTeams.filter((entry) => {
+      const levelMatch = teamLevelFilter === 'all' || String(entry.node_level || '').trim().toLowerCase() === teamLevelFilter;
+      if (!levelMatch) return false;
+      if (!selectedAssignment) return true;
+      const selectedCategory = String(selectedAssignment.category || '').trim().toLowerCase();
+      const selectedSubcategory = String(selectedAssignment.subcategory || '').trim().toLowerCase();
+      const rowCategory = String(entry.category || '').trim().toLowerCase();
+      const rowSubcategory = String(entry.subcategory || '').trim().toLowerCase();
+      if (selectedCategory && rowCategory !== selectedCategory) return false;
+      if (selectedSubcategory && rowSubcategory && rowSubcategory !== selectedSubcategory) return false;
+      return true;
+    });
+  }, [assignmentCards, categoryTeams, selectedCategoryKey, teamLevelFilter]);
 
   const subcategoryCards = useMemo(
     () =>
@@ -933,6 +954,48 @@ export default function KaryakariniMemberScreen() {
     if (selectedCategoryKey === 'all' || !selectedCategoryKey) return false;
     return subcategoryCards.some((entry) => entry.key === selectedCategoryKey);
   }, [selectedCategoryKey, subcategoryCards]);
+
+  const handleOpenTeamCreate = useCallback(() => {
+    if (!hasSelectedSubcategory) {
+      Alert.alert('आवश्यक', 'कृपया पहले उप-श्रेणी चुनें');
+      return;
+    }
+    const selectedAssignment = assignmentCards.find(
+      (c) => c.key === selectedCategoryKey && c.source !== 'invitation'
+    );
+    if (!selectedAssignment) return;
+    setTeamContext(selectedAssignment);
+    setEditingTeam(null);
+    setTeamMembersForm([{ fullName: '', mobileNumber: '', profilePhotoUrl: '' }]);
+    setShowTeamModal(true);
+  }, [assignmentCards, hasSelectedSubcategory, selectedCategoryKey]);
+
+  const handleOpenTeamEditor = useCallback((team: KaryakariniCategoryTeam) => {
+    const nextContext: AssignmentCard = {
+      key: `team-context-${team.id}`,
+      nodeId: Number(team.node_id || 0),
+      path: String(team.hierarchy_path || team.node_name || '').trim() || HINDI_NO_DATA,
+      nodeName: String(team.node_name || '').trim() || undefined,
+      nodeLevel: String(team.node_level || '').trim() || undefined,
+      category: String(team.category || '').trim() || 'General',
+      subcategory: String(team.subcategory || '').trim(),
+      pad: 'Member',
+      lastActivityAt: new Date(team.updated_at || team.created_at || 0).getTime(),
+      count: 1,
+      source: 'team',
+    };
+    const teamMembers = Array.isArray(team.team_members)
+      ? team.team_members.map((member: any) => ({
+          fullName: String(member?.fullName || member?.full_name || '').trim(),
+          mobileNumber: String(member?.mobileNumber || member?.mobile_number || '').replace(/\D/g, '').slice(0, 15),
+          profilePhotoUrl: String(member?.profilePhotoUrl || member?.profile_photo_url || '').trim(),
+        }))
+      : [];
+    setTeamContext(nextContext);
+    setEditingTeam(team);
+    setTeamMembersForm(teamMembers.length ? teamMembers : [{ fullName: '', mobileNumber: '', profilePhotoUrl: '' }]);
+    setShowTeamModal(true);
+  }, []);
 
   const handleOpenActivityCreate = useCallback(() => {
     if (!hasSelectedSubcategory) {
@@ -1265,11 +1328,11 @@ export default function KaryakariniMemberScreen() {
               कार्य ({filteredTasks.length})
             </Text>
           </TouchableOpacity>
-          {/* <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'myteams' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('myteams')}>
+          <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'myteams' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('myteams')}>
             <Text style={[styles.tabSwitchText, activeTab === 'myteams' && styles.tabSwitchTextActive]}>
-              टीम प्रबंधन ({teams.length})
+              टीम ({filteredCategoryTeams.length})
             </Text>
-          </TouchableOpacity> */}
+          </TouchableOpacity>
           <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'activities' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('activities')}>
             <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>
               गतिविधियाँ ({filteredActivities.length})
@@ -1279,6 +1342,18 @@ export default function KaryakariniMemberScreen() {
 
         {activeTab === 'myteams' ? (
           <View style={styles.listWrap}>
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.sectionTitle}>टीम प्रबंधन</Text>
+              {hasSelectedSubcategory ? (
+                <TouchableOpacity style={styles.taskEditBtn} onPress={() => handleOpenTeamCreate()}>
+                  <Text style={styles.taskEditBtnText}>+ टीम बनाएं</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            {hasSelectedSubcategory ? (
+              <Text style={styles.subHeading}>चुनी गई श्रेणी के अनुसार टीमें दिख रही हैं</Text>
+            ) : null}
+
             {teamLevelOptions.length > 0 ? (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.levelFilterRow}>
                 <TouchableOpacity
@@ -1303,115 +1378,57 @@ export default function KaryakariniMemberScreen() {
               </ScrollView>
             ) : null}
 
-            {teams.length === 0 ? (
-              <Text style={styles.helper}>कोई टीम असाइनमेंट नहीं मिला।</Text>
-            ) : filteredTeamNodeGroups.length === 0 ? (
-              <Text style={styles.helper}>चुने गए स्तर पर कोई टीम असाइनमेंट नहीं मिला।</Text>
+            {filteredCategoryTeams.length === 0 ? (
+              <Text style={styles.helper}>चुनी गई श्रेणी/स्तर के लिए कोई टीम नहीं मिली।</Text>
             ) : (
-              filteredTeamNodeGroups.map((group) => {
-                const assignedCategories = Array.from(
-                  new Set(
-                    group.assignments.flatMap((entry) =>
-                      parseLabelList(entry.categories && entry.categories.length ? entry.categories : entry.category || '')
-                    )
-                  )
-                )
-                  .map((entry) => formatDisplayLabel(entry))
-                  .join(', ') || HINDI_NO_DATA;
-
-                const assignedSubcategories = Array.from(
-                  new Set(
-                    group.assignments.flatMap((entry) =>
-                      parseLabelList(entry.subcategories && entry.subcategories.length ? entry.subcategories : entry.subcategory || '')
-                    )
-                  )
-                )
-                  .map((entry) => formatDisplayLabel(entry))
-                  .join(', ') || HINDI_NO_DATA;
-
+              filteredCategoryTeams.map((group) => {
+                const members = Array.isArray(group.team_members) ? group.team_members : [];
                 return (
-                  <View key={`team-group-${group.nodeId}`} style={styles.card}>
+                  <View key={`team-group-${group.id}`} style={styles.card}>
                     <View style={styles.cardHeaderRow}>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.cardTitle}>{displayText(group.path || group.nodeName || `नोड #${group.nodeId}`)}</Text>
-                        <Text style={styles.cardMeta}>स्तर: {formatNodeLevelLabel(group.nodeLevel)}</Text>
-                        <Text style={styles.cardMeta}>असाइनमेंट: {group.assignments.length}</Text>
+                        <Text style={styles.cardTitle}>{displayText(group.hierarchy_path || group.node_name || `नोड #${group.node_id}`)}</Text>
+                        <Text style={styles.cardMeta}>स्तर: {formatNodeLevelLabel(group.node_level)}</Text>
+                        <Text style={styles.cardMeta}>श्रेणी: {formatDisplayLabel(group.category)}</Text>
+                        <Text style={styles.cardMeta}>उप-श्रेणी: {formatDisplayLabel(group.subcategory)}</Text>
+                        {renderCreatedBy(
+                          group,
+                          Number(group.created_by || 0) === Number(user?.id)
+                            ? { name: currentUserName, avatar: currentUserAvatar }
+                            : undefined
+                        )}
                       </View>
-                      <TouchableOpacity
-                        style={styles.taskEditBtn}
-                        onPress={() => void loadTeamMembersByNodes(versionId, group.assignments)}
-                      >
-                        <Text style={styles.taskEditBtnText}>सदस्य रीफ्रेश करें</Text>
-                      </TouchableOpacity>
+                      {Number(group.created_by || 0) === Number(user?.id) ? (
+                        <TouchableOpacity style={styles.taskEditBtn} onPress={() => handleOpenTeamEditor(group)}>
+                          <Text style={styles.taskEditBtnText}>टीम संपादित करें</Text>
+                        </TouchableOpacity>
+                      ) : null}
                     </View>
 
-                    <Text style={styles.cardMeta}>असाइन श्रेणियाँ: {assignedCategories}</Text>
-                    <Text style={styles.cardMeta}>असाइन उप-श्रेणियाँ: {assignedSubcategories}</Text>
-
-                    {teamMembersLoading && group.members.length === 0 ? (
-                      <Text style={styles.helper}>सदस्य सूची लोड हो रही है...</Text>
-                    ) : group.members.length === 0 ? (
-                      <Text style={styles.helper}>इस स्तर पर कोई सदस्य नहीं मिला।</Text>
+                    {members.length === 0 ? (
+                      <Text style={styles.helper}>इस टीम में अभी सदस्य नहीं जोड़े गए।</Text>
                     ) : (
-                      <View style={styles.tableWrap}>
-                        <ScrollView horizontal showsHorizontalScrollIndicator>
-                          <View>
-                            <View style={styles.tableHeader}>
-                              <Text style={[styles.tableHeaderCell, styles.teamColName]}>नाम</Text>
-                              <Text style={[styles.tableHeaderCell, styles.teamColLevel]}>स्तर</Text>
-                              <Text style={[styles.tableHeaderCell, styles.teamColPad]}>पद</Text>
-                              <Text style={[styles.tableHeaderCell, styles.teamColCategory]}>श्रेणी</Text>
-                              <Text style={[styles.tableHeaderCell, styles.teamColSubcategory]}>उप-श्रेणी</Text>
-                              <Text style={[styles.tableHeaderCell, styles.teamColMobile]}>मोबाइल</Text>
-                              <Text style={[styles.tableHeaderCell, styles.teamColGotra]}>गोत्र</Text>
-                              <Text style={[styles.tableHeaderCell, styles.teamColVillage]}>गांव</Text>
-                              <Text style={[styles.tableHeaderCell, styles.teamColPath]}>पाथ</Text>
-                            </View>
-                            {group.members.map((member, index) => {
-                              const memberCategories = parseLabelList(
-                                member.categories && member.categories.length ? member.categories : member.category || ''
-                              )
-                                .map((entry) => formatDisplayLabel(entry))
-                                .join(', ') || HINDI_NO_DATA;
-                              const memberSubcategories = parseLabelList(
-                                member.subcategories && member.subcategories.length ? member.subcategories : member.subcategory || ''
-                              )
-                                .map((entry) => formatDisplayLabel(entry))
-                                .join(', ') || HINDI_NO_DATA;
-                              return (
-                                <View key={`team-member-${group.nodeId}-${member.id}-${index}`} style={styles.tableRow}>
-                                  <Text style={[styles.tableCell, styles.teamColName]} numberOfLines={2}>
-                                    {memberName(member)}
-                                  </Text>
-                                  <Text style={[styles.tableCell, styles.teamColLevel]} numberOfLines={2}>
-                                    {formatNodeLevelLabel(member.node_level)}
-                                  </Text>
-                                  <Text style={[styles.tableCell, styles.teamColPad]} numberOfLines={2}>
-                                    {formatDisplayLabel(member.pad)}
-                                  </Text>
-                                  <Text style={[styles.tableCell, styles.teamColCategory]} numberOfLines={2}>
-                                    {memberCategories}
-                                  </Text>
-                                  <Text style={[styles.tableCell, styles.teamColSubcategory]} numberOfLines={2}>
-                                    {memberSubcategories}
-                                  </Text>
-                                  <Text style={[styles.tableCell, styles.teamColMobile]} numberOfLines={2}>
-                                    {displayText(member.mobile_number)}
-                                  </Text>
-                                  <Text style={[styles.tableCell, styles.teamColGotra]} numberOfLines={2}>
-                                    {displayText(member.gotra)}
-                                  </Text>
-                                  <Text style={[styles.tableCell, styles.teamColVillage]} numberOfLines={2}>
-                                    {displayText(member.village || member.address_village)}
-                                  </Text>
-                                  <Text style={[styles.tableCell, styles.teamColPath]} numberOfLines={2}>
-                                    {displayText(member.hierarchy_path || member.node_name)}
-                                  </Text>
+                      <View style={{ marginTop: 8, gap: 8 }}>
+                        {members.map((member: any, index: number) => {
+                          const name = String(member?.fullName || member?.full_name || member?.name || '').trim();
+                          const mobile = String(member?.mobileNumber || member?.mobile_number || member?.mobile || '').trim();
+                          const photo = String(member?.profilePhotoUrl || member?.profile_photo_url || member?.avatar || '').trim();
+                          return (
+                            <View key={`team-member-${group.id}-${index}`} style={styles.teamMemberRow}>
+                              {photo ? (
+                                <Image source={{ uri: photo }} style={styles.teamMemberAvatar} />
+                              ) : (
+                                <View style={[styles.teamMemberAvatar, styles.creatorAvatarFallback]}>
+                                  <Text style={styles.creatorAvatarFallbackText}>{getInitials(name || 'NA')}</Text>
                                 </View>
-                              );
-                            })}
-                          </View>
-                        </ScrollView>
+                              )}
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.teamMemberName}>{displayText(name)}</Text>
+                                <Text style={styles.teamMemberMeta}>मोबाइल: {displayText(mobile)}</Text>
+                              </View>
+                            </View>
+                          );
+                        })}
                       </View>
                     )}
                   </View>
@@ -1635,6 +1652,101 @@ export default function KaryakariniMemberScreen() {
           onChange={handleDateTimePickerChange}
         />
       ) : null}
+
+      <StandardModal
+        visible={showTeamModal}
+        onClose={() => {
+          setShowTeamModal(false);
+          setEditingTeam(null);
+          setTeamContext(null);
+        }}
+        title={editingTeam ? 'टीम संपादित करें' : 'टीम बनाएं'}
+        subtitle={teamContext?.subcategory || teamContext?.category || HINDI_NO_DATA}
+        footer={
+          <>
+            <TouchableOpacity
+              style={[styles.btn, styles.btnLight]}
+              onPress={() => {
+                setShowTeamModal(false);
+                setEditingTeam(null);
+                setTeamContext(null);
+              }}
+            >
+              <Text style={[styles.btnText, styles.btnTextDark]}>रद्द करें</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.btn, styles.btnPrimary, savingTeam && styles.btnDisabled]}
+              onPress={() => void handleSaveTeam()}
+              disabled={savingTeam}
+            >
+              <Text style={styles.btnText}>{savingTeam ? 'सेव हो रहा है...' : 'टीम सेव करें'}</Text>
+            </TouchableOpacity>
+          </>
+        }
+      >
+        {teamContext ? (
+          <View style={{ backgroundColor: '#FFF9F7', borderRadius: 16, padding: 12, gap: 4, marginBottom: 12, borderWidth: 1, borderColor: '#FCEFE6' }}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: theme.colors.primary }}>
+              उप-श्रेणी: {formatDisplayLabel(teamContext.subcategory)}
+            </Text>
+            <Text style={styles.cardMeta}>श्रेणी: {formatDisplayLabel(teamContext.category)}</Text>
+            <Text style={styles.cardMeta}>स्थान: {teamContext.nodeName || teamContext.path || `#${teamContext.nodeId}`}</Text>
+            <Text style={styles.cardMeta}>स्तर: {formatNodeLevelLabel(teamContext.nodeLevel)}</Text>
+          </View>
+        ) : null}
+
+        <Text style={styles.sectionTitle}>टीम सदस्य</Text>
+        <View style={{ gap: 10, marginTop: 8 }}>
+          {teamMembersForm.map((member, idx) => (
+            <View key={`team-form-member-${idx}`} style={styles.teamMemberFormCard}>
+              <View style={styles.teamMemberFormHeader}>
+                <Text style={styles.teamMemberFormTitle}>सदस्य #{idx + 1}</Text>
+                <TouchableOpacity onPress={() => handleRemoveTeamMemberRow(idx)} disabled={teamMembersForm.length <= 1}>
+                  <Text style={[styles.teamMemberRemoveText, teamMembersForm.length <= 1 && { opacity: 0.35 }]}>हटाएं</Text>
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                style={styles.input}
+                value={member.fullName}
+                onChangeText={(value) =>
+                  setTeamMembersForm((prev) => prev.map((row, rowIdx) => (rowIdx === idx ? { ...row, fullName: value } : row)))
+                }
+                placeholder="पूरा नाम"
+              />
+              <TextInput
+                style={[styles.input, { marginTop: 8 }]}
+                value={member.mobileNumber}
+                onChangeText={(value) =>
+                  setTeamMembersForm((prev) =>
+                    prev.map((row, rowIdx) => (rowIdx === idx ? { ...row, mobileNumber: value.replace(/\D/g, '').slice(0, 15) } : row))
+                  )
+                }
+                placeholder="मोबाइल नंबर"
+                keyboardType="phone-pad"
+              />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                {member.profilePhotoUrl ? (
+                  <Image source={{ uri: member.profilePhotoUrl }} style={styles.teamMemberAvatar} />
+                ) : (
+                  <View style={[styles.teamMemberAvatar, styles.creatorAvatarFallback]}>
+                    <Text style={styles.creatorAvatarFallbackText}>{getInitials(member.fullName || 'NA')}</Text>
+                  </View>
+                )}
+                <TouchableOpacity
+                  style={[styles.taskEditBtn, { marginTop: 0 }]}
+                  onPress={() => void handleUploadTeamMemberPhoto(idx)}
+                  disabled={uploadingTeamMemberIndex === idx}
+                >
+                  <Text style={styles.taskEditBtnText}>{uploadingTeamMemberIndex === idx ? 'अपलोड...' : 'प्रोफाइल फोटो अपलोड करें'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+        </View>
+        <TouchableOpacity style={[styles.taskEditBtn, { marginTop: 12 }]} onPress={() => handleAddTeamMemberRow()}>
+          <Text style={styles.taskEditBtnText}>+ सदस्य जोड़ें</Text>
+        </TouchableOpacity>
+      </StandardModal>
 
       <StandardModal
         visible={showActivityModal}
@@ -2420,6 +2532,56 @@ const styles = StyleSheet.create({
   creatorName: {
     flex: 1,
     color: theme.colors.text.secondary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  teamMemberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.borderLight,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+  },
+  teamMemberAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: theme.colors.primarySoft,
+  },
+  teamMemberName: {
+    color: theme.colors.text.primary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  teamMemberMeta: {
+    color: theme.colors.text.secondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  teamMemberFormCard: {
+    borderWidth: 1,
+    borderColor: theme.colors.borderLight,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    padding: 10,
+  },
+  teamMemberFormHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  teamMemberFormTitle: {
+    color: theme.colors.text.primary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  teamMemberRemoveText: {
+    color: theme.colors.error,
     fontSize: 12,
     fontWeight: '700',
   },

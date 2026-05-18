@@ -196,6 +196,29 @@ export type KaryakariniMyTeam = {
   hierarchy_path?: string | null;
 };
 
+export type KaryakariniCategoryTeamMember = {
+  fullName: string;
+  mobileNumber: string;
+  profilePhotoUrl?: string | null;
+};
+
+export type KaryakariniCategoryTeam = {
+  id: number;
+  version_id: number;
+  node_id: number;
+  node_name?: string | null;
+  node_level?: string | null;
+  hierarchy_path?: string | null;
+  category: string;
+  subcategory?: string | null;
+  created_by: number;
+  created_by_name?: string | null;
+  created_by_avatar?: string | null;
+  team_members: KaryakariniCategoryTeamMember[];
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 export type KaryakariniTask = {
   id: number;
   title: string;
