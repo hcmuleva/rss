@@ -60,6 +60,8 @@ const defaultPagination: KaryakariniPagination = {
   totalPages: 1,
 };
 
+const ACTIVITY_OPTIONS = ['धर्मरक्षा सूत्र', 'धर्मरक्षा दिवस', 'भारतमाता पूजन', 'संत यात्रा'];
+
 const NODE_LEVEL_OPTIONS = [
   { label: 'राष्ट्रीय', value: 'rashtriya' },
   { label: 'प्रान्त', value: 'prant' },
@@ -1363,7 +1365,7 @@ export default function KaryakariniModuleScreen() {
       } catch (err: any) {
         setActivityRows([]);
         setActivityPagination(defaultPagination);
-        Alert.alert('त्रुटि', err?.response?.data?.message || 'श्रेणी गतिविधियाँ लोड करने में विफल');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'आयाम गतिविधियाँ लोड करने में विफल');
       } finally {
         setActivitiesLoading(false);
       }
@@ -1412,7 +1414,7 @@ export default function KaryakariniModuleScreen() {
     } catch (err: any) {
       if (forType === 'meeting') setMeetingMembers([]);
       else setTaskMembers([]);
-      Alert.alert('त्रुटि', err?.response?.data?.message || 'नोड सदस्य लोड करने में विफल');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'नोड कार्यकर्ता लोड करने में विफल');
     }
   }, []);
 
@@ -1430,7 +1432,7 @@ export default function KaryakariniModuleScreen() {
       setMeetingGuests((response?.data?.data?.guests || []) as KaryakariniGuestMember[]);
     } catch (err: any) {
       setMeetingGuests([]);
-      Alert.alert('त्रुटि', err?.response?.data?.message || 'अतिथि सदस्य लोड करने में विफल');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'अतिथि कार्यकर्ता लोड करने में विफल');
     } finally {
       setMeetingGuestSearching(false);
     }
@@ -1586,7 +1588,7 @@ export default function KaryakariniModuleScreen() {
         const payload = response?.data?.data || {};
         const avatarUrl = String(payload.url || '').trim();
         if (!avatarUrl) {
-          Alert.alert('त्रुटि', 'सदस्य फोटो अपलोड करने में विफल');
+          Alert.alert('त्रुटि', 'कार्यकर्ता फोटो अपलोड करने में विफल');
           return;
         }
         if (target === 'edit') {
@@ -1597,7 +1599,7 @@ export default function KaryakariniModuleScreen() {
           setMemberForm((prev) => ({ ...prev, avatar: avatarUrl }));
         }
       } catch (err: any) {
-        Alert.alert('त्रुटि', err?.response?.data?.message || 'सदस्य फोटो अपलोड करने में विफल');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'कार्यकर्ता फोटो अपलोड करने में विफल');
       } finally {
         setUploadingMemberPhoto(false);
       }
@@ -1804,7 +1806,7 @@ export default function KaryakariniModuleScreen() {
       } catch (err: any) {
         setMembers([]);
         setMembersPagination(defaultPagination);
-        Alert.alert('त्रुटि', err?.response?.data?.message || 'सदस्य लोड करने में विफल');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'कार्यकर्ता लोड करने में विफल');
       } finally {
         setMembersLoading(false);
       }
@@ -1857,7 +1859,7 @@ export default function KaryakariniModuleScreen() {
       } catch (err: any) {
         setMembers([]);
         setMembersPagination(defaultPagination);
-        Alert.alert('त्रुटि', err?.response?.data?.message || 'सदस्य लोड करने में विफल');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'कार्यकर्ता लोड करने में विफल');
       } finally {
         setMembersLoading(false);
       }
@@ -2163,11 +2165,11 @@ export default function KaryakariniModuleScreen() {
   const handleSubmitMemberEdit = useCallback(async () => {
     if (!editingMember || !selectedVersionId) return;
     if (!editMemberForm.pad.trim()) {
-      Alert.alert('आवश्यक', 'पद आवश्यक है');
+      Alert.alert('आवश्यक', 'दायित्व आवश्यक है');
       return;
     }
     if (!editMemberForm.category.trim() || !editMemberForm.subcategory.trim()) {
-      Alert.alert('आवश्यक', 'श्रेणी और उप-श्रेणी आवश्यक हैं');
+      Alert.alert('आवश्यक', 'आयाम और टोली आवश्यक हैं');
       return;
     }
 
@@ -2198,9 +2200,9 @@ export default function KaryakariniModuleScreen() {
       if (membersNode) {
         await loadMembers(membersNode, membersPagination.page || 1);
       }
-      Alert.alert('सफल', 'सदस्य सफलतापूर्वक अपडेट हो गया');
+      Alert.alert('सफल', 'कार्यकर्ता सफलतापूर्वक अपडेट हो गया');
     } catch (err: any) {
-      Alert.alert('त्रुटि', err?.response?.data?.message || 'सदस्य अपडेट करने में विफल');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'कार्यकर्ता अपडेट करने में विफल');
     } finally {
       setSavingMemberEdit(false);
     }
@@ -2506,11 +2508,11 @@ export default function KaryakariniModuleScreen() {
           return;
         }
         if (!assignForm.pad.trim()) {
-          Alert.alert('आवश्यक', 'पद आवश्यक है');
+          Alert.alert('आवश्यक', 'दायित्व आवश्यक है');
           return;
         }
         if (!assignForm.category.trim() || !assignForm.subcategory.trim()) {
-          Alert.alert('आवश्यक', 'श्रेणी और उप-श्रेणी आवश्यक हैं');
+          Alert.alert('आवश्यक', 'आयाम और टोली आवश्यक हैं');
           return;
         }
         const assignCategories = parseLabelList(assignForm.category);
@@ -2533,11 +2535,11 @@ export default function KaryakariniModuleScreen() {
           return;
         }
         if (!memberForm.pad.trim()) {
-          Alert.alert('आवश्यक', 'पद आवश्यक है');
+          Alert.alert('आवश्यक', 'दायित्व आवश्यक है');
           return;
         }
         if (!memberForm.category.trim() || !memberForm.subcategory.trim()) {
-          Alert.alert('आवश्यक', 'श्रेणी और उप-श्रेणी आवश्यक हैं');
+          Alert.alert('आवश्यक', 'आयाम और टोली आवश्यक हैं');
           return;
         }
         const createCategories = parseLabelList(memberForm.category);
@@ -2569,9 +2571,9 @@ export default function KaryakariniModuleScreen() {
       if (created?.createdUser) {
         const loginId = created.mobileNumber || created.email || memberForm.mobileNumber.trim();
         const loginPassword = created.loginPassword || memberForm.password.trim() || 'welcome';
-      Alert.alert('सफल', `सदस्य जोड़ दिया गया। नए उपयोगकर्ता का लॉगिन:\nआईडी: ${loginId}\nपासवर्ड: ${loginPassword}`);
+      Alert.alert('सफल', `कार्यकर्ता जोड़ दिया गया। नए उपयोगकर्ता का लॉगिन:\nआईडी: ${loginId}\nपासवर्ड: ${loginPassword}`);
       } else {
-        Alert.alert('सफल', memberModalTab === 'assign' ? 'सदस्य सफलतापूर्वक आवंटित हुआ' : 'सदस्य सफलतापूर्वक जोड़ दिया गया');
+        Alert.alert('सफल', memberModalTab === 'assign' ? 'कार्यकर्ता सफलतापूर्वक आवंटित हुआ' : 'कार्यकर्ता सफलतापूर्वक जोड़ दिया गया');
       }
 
       const selectedIds = selectedPathNodes.map((node) => node.id);
@@ -2580,7 +2582,7 @@ export default function KaryakariniModuleScreen() {
         await loadMembers(addTargetNode, membersPagination.page || 1);
       }
     } catch (err: any) {
-      Alert.alert('त्रुटि', err?.response?.data?.message || 'सदस्य जोड़ने में विफल');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'कार्यकर्ता जोड़ने में विफल');
     } finally {
       setAddingMember(false);
     }
@@ -3146,7 +3148,7 @@ export default function KaryakariniModuleScreen() {
     const safeTitle = String(activityForm.title || '').trim();
     const safeSubcategory = String(activityForm.subcategory || '').trim();
     if (safeNodeId <= 0 || !safeTitle || !safeSubcategory) {
-      Alert.alert('सत्यापन', 'कृपया हाइरार्की में नोड चुनें और शीर्षक व उप-श्रेणी भरें।');
+      Alert.alert('सत्यापन', 'कृपया हाइरार्की में नोड चुनें और शीर्षक व टोली भरें।');
       return;
     }
 
@@ -3399,7 +3401,7 @@ export default function KaryakariniModuleScreen() {
     const taskCategories = parseLabelList(taskForm.category);
     const taskSubcategories = parseLabelList(taskForm.subcategory);
     if (!taskSubcategories.length) {
-      Alert.alert('आवश्यक', 'कार्य उप-श्रेणी चयन आवश्यक है');
+      Alert.alert('आवश्यक', 'कार्य टोली चयन आवश्यक है');
       return;
     }
     if (isAdminAssignMode && taskForm.assignedUserIds.length === 0) {
@@ -3463,7 +3465,7 @@ export default function KaryakariniModuleScreen() {
     const nodeId = Number(selectedRoleNodeId || 0);
     const targetUserId = Number(selectedRoleUserId || 0);
     if (!nodeId || !targetUserId) {
-      Alert.alert('आवश्यक', 'एडमिन भूमिका देने के लिए नोड स्तर, नोड और सदस्य चुनें');
+      Alert.alert('आवश्यक', 'एडमिन भूमिका देने के लिए नोड स्तर, नोड और कार्यकर्ता चुनें');
       return;
     }
 
@@ -3611,7 +3613,7 @@ export default function KaryakariniModuleScreen() {
               style={[styles.tabSwitchBtn, activeTab === 'members' && styles.tabSwitchBtnActive]}
               onPress={() => setActiveTab('members')}
             >
-              <Text style={[styles.tabSwitchText, activeTab === 'members' && styles.tabSwitchTextActive]}>सदस्य</Text>
+              <Text style={[styles.tabSwitchText, activeTab === 'members' && styles.tabSwitchTextActive]}>कार्यकर्ता</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.tabSwitchBtn, activeTab === 'meetings' && styles.tabSwitchBtnActive]}
@@ -3631,12 +3633,12 @@ export default function KaryakariniModuleScreen() {
             >
               <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>गतिविधियाँ</Text>
             </TouchableOpacity>
-            <TouchableOpacity
+            {/* <TouchableOpacity
               style={[styles.tabSwitchBtn, activeTab === 'roles' && styles.tabSwitchBtnActive]}
               onPress={() => setActiveTab('roles')}
             >
               <Text style={[styles.tabSwitchText, activeTab === 'roles' && styles.tabSwitchTextActive]}>भूमिकाएँ</Text>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
           </View>
         </ScrollView>
 
@@ -3786,14 +3788,14 @@ export default function KaryakariniModuleScreen() {
                 />
               </View>
 
-              {/* श्रेणी Dropdown Selector */}
+              {/* आयाम Dropdown Selector */}
               <View style={styles.filterCol}>
-                <Text style={styles.sectionLabel}>श्रेणी</Text>
+                <Text style={styles.sectionLabel}>आयाम</Text>
                 <TouchableOpacity
                   style={[styles.inputCompact, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minWidth: 100 }]}
                   onPress={() => {
                     const options = CATEGORY_SUBCATEGORY_OPTIONS.map(item => ({ label: item.category, value: item.category }));
-                    setSearchPickerTitle('श्रेणी चुनें');
+                    setSearchPickerTitle('आयाम चुनें');
                     setSearchPickerOptions(options);
                     setSearchPickerSearchText('');
                     setOnSearchPickerSelect(() => (val: string) => {
@@ -3804,15 +3806,15 @@ export default function KaryakariniModuleScreen() {
                   }}
                 >
                   <Text style={{ fontSize: 12, color: taskFilterCategory ? theme.colors.text.primary : '#94A3B8', marginRight: 4 }}>
-                    {taskFilterCategory || 'श्रेणी चुनें'}
+                    {taskFilterCategory || 'आयाम चुनें'}
                   </Text>
                   <MaterialIcons name="arrow-drop-down" size={16} color={theme.colors.text.secondary} />
                 </TouchableOpacity>
               </View>
 
-              {/* उप-श्रेणी Dropdown Selector */}
+              {/* टोली Dropdown Selector */}
               <View style={styles.filterCol}>
-                <Text style={styles.sectionLabel}>उप-श्रेणी</Text>
+                <Text style={styles.sectionLabel}>टोली</Text>
                 <TouchableOpacity
                   style={[styles.inputCompact, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minWidth: 100 }]}
                   onPress={() => {
@@ -3823,7 +3825,7 @@ export default function KaryakariniModuleScreen() {
                       subList = Array.from(new Set(CATEGORY_SUBCATEGORY_OPTIONS.flatMap(item => item.subcategories)));
                     }
                     const options = subList.map(sub => ({ label: sub, value: sub }));
-                    setSearchPickerTitle('उप-श्रेणी चुनें');
+                    setSearchPickerTitle('टोली चुनें');
                     setSearchPickerOptions(options);
                     setSearchPickerSearchText('');
                     setOnSearchPickerSelect(() => (val: string) => {
@@ -3833,7 +3835,7 @@ export default function KaryakariniModuleScreen() {
                   }}
                 >
                   <Text style={{ fontSize: 12, color: taskFilterSubcategory ? theme.colors.text.primary : '#94A3B8', marginRight: 4 }}>
-                    {taskFilterSubcategory || 'उप-श्रेणी चुनें'}
+                    {taskFilterSubcategory || 'टोली चुनें'}
                   </Text>
                   <MaterialIcons name="arrow-drop-down" size={16} color={theme.colors.text.secondary} />
                 </TouchableOpacity>
@@ -3888,8 +3890,8 @@ export default function KaryakariniModuleScreen() {
                   <Text style={[styles.tableHeaderCell, styles.colDate]}>दिनांक</Text>
                   <Text style={[styles.tableHeaderCell, styles.colTitle]}>शीर्षक</Text>
                   <Text style={[styles.tableHeaderCell, styles.colNode]}>नोड</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colCat]}>श्रेणी</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colSubcat]}>उप-श्रेणी</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colCat]}>आयाम</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colSubcat]}>टोली</Text>
                   <Text style={[styles.tableHeaderCell, styles.colAssignee]}>असाइनी</Text>
                   <Text style={[styles.tableHeaderCell, styles.colStatus]}>स्थिति</Text>
                   <Text style={[styles.tableHeaderCell, styles.colCount]}>संलग्नक</Text>
@@ -4012,7 +4014,7 @@ export default function KaryakariniModuleScreen() {
         {activeTab === 'members' ? (
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>सदस्य</Text>
+              <Text style={styles.sectionTitle}>कार्यकर्ता</Text>
             </View>
             {!canManageActivities ? <Text style={styles.modalSub}>इस उपयोगकर्ता को कोई नोड दायरा आवंटित नहीं है</Text> : null}
             <View style={styles.filterGrid}>
@@ -4046,14 +4048,14 @@ export default function KaryakariniModuleScreen() {
                 />
               </View>
 
-              {/* श्रेणी Dropdown Selector */}
+              {/* आयाम Dropdown Selector */}
               <View style={styles.filterCol}>
-                <Text style={styles.sectionLabel}>श्रेणी</Text>
+                <Text style={styles.sectionLabel}>आयाम</Text>
                 <TouchableOpacity
                   style={[styles.inputCompact, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minWidth: 100 }]}
                   onPress={() => {
                     const options = CATEGORY_SUBCATEGORY_OPTIONS.map(item => ({ label: item.category, value: item.category }));
-                    setSearchPickerTitle('श्रेणी चुनें');
+                    setSearchPickerTitle('आयाम चुनें');
                     setSearchPickerOptions(options);
                     setSearchPickerSearchText('');
                     setOnSearchPickerSelect(() => (val: string) => {
@@ -4064,15 +4066,15 @@ export default function KaryakariniModuleScreen() {
                   }}
                 >
                   <Text style={{ fontSize: 12, color: memberFilterCategory ? theme.colors.text.primary : '#94A3B8', marginRight: 4 }}>
-                    {memberFilterCategory || 'श्रेणी चुनें'}
+                    {memberFilterCategory || 'आयाम चुनें'}
                   </Text>
                   <MaterialIcons name="arrow-drop-down" size={16} color={theme.colors.text.secondary} />
                 </TouchableOpacity>
               </View>
 
-              {/* उप-श्रेणी Dropdown Selector */}
+              {/* टोली Dropdown Selector */}
               <View style={styles.filterCol}>
-                <Text style={styles.sectionLabel}>उप-श्रेणी</Text>
+                <Text style={styles.sectionLabel}>टोली</Text>
                 <TouchableOpacity
                   style={[styles.inputCompact, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minWidth: 100 }]}
                   onPress={() => {
@@ -4083,7 +4085,7 @@ export default function KaryakariniModuleScreen() {
                       subList = Array.from(new Set(CATEGORY_SUBCATEGORY_OPTIONS.flatMap(item => item.subcategories)));
                     }
                     const options = subList.map(sub => ({ label: sub, value: sub }));
-                    setSearchPickerTitle('उप-श्रेणी चुनें');
+                    setSearchPickerTitle('टोली चुनें');
                     setSearchPickerOptions(options);
                     setSearchPickerSearchText('');
                     setOnSearchPickerSelect(() => (val: string) => {
@@ -4093,7 +4095,7 @@ export default function KaryakariniModuleScreen() {
                   }}
                 >
                   <Text style={{ fontSize: 12, color: memberFilterSubcategory ? theme.colors.text.primary : '#94A3B8', marginRight: 4 }}>
-                    {memberFilterSubcategory || 'उप-श्रेणी चुनें'}
+                    {memberFilterSubcategory || 'टोली चुनें'}
                   </Text>
                   <MaterialIcons name="arrow-drop-down" size={16} color={theme.colors.text.secondary} />
                 </TouchableOpacity>
@@ -4122,11 +4124,11 @@ export default function KaryakariniModuleScreen() {
 
             {membersLoading ? (
               <View style={styles.tableEmpty}>
-                <Text style={styles.helper}>सदस्य लोड हो रहे हैं...</Text>
+                <Text style={styles.helper}>कार्यकर्ता लोड हो रहे हैं...</Text>
               </View>
             ) : groupedMembersForTab.length === 0 ? (
               <View style={styles.tableEmpty}>
-                <Text style={styles.helper}>चुने गए फ़िल्टर के लिए कोई सदस्य नहीं मिला</Text>
+                <Text style={styles.helper}>चुने गए फ़िल्टर के लिए कोई कार्यकर्ता नहीं मिला</Text>
               </View>
             ) : (
               groupedMembersForTab.map((group) => (
@@ -4143,8 +4145,8 @@ export default function KaryakariniModuleScreen() {
                               <Text style={[styles.memberTableHeaderCell, styles.memberColPhoto]}>फोटो</Text>
                               <Text style={[styles.memberTableHeaderCell, styles.memberColName]}>नाम</Text>
                               <Text style={[styles.memberTableHeaderCell, styles.memberColLevel]}>स्तर</Text>
-                              <Text style={[styles.memberTableHeaderCell, styles.memberColCategory]}>श्रेणी</Text>
-                              <Text style={[styles.memberTableHeaderCell, styles.memberColSubcategory]}>उप-श्रेणी</Text>
+                              <Text style={[styles.memberTableHeaderCell, styles.memberColCategory]}>आयाम</Text>
+                              <Text style={[styles.memberTableHeaderCell, styles.memberColSubcategory]}>टोली</Text>
                               <Text style={[styles.memberTableHeaderCell, styles.memberColMobile]}>मोबाइल</Text>
                               <Text style={[styles.memberTableHeaderCell, styles.memberColGotra]}>गोत्र</Text>
                               <Text style={[styles.memberTableHeaderCell, styles.memberColVillage]}>गांव</Text>
@@ -4305,14 +4307,14 @@ export default function KaryakariniModuleScreen() {
                 />
               </View>
 
-              {/* श्रेणी Dropdown Selector */}
+              {/* आयाम Dropdown Selector */}
               <View style={styles.filterCol}>
-                <Text style={styles.sectionLabel}>श्रेणी</Text>
+                <Text style={styles.sectionLabel}>आयाम</Text>
                 <TouchableOpacity
                   style={[styles.inputCompact, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minWidth: 100 }]}
                   onPress={() => {
                     const options = CATEGORY_SUBCATEGORY_OPTIONS.map(item => ({ label: item.category, value: item.category }));
-                    setSearchPickerTitle('श्रेणी चुनें');
+                    setSearchPickerTitle('आयाम चुनें');
                     setSearchPickerOptions(options);
                     setSearchPickerSearchText('');
                     setOnSearchPickerSelect(() => (val: string) => {
@@ -4323,15 +4325,15 @@ export default function KaryakariniModuleScreen() {
                   }}
                 >
                   <Text style={{ fontSize: 12, color: activityFilterCategory ? theme.colors.text.primary : '#94A3B8', marginRight: 4 }}>
-                    {activityFilterCategory || 'श्रेणी चुनें'}
+                    {activityFilterCategory || 'आयाम चुनें'}
                   </Text>
                   <MaterialIcons name="arrow-drop-down" size={16} color={theme.colors.text.secondary} />
                 </TouchableOpacity>
               </View>
 
-              {/* उप-श्रेणी Dropdown Selector */}
+              {/* टोली Dropdown Selector */}
               <View style={styles.filterCol}>
-                <Text style={styles.sectionLabel}>उप-श्रेणी</Text>
+                <Text style={styles.sectionLabel}>टोली</Text>
                 <TouchableOpacity
                   style={[styles.inputCompact, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minWidth: 100 }]}
                   onPress={() => {
@@ -4342,7 +4344,7 @@ export default function KaryakariniModuleScreen() {
                       subList = Array.from(new Set(CATEGORY_SUBCATEGORY_OPTIONS.flatMap(item => item.subcategories)));
                     }
                     const options = subList.map(sub => ({ label: sub, value: sub }));
-                    setSearchPickerTitle('उप-श्रेणी चुनें');
+                    setSearchPickerTitle('टोली चुनें');
                     setSearchPickerOptions(options);
                     setSearchPickerSearchText('');
                     setOnSearchPickerSelect(() => (val: string) => {
@@ -4352,7 +4354,7 @@ export default function KaryakariniModuleScreen() {
                   }}
                 >
                   <Text style={{ fontSize: 12, color: activityFilterSubcategory ? theme.colors.text.primary : '#94A3B8', marginRight: 4 }}>
-                    {activityFilterSubcategory || 'उप-श्रेणी चुनें'}
+                    {activityFilterSubcategory || 'टोली चुनें'}
                   </Text>
                   <MaterialIcons name="arrow-drop-down" size={16} color={theme.colors.text.secondary} />
                 </TouchableOpacity>
@@ -4386,8 +4388,8 @@ export default function KaryakariniModuleScreen() {
                   <Text style={[styles.tableHeaderCell, styles.colDate]}>दिनांक</Text>
                   <Text style={[styles.tableHeaderCell, styles.colTitle]}>शीर्षक</Text>
                   <Text style={[styles.tableHeaderCell, styles.colNode]}>नोड</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colCat]}>श्रेणी</Text>
-                  <Text style={[styles.tableHeaderCell, styles.colSubcat]}>उप-श्रेणी</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colCat]}>आयाम</Text>
+                  <Text style={[styles.tableHeaderCell, styles.colSubcat]}>टोली</Text>
                   <Text style={[styles.tableHeaderCell, styles.colBy]}>द्वारा</Text>
                   <Text style={[styles.tableHeaderCell, styles.colAction]}>कार्य</Text>
                 </View>
@@ -4404,7 +4406,15 @@ export default function KaryakariniModuleScreen() {
                     <View key={`activity-${row.id}`} style={[styles.tableRow, index % 2 === 1 && styles.tableRowEven]}>
                       <Text style={[styles.tableCell, styles.colDate]}>{String(row.created_at || '').slice(0, 10) || '-'}</Text>
                       <View style={[styles.tableCell, styles.colTitle]}>
-                        <Text style={styles.tableCellTextCompact} numberOfLines={2}>{row.title}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 2 }}>
+                          <Text style={styles.tableCellTextCompact} numberOfLines={2}>{row.title}</Text>
+                          {ACTIVITY_OPTIONS.includes(row.title) ? (
+                            <View style={{ backgroundColor: theme.colors.primary, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                              <MaterialIcons name="event-available" size={12} color="#fff" />
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#fff' }}>{row.title}</Text>
+                            </View>
+                          ) : null}
+                        </View>
                         {row.description ? <Text style={styles.tableCellSubText} numberOfLines={2}>{row.description}</Text> : null}
                         {(row.male_count || row.female_count || row.children_count) ? (
                           <Text style={[styles.tableCellSubText, { color: theme.colors.primary, fontWeight: '600', marginTop: 4 }]}>
@@ -4481,10 +4491,10 @@ export default function KaryakariniModuleScreen() {
                 />
 
                 <View style={styles.assignmentMemberSection}>
-                  <Text style={styles.sectionLabel}>प्रमोट करने के लिए सदस्य चुनें</Text>
+                  <Text style={styles.sectionLabel}>प्रमोट करने के लिए कार्यकर्ता चुनें</Text>
                   <View style={styles.selectList}>
                     {loadingRoleMembers ? (
-                      <View style={styles.loadingWrapper}><Text style={styles.modalSub}>सदस्य लोड हो रहे हैं...</Text></View>
+                      <View style={styles.loadingWrapper}><Text style={styles.modalSub}>कार्यकर्ता लोड हो रहे हैं...</Text></View>
                     ) : null}
                     {!loadingRoleMembers &&
                       roleMembers
@@ -4511,7 +4521,7 @@ export default function KaryakariniModuleScreen() {
                           );
                         })}
                     {!loadingRoleMembers && roleMembers.filter((member) => Number(member.user_id || 0) > 0).length === 0 ? (
-                      <View style={styles.loadingWrapper}><Text style={styles.modalSub}>चुने गए नोड के लिए कोई सदस्य नहीं मिला</Text></View>
+                      <View style={styles.loadingWrapper}><Text style={styles.modalSub}>चुने गए नोड के लिए कोई कार्यकर्ता नहीं मिला</Text></View>
                     ) : null}
                   </View>
                 </View>
@@ -4570,7 +4580,7 @@ export default function KaryakariniModuleScreen() {
                     ? pillsModalMember.categories
                     : pillsModalMember.category || ''
                 ).length === 0 ? (
-                  <Text style={styles.tabPillEmptyText}>कोई श्रेणी नहीं</Text>
+                  <Text style={styles.tabPillEmptyText}>कोई आयाम नहीं</Text>
                 ) : null}
               </View>
             </View>
@@ -4594,7 +4604,7 @@ export default function KaryakariniModuleScreen() {
                     ? pillsModalMember.subcategories
                     : pillsModalMember.subcategory || ''
                 ).length === 0 ? (
-                  <Text style={styles.tabPillEmptyText}>कोई उप-श्रेणी नहीं</Text>
+                  <Text style={styles.tabPillEmptyText}>कोई टोली नहीं</Text>
                 ) : null}
               </View>
             </View>
@@ -4605,8 +4615,8 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showEditMemberModal}
         onClose={() => setShowEditMemberModal(false)}
-        title="सदस्य संपादित करें"
-        subtitle={editingMember?.hierarchy_path || editingMember?.node_name || 'सदस्य विवरण'}
+        title="कार्यकर्ता संपादित करें"
+        subtitle={editingMember?.hierarchy_path || editingMember?.node_name || 'कार्यकर्ता विवरण'}
         footer={
           <>
             <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowEditMemberModal(false)}>
@@ -4668,7 +4678,7 @@ export default function KaryakariniModuleScreen() {
             </View>
           </View>
 
-          <Text style={styles.fieldLabel}>सदस्य फोटो</Text>
+          <Text style={styles.fieldLabel}>कार्यकर्ता फोटो</Text>
           <View style={styles.photoActionsRow}>
             {editMemberForm.avatar ? (
               <Image source={{ uri: editMemberForm.avatar }} style={styles.memberPhotoPreview} />
@@ -4698,7 +4708,7 @@ export default function KaryakariniModuleScreen() {
 
           <View style={styles.twoColRow}>
             <View style={styles.twoColField}>
-              <Text style={styles.fieldLabel}>पद</Text>
+              <Text style={styles.fieldLabel}>दायित्व</Text>
               <TouchableOpacity
                 style={styles.input}
                 onPress={() => {
@@ -4710,15 +4720,15 @@ export default function KaryakariniModuleScreen() {
                 disabled={loadingPads}
               >
                 <Text style={editMemberForm.pad ? styles.inputText : styles.inputPlaceholder}>
-                  {editMemberForm.pad || (loadingPads ? 'लोड हो रहा है...' : 'पद चुनें')}
+                  {editMemberForm.pad || (loadingPads ? 'लोड हो रहा है...' : 'दायित्व चुनें')}
                 </Text>
               </TouchableOpacity>
             </View>
             <View style={styles.twoColField}>
-              <Text style={styles.fieldLabel}>पदभार आवंटन *</Text>
+              <Text style={styles.fieldLabel}>दायित्व आवंटन *</Text>
               <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('edit')}>
                 <Text style={editSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                  {editSelectedSubcategories.length ? `${editSelectedSubcategories.length} चयनित` : 'पदभार चुनें'}
+                  {editSelectedSubcategories.length ? `${editSelectedSubcategories.length} चयनित` : 'दायित्व चुनें'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -4739,7 +4749,7 @@ export default function KaryakariniModuleScreen() {
             ))}
           </View>
           <TouchableOpacity onPress={() => setEditMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-            <Text style={styles.clearLink}>श्रेणियाँ साफ करें</Text>
+            <Text style={styles.clearLink}>आयाम साफ करें</Text>
           </TouchableOpacity>
 
           <Text style={styles.fieldLabel}>पता</Text>
@@ -4802,7 +4812,7 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showAddMemberModal}
         onClose={() => setShowAddMemberModal(false)}
-        title="सदस्य जोड़ें"
+        title="कार्यकर्ता जोड़ें"
         subtitle={addTargetNode?.name || 'चयनित नोड'}
         topContent={
           <View style={styles.modalTabRow}>
@@ -4811,7 +4821,7 @@ export default function KaryakariniModuleScreen() {
               onPress={() => setMemberModalTab('create')}
             >
               <Text style={[styles.modalTabText, memberModalTab === 'create' && styles.modalTabTextActive]}>
-                नया सदस्य
+                नया कार्यकर्ता
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -4834,7 +4844,7 @@ export default function KaryakariniModuleScreen() {
               disabled={addingMember}
               onPress={() => void handleSubmitMember()}
             >
-              <Text style={styles.btnText}>{addingMember ? 'सहेजा जा रहा है...' : memberModalTab === 'assign' ? 'सदस्य आवंटित करें' : 'सदस्य बनाएं'}</Text>
+              <Text style={styles.btnText}>{addingMember ? 'सहेजा जा रहा है...' : memberModalTab === 'assign' ? 'कार्यकर्ता आवंटित करें' : 'कार्यकर्ता बनाएं'}</Text>
             </TouchableOpacity>
           </>
         }
@@ -4886,7 +4896,7 @@ export default function KaryakariniModuleScreen() {
               </View>
             </View>
 
-            <Text style={styles.fieldLabel}>सदस्य फोटो</Text>
+            <Text style={styles.fieldLabel}>कार्यकर्ता फोटो</Text>
             <View style={styles.photoActionsRow}>
               {memberForm.avatar ? (
                 <Image source={{ uri: memberForm.avatar }} style={styles.memberPhotoPreview} />
@@ -4916,7 +4926,7 @@ export default function KaryakariniModuleScreen() {
 
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>पद</Text>
+                <Text style={styles.fieldLabel}>दायित्व</Text>
                 <TouchableOpacity
                   style={styles.input}
                   onPress={() => {
@@ -4928,15 +4938,15 @@ export default function KaryakariniModuleScreen() {
                   disabled={loadingPads}
                 >
                   <Text style={memberForm.pad ? styles.inputText : styles.inputPlaceholder}>
-                    {memberForm.pad || (loadingPads ? 'लोड हो रहा है...' : 'पद चुनें')}
+                    {memberForm.pad || (loadingPads ? 'लोड हो रहा है...' : 'दायित्व चुनें')}
                   </Text>
                 </TouchableOpacity>
               </View>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>पदभार आवंटन *</Text>
+                <Text style={styles.fieldLabel}>दायित्व आवंटन *</Text>
                 <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer()}>
                   <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                    {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} चयनित` : 'पदभार चुनें'}
+                    {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} चयनित` : 'दायित्व चुनें'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -4957,7 +4967,7 @@ export default function KaryakariniModuleScreen() {
               ))}
             </View>
             <TouchableOpacity onPress={() => setMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-              <Text style={styles.clearLink}>श्रेणियाँ साफ करें</Text>
+              <Text style={styles.clearLink}>आयाम साफ करें</Text>
             </TouchableOpacity>
 
             <Text style={styles.fieldLabel}>पता</Text>
@@ -5064,7 +5074,7 @@ export default function KaryakariniModuleScreen() {
 
             {selectedUser ? (
               <View>
-                <Text style={styles.fieldLabel}>सदस्य फोटो</Text>
+                <Text style={styles.fieldLabel}>कार्यकर्ता फोटो</Text>
                 <View style={styles.photoActionsRow}>
                   {assignForm.avatar || selectedUser.avatar ? (
                     <Image source={{ uri: String(assignForm.avatar || selectedUser.avatar) }} style={styles.memberPhotoPreview} />
@@ -5118,7 +5128,7 @@ export default function KaryakariniModuleScreen() {
 
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>पद</Text>
+                <Text style={styles.fieldLabel}>दायित्व</Text>
                 <TouchableOpacity
                   style={styles.input}
                   onPress={() => {
@@ -5130,15 +5140,15 @@ export default function KaryakariniModuleScreen() {
                   disabled={loadingPads}
                 >
                   <Text style={assignForm.pad ? styles.inputText : styles.inputPlaceholder}>
-                    {assignForm.pad || (loadingPads ? 'लोड हो रहा है...' : 'पद चुनें')}
+                    {assignForm.pad || (loadingPads ? 'लोड हो रहा है...' : 'दायित्व चुनें')}
                   </Text>
                 </TouchableOpacity>
               </View>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>पदभार आवंटन *</Text>
+                <Text style={styles.fieldLabel}>दायित्व आवंटन *</Text>
                 <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer()}>
                   <Text style={addFormSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
-                    {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} चयनित` : 'पदभार चुनें'}
+                    {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} चयनित` : 'दायित्व चुनें'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -5159,7 +5169,7 @@ export default function KaryakariniModuleScreen() {
               ))}
             </View>
             <TouchableOpacity onPress={() => setAssignForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-              <Text style={styles.clearLink}>श्रेणियाँ साफ करें</Text>
+              <Text style={styles.clearLink}>आयाम साफ करें</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -5301,7 +5311,7 @@ export default function KaryakariniModuleScreen() {
         />
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.fieldLabel}>आमंत्रित सदस्य ({meetingTransferSelectedItems.length})</Text>
+          <Text style={styles.fieldLabel}>आमंत्रित कार्यकर्ता ({meetingTransferSelectedItems.length})</Text>
           <TouchableOpacity style={styles.rowActionBtn} onPress={() => setShowAttendanceTransferModal(true)}>
             <Text style={styles.rowActionText}>प्रबंधित करें</Text>
           </TouchableOpacity>
@@ -5320,7 +5330,7 @@ export default function KaryakariniModuleScreen() {
             ) : null}
           </View>
         ) : (
-          <Text style={styles.modalSub}>अभी कोई आमंत्रित सदस्य चयनित नहीं है</Text>
+          <Text style={styles.modalSub}>अभी कोई आमंत्रित कार्यकर्ता चयनित नहीं है</Text>
         )}
 
         <View style={styles.sectionHeader}>
@@ -5343,7 +5353,7 @@ export default function KaryakariniModuleScreen() {
             ) : null}
           </View>
         ) : (
-          <Text style={styles.modalSub}>अभी कोई उपस्थित सदस्य चयनित नहीं है</Text>
+          <Text style={styles.modalSub}>अभी कोई उपस्थित कार्यकर्ता चयनित नहीं है</Text>
         )}
 
         <Text style={styles.fieldLabel}>संलग्नक (फ़ाइल/फोटो/वीडियो)</Text>
@@ -5376,7 +5386,7 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showAttendanceTransferModal}
         onClose={() => setShowAttendanceTransferModal(false)}
-        title="आमंत्रित सदस्यों का प्रबंधन"
+        title="आमंत्रित कार्यकर्ताओं का प्रबंधन"
         footer={
           <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowAttendanceTransferModal(false)}>
             <Text style={styles.btnTextDark}>पूर्ण</Text>
@@ -5393,7 +5403,7 @@ export default function KaryakariniModuleScreen() {
           allNodes={assignableNodes}
         />
 
-        <Text style={styles.sectionLabel}>सदस्य या अतिथि खोजें</Text>
+        <Text style={styles.sectionLabel}>कार्यकर्ता या अतिथि खोजें</Text>
         <View style={styles.searchRow}>
           <TextInput
             style={[styles.input, styles.searchInput]}
@@ -5443,11 +5453,11 @@ export default function KaryakariniModuleScreen() {
                     {item.name}
                   </Text>
                   <Text style={styles.transferItemMeta} numberOfLines={1}>
-                    {item.subtitle || (item.attendeeType === 'member' ? 'सदस्य' : 'अतिथि')}
+                    {item.subtitle || (item.attendeeType === 'member' ? 'कार्यकर्ता' : 'अतिथि')}
                   </Text>
                 </TouchableOpacity>
               ))}
-              {meetingTransferAvailableItems.length === 0 ? <Text style={styles.modalSub}>कोई उपलब्ध आमंत्रित सदस्य नहीं</Text> : null}
+              {meetingTransferAvailableItems.length === 0 ? <Text style={styles.modalSub}>कोई उपलब्ध आमंत्रित कार्यकर्ता नहीं</Text> : null}
             </ScrollView>
           </View>
 
@@ -5460,11 +5470,11 @@ export default function KaryakariniModuleScreen() {
                     {item.subtitle ? `${item.name} (${item.subtitle})` : item.name}
                   </Text>
                   <Text style={styles.transferItemMeta} numberOfLines={1}>
-                    {item.subtitle || (item.attendeeType === 'member' ? 'सदस्य' : 'अतिथि')}
+                    {item.subtitle || (item.attendeeType === 'member' ? 'कार्यकर्ता' : 'अतिथि')}
                   </Text>
                 </TouchableOpacity>
               ))}
-              {meetingTransferSelectedItems.length === 0 ? <Text style={styles.modalSub}>कोई चयनित आमंत्रित सदस्य नहीं</Text> : null}
+              {meetingTransferSelectedItems.length === 0 ? <Text style={styles.modalSub}>कोई चयनित आमंत्रित कार्यकर्ता नहीं</Text> : null}
             </ScrollView>
           </View>
         </View>
@@ -5562,7 +5572,7 @@ export default function KaryakariniModuleScreen() {
           allNodes={assignableNodes}
         />
 
-        <Text style={styles.sectionLabel}>सदस्य खोजें</Text>
+        <Text style={styles.sectionLabel}>कार्यकर्ता खोजें</Text>
         <TextInput
           style={[styles.input, { marginBottom: 12 }]}
           value={meetingInviteSearchQuery}
@@ -5572,7 +5582,7 @@ export default function KaryakariniModuleScreen() {
 
         <View style={styles.transferRow}>
           <View style={styles.transferColumn}>
-            <Text style={styles.transferTitle}>उपलब्ध सदस्य</Text>
+            <Text style={styles.transferTitle}>उपलब्ध कार्यकर्ता</Text>
             <ScrollView style={styles.transferList}>
               {meetingInviteAvailableItems.map((item) => (
                 <TouchableOpacity key={`invite-available-${item.key}`} style={styles.transferItem} onPress={() => handleAddInviteMember(item)}>
@@ -5580,16 +5590,16 @@ export default function KaryakariniModuleScreen() {
                     {item.name}
                   </Text>
                   <Text style={styles.transferItemMeta} numberOfLines={1}>
-                    {item.subtitle || 'सदस्य'}
+                    {item.subtitle || 'कार्यकर्ता'}
                   </Text>
                 </TouchableOpacity>
               ))}
-              {meetingInviteAvailableItems.length === 0 ? <Text style={styles.modalSub}>कोई उपलब्ध सदस्य नहीं</Text> : null}
+              {meetingInviteAvailableItems.length === 0 ? <Text style={styles.modalSub}>कोई उपलब्ध कार्यकर्ता नहीं</Text> : null}
             </ScrollView>
           </View>
 
           <View style={styles.transferColumn}>
-            <Text style={styles.transferTitle}>उपस्थित सदस्य</Text>
+            <Text style={styles.transferTitle}>उपस्थित कार्यकर्ता</Text>
             <ScrollView style={styles.transferList}>
               {meetingInviteSelectedItems.map((item) => (
                 <TouchableOpacity key={`invite-selected-${item.key}`} style={styles.transferItemSelected} onPress={() => handleRemoveInviteMember(item)}>
@@ -5597,11 +5607,11 @@ export default function KaryakariniModuleScreen() {
                     {item.subtitle ? `${item.name} (${item.subtitle})` : item.name}
                   </Text>
                   <Text style={styles.transferItemMeta} numberOfLines={1}>
-                    {item.subtitle || 'सदस्य'}
+                    {item.subtitle || 'कार्यकर्ता'}
                   </Text>
                 </TouchableOpacity>
               ))}
-              {meetingInviteSelectedItems.length === 0 ? <Text style={styles.modalSub}>कोई उपस्थित सदस्य नहीं</Text> : null}
+              {meetingInviteSelectedItems.length === 0 ? <Text style={styles.modalSub}>कोई उपस्थित कार्यकर्ता नहीं</Text> : null}
             </ScrollView>
           </View>
         </View>
@@ -5638,31 +5648,43 @@ export default function KaryakariniModuleScreen() {
             />
           </View>
 
-          <Text style={styles.fieldLabel}>कार्यक्रम श्रेणियाँ *</Text>
+          <Text style={styles.fieldLabel}>कार्यक्रम आयाम *</Text>
           <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('activity')}>
             <Text style={activitySelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
               {activitySelectedSubcategories.length
-                ? `${activitySelectedSubcategories.length} उप-श्रेणियाँ चयनित`
-                : 'कार्यक्रम उप-श्रेणियाँ चुनें *'}
+                ? `${activitySelectedSubcategories.length} टोलियाँ चयनित`
+                : 'कार्यक्रम टोलियाँ चुनें *'}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setActivityForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-            <Text style={styles.clearLink}>श्रेणियाँ साफ करें</Text>
+            <Text style={styles.clearLink}>आयाम साफ करें</Text>
           </TouchableOpacity>
           {activitySelectedCategories.length ? (
-            <Text style={styles.helper}>श्रेणियाँ: {activitySelectedCategories.join(', ')}</Text>
+            <Text style={styles.helper}>आयाम: {activitySelectedCategories.join(', ')}</Text>
           ) : null}
           {activitySelectedSubcategories.length ? (
-            <Text style={styles.helper}>उप-श्रेणियाँ: {activitySelectedSubcategories.join(', ')}</Text>
+            <Text style={styles.helper}>टोलियाँ: {activitySelectedSubcategories.join(', ')}</Text>
           ) : null}
 
-          <Text style={styles.fieldLabel}>कार्यक्रम शीर्षक *</Text>
-          <TextInput
-            style={styles.input}
-            value={activityForm.title}
-            onChangeText={(value) => setActivityForm((prev) => ({ ...prev, title: value }))}
-            placeholder="कार्यक्रम शीर्षक दर्ज करें"
-          />
+          <Text style={styles.fieldLabel}>कार्यक्रम शीर्षक (गतिविधि) *</Text>
+          <TouchableOpacity
+            style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+            onPress={() => {
+              const options = ACTIVITY_OPTIONS.map(item => ({ label: item, value: item }));
+              setSearchPickerTitle('कार्यक्रम शीर्षक चुनें');
+              setSearchPickerOptions(options);
+              setSearchPickerSearchText('');
+              setOnSearchPickerSelect(() => (val: string) => {
+                setActivityForm(prev => ({ ...prev, title: val }));
+              });
+              setSearchPickerVisible(true);
+            }}
+          >
+            <Text style={activityForm.title ? styles.inputText : styles.inputPlaceholder}>
+              {activityForm.title || 'कार्यक्रम शीर्षक चुनें *'}
+            </Text>
+            <MaterialIcons name="arrow-drop-down" size={24} color={theme.colors.text.secondary} />
+          </TouchableOpacity>
 
           <Text style={styles.fieldLabel}>विवरण</Text>
           <TextInput
@@ -5834,22 +5856,22 @@ export default function KaryakariniModuleScreen() {
             </>
           ) : null}
 
-          <Text style={styles.fieldLabel}>कार्य श्रेणियाँ *</Text>
+          <Text style={styles.fieldLabel}>कार्य आयाम *</Text>
           <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('task')}>
             <Text style={taskSelectedSubcategories.length ? styles.inputText : styles.inputPlaceholder}>
               {taskSelectedSubcategories.length
-                ? `${taskSelectedSubcategories.length} उप-श्रेणियाँ चयनित`
-                : 'कार्य उप-श्रेणियाँ चुनें *'}
+                ? `${taskSelectedSubcategories.length} टोलियाँ चयनित`
+                : 'कार्य टोलियाँ चुनें *'}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setTaskForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
-            <Text style={styles.clearLink}>श्रेणियाँ साफ करें</Text>
+            <Text style={styles.clearLink}>आयाम साफ करें</Text>
           </TouchableOpacity>
           {taskSelectedCategories.length ? (
-            <Text style={styles.helper}>श्रेणियाँ: {taskSelectedCategories.join(', ')}</Text>
+            <Text style={styles.helper}>आयाम: {taskSelectedCategories.join(', ')}</Text>
           ) : null}
           {taskSelectedSubcategories.length ? (
-            <Text style={styles.helper}>उप-श्रेणियाँ: {taskSelectedSubcategories.join(', ')}</Text>
+            <Text style={styles.helper}>टोलियाँ: {taskSelectedSubcategories.join(', ')}</Text>
           ) : null}
 
           <Text style={styles.sectionLabel}>नोड हाइरार्की</Text>
@@ -5865,7 +5887,7 @@ export default function KaryakariniModuleScreen() {
             <Text style={styles.errorInline}>चेतावनी: आप आवंटित स्तर पर कार्य नहीं बना सकते। नीचे का चाइल्ड नोड चुनें।</Text>
           ) : null}
 
-          <Text style={styles.sectionLabel}>सदस्य आवंटित करें</Text>
+          <Text style={styles.sectionLabel}>कार्यकर्ता आवंटित करें</Text>
           <Text style={styles.fieldLabel}>आवंटित उपयोगकर्ता ({taskForm.assignedUserIds.length})</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4, marginBottom: 12 }}>
             {taskForm.assignedUserIds.map((userId) => {
@@ -5906,7 +5928,7 @@ export default function KaryakariniModuleScreen() {
               );
             })}
             {taskForm.assignedUserIds.length === 0 ? (
-              <Text style={styles.modalSub}>कोई सदस्य आवंटित नहीं। उपयोगकर्ता खोजें या नीचे से चुनें।</Text>
+              <Text style={styles.modalSub}>कोई कार्यकर्ता आवंटित नहीं। उपयोगकर्ता खोजें या नीचे से चुनें।</Text>
             ) : null}
           </View>
 
@@ -5938,7 +5960,7 @@ export default function KaryakariniModuleScreen() {
                 <>
                   <View style={{ paddingHorizontal: 12, paddingVertical: 8, backgroundColor: theme.colors.surfaceContainerHigh, borderBottomWidth: 1, borderBottomColor: theme.colors.borderLight }}>
                     <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.text.secondary }}>
-                      नोड सदस्य ({taskMembers.length}) — आवंटित स्तर के नीचे योग्य उपयोगकर्ता खोजने के लिए 3+ अक्षर लिखें
+                      नोड कार्यकर्ता ({taskMembers.length}) — आवंटित स्तर के नीचे योग्य उपयोगकर्ता खोजने के लिए 3+ अक्षर लिखें
                     </Text>
                   </View>
                   {taskMembers.map((member) => {
@@ -5977,7 +5999,7 @@ export default function KaryakariniModuleScreen() {
                   })}
                   {taskMembers.length === 0 ? (
                     <Text style={{ padding: 12, color: theme.colors.text.disabled, fontStyle: 'italic', fontSize: 12 }}>
-                      चुने गए नोड में कोई सदस्य नहीं। ऊपर खोजकर अपने निचले स्तर के योग्य उपयोगकर्ता खोजें।
+                      चुने गए नोड में कोई कार्यकर्ता नहीं। ऊपर खोजकर अपने निचले स्तर के योग्य उपयोगकर्ता खोजें।
                     </Text>
                   ) : null}
                 </>
@@ -6096,11 +6118,11 @@ export default function KaryakariniModuleScreen() {
         <View style={styles.infoCard}>
           <View style={styles.infoRow}>
             <View style={styles.infoCol}>
-              <Text style={styles.infoLabel}>श्रेणी</Text>
+              <Text style={styles.infoLabel}>आयाम</Text>
               <Text style={styles.infoValue}>{selectedActivityDetails?.category || '-'}</Text>
             </View>
             <View style={styles.infoCol}>
-              <Text style={styles.infoLabel}>उप-श्रेणी</Text>
+              <Text style={styles.infoLabel}>टोली</Text>
               <Text style={styles.infoValue}>{selectedActivityDetails?.subcategory || '-'}</Text>
             </View>
           </View>
@@ -6181,7 +6203,7 @@ export default function KaryakariniModuleScreen() {
       <Modal visible={padPickerVisible} transparent animationType="fade" onRequestClose={() => setPadPickerVisible(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>पद चुनें</Text>
+            <Text style={styles.modalTitle}>दायित्व चुनें</Text>
             <ScrollView style={{ maxHeight: 300 }}>
               {padOptions.map((pad) => (
                 <TouchableOpacity
@@ -6201,7 +6223,7 @@ export default function KaryakariniModuleScreen() {
                   <Text style={styles.padOptionText}>{pad}</Text>
                 </TouchableOpacity>
               ))}
-              {padOptions.length === 0 ? <Text style={styles.modalSub}>कोई पद विकल्प नहीं मिला</Text> : null}
+              {padOptions.length === 0 ? <Text style={styles.modalSub}>कोई दायित्व विकल्प नहीं मिला</Text> : null}
             </ScrollView>
             <TouchableOpacity style={styles.closeBtn} onPress={() => setPadPickerVisible(false)}>
               <Text style={styles.closeText}>बंद करें</Text>
@@ -6257,8 +6279,8 @@ export default function KaryakariniModuleScreen() {
       <Modal visible={padbharTransferVisible} transparent animationType="slide" onRequestClose={() => setPadbharTransferVisible(false)}>
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCard, styles.memberModalCard]}>
-            <Text style={styles.modalTitle}>{padbharTransferMode === 'task' ? 'कार्य उप-श्रेणियाँ चुनें' : padbharTransferMode === 'activity' ? 'कार्यक्रम उप-श्रेणियाँ चुनें' : 'पदभार आवंटन'}</Text>
-            <Text style={styles.modalSub}>उप-श्रेणियाँ बाएँ से दाएँ स्थानांतरित करें</Text>
+            <Text style={styles.modalTitle}>{padbharTransferMode === 'task' ? 'कार्य टोलियाँ चुनें' : padbharTransferMode === 'activity' ? 'कार्यक्रम टोलियाँ चुनें' : 'दायित्व आवंटन'}</Text>
+            <Text style={styles.modalSub}>टोलियाँ बाएँ से दाएँ स्थानांतरित करें</Text>
             <View style={styles.transferContainer}>
               <View style={styles.transferPanel}>
                 <Text style={styles.transferTitle}>उपलब्ध</Text>
@@ -6305,12 +6327,12 @@ export default function KaryakariniModuleScreen() {
                       <Text style={styles.transferSelectedText}>{subcategory}</Text>
                     </TouchableOpacity>
                   ))}
-                  {transferDraftSubcategories.length === 0 ? <Text style={styles.modalSub}>कोई उप-श्रेणी चयनित नहीं</Text> : null}
+                  {transferDraftSubcategories.length === 0 ? <Text style={styles.modalSub}>कोई टोली चयनित नहीं</Text> : null}
                 </ScrollView>
               </View>
             </View>
             <Text style={styles.helper}>
-              स्वतः निर्धारित श्रेणियाँ: {deriveCategoriesFromSubcategories(transferDraftSubcategories).join(', ') || 'कोई नहीं'}
+              स्वतः निर्धारित आयाम: {deriveCategoriesFromSubcategories(transferDraftSubcategories).join(', ') || 'कोई नहीं'}
             </Text>
             <View style={[styles.modalActions, styles.memberModalStickyActions]}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setPadbharTransferVisible(false)}>

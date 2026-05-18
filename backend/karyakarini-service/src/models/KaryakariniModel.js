@@ -2256,7 +2256,7 @@ class KaryakariniModel {
          FROM karyakarini_nodes n
          WHERE n.version_id = $2
            AND n.parent_id IS NULL
-         UNION ALL
+         UNION ALL  
          SELECT c.id, c.parent_id, c.name, c.level, c.version_id, np.path || ' > ' || c.name AS path
          FROM karyakarini_nodes c
          JOIN node_paths np ON c.parent_id = np.id

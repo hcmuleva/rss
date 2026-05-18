@@ -125,7 +125,7 @@ export default function KaryakariniAdminActivitiesScreen() {
       <ScreenHeader title="कार्यकारिणी एडमिन" showBack user={user} />
       <PageHeaderCard
         title="गतिविधि असाइनमेंट"
-        subtitle="सदस्यों को गतिविधि असाइन करें"
+        subtitle="कार्यकर्ताओं को गतिविधि असाइन करें"
         icon={<MaterialIcons name="assignment-ind" size={24} color={theme.colors.primary} />}
       />
       <ScrollView
