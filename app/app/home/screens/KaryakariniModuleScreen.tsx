@@ -62,19 +62,45 @@ const defaultPagination: KaryakariniPagination = {
 
 const NODE_LEVEL_OPTIONS = [
   { label: 'राष्ट्रीय', value: 'rashtriya' },
-  { label: 'प्रांत', value: 'prant' },
+  { label: 'प्रान्त', value: 'prant' },
   { label: 'संभाग', value: 'sambhag' },
   { label: 'विभाग', value: 'vibhag' },
   { label: 'जिला', value: 'jila' },
   { label: 'खंड', value: 'khand' },
+  { label: 'मंडल', value: 'mandal' },
   { label: 'नगर', value: 'nagar' },
-  { label: 'मंडल बस्ती', value: 'mandal_basti' },
-  { label: 'नगर मोहल्ला', value: 'nagar_mohalla' },
+  { label: 'ग्राम', value: 'gram' },
+  { label: 'बस्ती', value: 'basti' },
+  { label: 'मोहल्ला', value: 'mohalla' },
 ];
 
 const NODE_LEVEL_ORDER = NODE_LEVEL_OPTIONS.map((option) => option.value);
 const NODE_LEVEL_LABEL_MAP: Record<string, string> = Object.fromEntries(
   NODE_LEVEL_OPTIONS.map((entry) => [entry.value, entry.label])
+);
+NODE_LEVEL_LABEL_MAP.mandal_basti = 'बस्ती';
+NODE_LEVEL_LABEL_MAP.nagar_mohalla = 'मोहल्ला';
+const NODE_CHILD_LEVELS: Record<string, string[]> = {
+  rashtriya: ['prant'],
+  prant: ['sambhag'],
+  sambhag: ['vibhag'],
+  vibhag: ['jila'],
+  jila: ['khand'],
+  khand: ['mandal', 'nagar'],
+  mandal: ['gram'],
+  nagar: ['basti'],
+  gram: [],
+  basti: ['mohalla'],
+  mohalla: [],
+};
+const NODE_PARENT_LEVEL: Record<string, string> = Object.entries(NODE_CHILD_LEVELS).reduce(
+  (acc, [parent, children]) => {
+    children.forEach((child) => {
+      acc[child] = parent;
+    });
+    return acc;
+  },
+  {} as Record<string, string>
 );
 const DEFAULT_PAD_OPTIONS = ['संयोजक', 'सह संयोजक', 'प्रमुख', 'आयाम', 'अन्य'];
 const formatNodeLevelLabel = (level?: string | null) => {
@@ -143,13 +169,27 @@ const CATEGORY_SUBCATEGORY_OPTIONS: { category: string; subcategories: string[] 
 
 const getAllowedNodeLevels = (targetLevel?: string | null, relation: 'child' | 'parent' = 'child') => {
   const normalized = String(targetLevel || '').trim().toLowerCase();
-  const targetIndex = NODE_LEVEL_ORDER.indexOf(normalized);
-  if (targetIndex < 0) return NODE_LEVEL_OPTIONS;
-
+  if (!normalized || !NODE_LEVEL_ORDER.includes(normalized)) return NODE_LEVEL_OPTIONS;
   if (relation === 'child') {
-    return NODE_LEVEL_OPTIONS.filter((option) => NODE_LEVEL_ORDER.indexOf(option.value) > targetIndex);
+    const descendants = new Set<string>();
+    const queue = [...(NODE_CHILD_LEVELS[normalized] || [])];
+    while (queue.length > 0) {
+      const current = String(queue.shift() || '').trim().toLowerCase();
+      if (!current || descendants.has(current)) continue;
+      descendants.add(current);
+      (NODE_CHILD_LEVELS[current] || []).forEach((child) => queue.push(child));
+    }
+    return NODE_LEVEL_OPTIONS.filter((option) => descendants.has(option.value));
   }
-  return NODE_LEVEL_OPTIONS.filter((option) => NODE_LEVEL_ORDER.indexOf(option.value) < targetIndex);
+
+  const ancestors = new Set<string>();
+  let cursor = normalized;
+  while (NODE_PARENT_LEVEL[cursor]) {
+    const parent = NODE_PARENT_LEVEL[cursor];
+    ancestors.add(parent);
+    cursor = parent;
+  }
+  return NODE_LEVEL_OPTIONS.filter((option) => ancestors.has(option.value));
 };
 
 const fullUserName = (entry: KaryakariniAssignableUser) =>
