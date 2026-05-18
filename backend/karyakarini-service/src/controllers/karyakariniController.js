@@ -5,14 +5,22 @@ const ablyService = require('../services/ablyService');
 const pool = require('../config/database');
 
 const LEVEL_WEIGHTS = {
-  'prant': 1,
-  'sambhag': 2,
-  'vibhag': 3,
-  'jila': 4,
-  'khand': 5,
-  'nagar': 6,
-  'nagar_mohalla': 7
+  rashtriya: 1,
+  prant: 2,
+  sambhag: 3,
+  vibhag: 4,
+  jila: 5,
+  khand: 6,
+  mandal: 7,
+  nagar: 7,
+  gram: 8,
+  basti: 8,
+  mohalla: 9,
+  // Legacy values kept for backward compatibility
+  mandal_basti: 8,
+  nagar_mohalla: 9,
 };
+const getLevelWeight = (level) => LEVEL_WEIGHTS[String(level || '').trim().toLowerCase()] || 9;
 
 async function notifySubcategoryUsers({ versionId, nodeId, subcategory, creatorUserId, type, title, message, entityType, entityId, metadata }) {
   try {
@@ -20,8 +28,8 @@ async function notifySubcategoryUsers({ versionId, nodeId, subcategory, creatorU
       `SELECT level FROM karyakarini_nodes WHERE id = $1 AND version_id = $2`,
       [Number(nodeId), Number(versionId)]
     );
-    const creatorLevel = creatorNode.rows[0]?.level || 'nagar_mohalla';
-    const creatorWeight = LEVEL_WEIGHTS[creatorLevel] || 7;
+    const creatorLevel = creatorNode.rows[0]?.level || 'mohalla';
+    const creatorWeight = getLevelWeight(creatorLevel);
 
     const membersRes = await pool.query(
       `SELECT DISTINCT m.user_id, n.level
@@ -47,7 +55,7 @@ async function notifySubcategoryUsers({ versionId, nodeId, subcategory, creatorU
     );
 
     const targetUsers = membersRes.rows.filter(member => {
-      const memberWeight = LEVEL_WEIGHTS[member.level] || 7;
+      const memberWeight = getLevelWeight(member.level);
       return memberWeight <= creatorWeight;
     });
 
@@ -135,9 +143,6 @@ const toDateString = (input, fallback = null) => {
   if (Number.isNaN(parsed.getTime())) return fallback;
   return parsed.toISOString().slice(0, 10);
 };
-
-const LEVEL_ORDER = ['rashtriya', 'prant', 'sambhag', 'vibhag', 'jila', 'khand', 'nagar', 'mandal_basti', 'nagar_mohalla'];
-const getLevelIndex = (level) => LEVEL_ORDER.indexOf(String(level || '').trim().toLowerCase());
 
 const normalizeInvitationStatus = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -1618,15 +1623,22 @@ exports.getMyTeams = async (req, res) => {
       });
     }
 
-    const teams = await KaryakariniModel.getMyTeamNodes({
+    const assignments = await KaryakariniModel.getMyTeamNodes({
       userId: req.user?.id,
       versionId,
+    });
+    const teams = await KaryakariniModel.getVisibleCategoryTeams({
+      userId: req.user?.id,
+      versionId,
+      category: req.query?.category || '',
+      subcategory: req.query?.subcategory || '',
     });
 
     return res.status(200).json({
       success: true,
       data: {
         versionId,
+        assignments,
         teams,
       },
     });
@@ -1635,6 +1647,84 @@ exports.getMyTeams = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to load my karyakarini teams',
+    });
+  }
+};
+
+exports.saveMyTeam = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.query?.versionId || 'current');
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const teamId = parsePositiveNumber(req.body?.teamId);
+    const nodeId = parsePositiveNumber(req.body?.nodeId);
+    const category = String(req.body?.category || '').trim();
+    const subcategory = String(req.body?.subcategory || '').trim();
+    const members = Array.isArray(req.body?.members) ? req.body.members : [];
+    if (!nodeId || !category) {
+      return res.status(400).json({
+        success: false,
+        message: 'nodeId and category are required',
+      });
+    }
+
+    const hasNodeAccess = await KaryakariniModel.hasNodeAccess({
+      nodeId,
+      userId: req.user?.id,
+      userRole: normalizeRole(req.userRole || req.user?.role),
+      versionId,
+    });
+    if (!hasNodeAccess) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can create team only in your assigned scope',
+      });
+    }
+
+    const hasCategoryAccess = await KaryakariniModel.userHasCategoryAccessInNodeScope({
+      userId: req.user?.id,
+      versionId,
+      nodeId,
+      category,
+    });
+    if (!hasCategoryAccess) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can create team only for your assigned category',
+      });
+    }
+
+    const saved = await KaryakariniModel.upsertMyCategoryTeam({
+      teamId,
+      userId: req.user?.id,
+      versionId,
+      nodeId,
+      category,
+      subcategory,
+      members,
+    });
+    if (!saved) {
+      return res.status(400).json({
+        success: false,
+        message: 'Unable to save team',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Team saved successfully',
+      data: saved,
+    });
+  } catch (error) {
+    console.error('Failed to save my team:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Failed to save team',
     });
   }
 };
@@ -2799,14 +2889,14 @@ exports.upsertScope = async (req, res) => {
       }
 
       const targetNode = await KaryakariniModel.getNodeById(nodeId, versionId);
-      const targetLevelIndex = getLevelIndex(targetNode?.level);
+      const targetLevelWeight = getLevelWeight(targetNode?.level);
       const scopeRoots = await KaryakariniModel.getScopeRootNodes({
         userId: req.user?.id,
         versionId,
       });
       const canAssignTargetLevel = scopeRoots.some((scopeRoot) => {
-        const rootLevelIndex = getLevelIndex(scopeRoot.node_level);
-        return rootLevelIndex >= 0 && targetLevelIndex > rootLevelIndex;
+        const rootLevelWeight = getLevelWeight(scopeRoot.node_level);
+        return targetLevelWeight > rootLevelWeight;
       });
       if (!canAssignTargetLevel) {
         return res.status(403).json({
