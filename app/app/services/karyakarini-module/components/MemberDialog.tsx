@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { theme } from '../../../theme';
 import { StandardModal } from '../../../core/components/StandardModal';
@@ -48,6 +48,9 @@ const parseLabelList = (value?: string | string[] | null) => {
 };
 
 export function MemberDialog({ visible, loading, node, members, pagination, onClose, onChangePage, onEditMember }: Props) {
+  const [pillsModalVisible, setPillsModalVisible] = useState(false);
+  const [pillsModalMember, setPillsModalMember] = useState<KaryakariniMember | null>(null);
+
   const canPrev = pagination.page > 1;
   const canNext = pagination.page < (pagination.totalPages || 1);
   const groupedMembers = useMemo(() => {
@@ -97,7 +100,8 @@ export function MemberDialog({ visible, loading, node, members, pagination, onCl
   }, [members, node?.id]);
 
   return (
-    <StandardModal
+    <>
+      <StandardModal
       visible={visible}
       onClose={onClose}
       title="Members"
@@ -173,29 +177,58 @@ export function MemberDialog({ visible, loading, node, members, pagination, onCl
                         </View>
                         <View style={[styles.cell, styles.colCategory]}>
                           <View style={styles.pillsWrap}>
-                            {parseLabelList(member.categories && member.categories.length ? member.categories : member.category || '').map((entry) => (
-                              <View key={`cat-${member.id}-${entry}`} style={styles.pill}>
-                                <Text style={styles.pillText}>{entry}</Text>
-                              </View>
-                            ))}
-                            {parseLabelList(member.categories && member.categories.length ? member.categories : member.category || '').length === 0 ? (
-                              <Text style={styles.value}>-</Text>
-                            ) : null}
+                            {(() => {
+                              const list = parseLabelList(member.categories && member.categories.length ? member.categories : member.category || '');
+                              return (
+                                <>
+                                  {list.slice(0, 2).map((entry) => (
+                                    <View key={`cat-${member.id}-${entry}`} style={styles.pill}>
+                                      <Text style={styles.pillText}>{entry}</Text>
+                                    </View>
+                                  ))}
+                                  {list.length > 2 ? (
+                                    <TouchableOpacity
+                                      style={[styles.pill, { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }]}
+                                      onPress={() => {
+                                        setPillsModalMember(member);
+                                        setPillsModalVisible(true);
+                                      }}
+                                    >
+                                      <Text style={[styles.pillText, { color: '#FFF' }]}>+{list.length - 2} और</Text>
+                                    </TouchableOpacity>
+                                  ) : null}
+                                  {list.length === 0 ? <Text style={styles.value}>-</Text> : null}
+                                </>
+                              );
+                            })()}
                           </View>
                         </View>
                         <View style={[styles.cell, styles.colSubcategory]}>
                           <View style={styles.pillsWrap}>
-                            {parseLabelList(member.subcategories && member.subcategories.length ? member.subcategories : member.subcategory || '').map(
-                              (entry) => (
-                                <View key={`sub-${member.id}-${entry}`} style={styles.pill}>
-                                  <Text style={styles.pillText}>{entry}</Text>
-                                </View>
-                              )
-                            )}
-                            {parseLabelList(member.subcategories && member.subcategories.length ? member.subcategories : member.subcategory || '').length ===
-                            0 ? (
-                              <Text style={styles.value}>-</Text>
-                            ) : null}
+                            {(() => {
+                              const list = parseLabelList(member.subcategories && member.subcategories.length ? member.subcategories : member.subcategory || '');
+                              return (
+                                <>
+                                  {list.slice(0, 2).map((entry) => (
+                                    <View key={`sub-${member.id}-${entry}`} style={styles.pill}>
+                                      <Text style={styles.pillText}>{entry}</Text>
+                                    </View>
+                                  ))}
+                                  {list.length > 2 ? (
+                                    <TouchableOpacity
+                                      style={[styles.pill, { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }]}
+                                      onPress={() => {
+                                        setPillsModalMember(member);
+                                        setPillsModalVisible(true);
+                                      }}
+                                    >
+                                      <Text style={[styles.pillText, { color: '#FFF' }]}>+{list.length - 2} और</Text>
+                                    </TouchableOpacity>
+                                  ) : null}
+                                  {list.length === 0 ? <Text style={styles.value}>-</Text> : null}
+                                </>
+                              );
+                            })()}
                           </View>
                         </View>
                         <View style={[styles.cell, styles.colMobile]}>
@@ -230,6 +263,69 @@ export function MemberDialog({ visible, loading, node, members, pagination, onCl
         ))
       )}
     </StandardModal>
+
+    {pillsModalVisible && pillsModalMember ? (
+      <StandardModal
+        visible={pillsModalVisible}
+        onClose={() => {
+          setPillsModalVisible(false);
+          setPillsModalMember(null);
+        }}
+        title="आवंटित श्रेणियां और उप-श्रेणियां"
+        subtitle={memberName(pillsModalMember)}
+      >
+        <View style={{ padding: 4, gap: 16 }}>
+          <View style={{ gap: 8 }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: theme.colors.text.secondary }}>
+              श्रेणियां (Categories)
+            </Text>
+            <View style={styles.pillsWrap}>
+              {parseLabelList(
+                pillsModalMember.categories && pillsModalMember.categories.length
+                  ? pillsModalMember.categories
+                  : pillsModalMember.category || ''
+              ).map((entry) => (
+                <View key={`modal-cat-${entry}`} style={[styles.pill, { paddingHorizontal: 8, paddingVertical: 4 }]}>
+                  <Text style={[styles.pillText, { fontSize: 11 }]}>{entry}</Text>
+                </View>
+              ))}
+              {parseLabelList(
+                pillsModalMember.categories && pillsModalMember.categories.length
+                  ? pillsModalMember.categories
+                  : pillsModalMember.category || ''
+              ).length === 0 ? (
+                <Text style={styles.value}>कोई श्रेणी नहीं</Text>
+              ) : null}
+            </View>
+          </View>
+
+          <View style={{ gap: 8, borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingTop: 16 }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: theme.colors.text.secondary }}>
+              उप-श्रेणियां (Subcategories)
+            </Text>
+            <View style={styles.pillsWrap}>
+              {parseLabelList(
+                pillsModalMember.subcategories && pillsModalMember.subcategories.length
+                  ? pillsModalMember.subcategories
+                  : pillsModalMember.subcategory || ''
+              ).map((entry) => (
+                <View key={`modal-sub-${entry}`} style={[styles.pill, { paddingHorizontal: 8, paddingVertical: 4 }]}>
+                  <Text style={[styles.pillText, { fontSize: 11 }]}>{entry}</Text>
+                </View>
+              ))}
+              {parseLabelList(
+                pillsModalMember.subcategories && pillsModalMember.subcategories.length
+                  ? pillsModalMember.subcategories
+                  : pillsModalMember.subcategory || ''
+              ).length === 0 ? (
+                <Text style={styles.value}>कोई उप-श्रेणी नहीं</Text>
+              ) : null}
+            </View>
+          </View>
+        </View>
+      </StandardModal>
+    ) : null}
+  </>
   );
 }
 

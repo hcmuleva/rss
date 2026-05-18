@@ -19,7 +19,7 @@ RUN npx expo export -p web
 # Production stage
 FROM nginx:alpine
 # Copy built assets to nginx subdirectory
-COPY --from=builder /app/dist /usr/share/nginx/html/seervi-app
+COPY --from=builder /app/dist /usr/share/nginx/html/rss-app
 
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf

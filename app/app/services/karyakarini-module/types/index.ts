@@ -14,8 +14,11 @@ export type KaryakariniNode = {
   parent_id?: number | null;
   version_id?: number;
   member_count?: number;
+  members_count?: number;
   child_count?: number;
   can_assign_member?: boolean;
+  can_manage_hierarchy?: boolean;
+  has_children?: boolean;
 };
 
 export type KaryakariniMember = {

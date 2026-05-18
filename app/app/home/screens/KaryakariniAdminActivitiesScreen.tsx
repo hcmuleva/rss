@@ -4,7 +4,7 @@ import { ScreenHeader } from '../../core/components/ScreenHeader';
 import { PageHeaderCard } from '../../core/components/PageHeaderCard';
 import { useProfile } from '../../core/context/ProfileContext';
 import { karyakariniClient } from '../../api/client';
-import { theme } from '../../theme';
+import  { theme } from '../../theme';
 import { MaterialIcons } from '@expo/vector-icons';
 import type { KaryakariniActivityAssignment, KaryakariniAssignableNode, KaryakariniAssignableUser, KaryakariniVersion } from '../../services/karyakarini-module/types';
 

@@ -1,13 +1,25 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import { Slot, usePathname } from 'expo-router';
+import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import { Slot, usePathname, Redirect } from 'expo-router';
 import { AppBottomNav, AppNavKey } from '../core/components/AppBottomNav';
 import { useProfile } from '../core/context/ProfileContext';
 
 export default function MainLayout() {
   const pathname = usePathname();
-  const { user } = useProfile();
+  const { user, isAuthenticated, isLoading } = useProfile();
 
+  if (isLoading) {
+    return (
+      <View style={[styles.container, styles.loading]}>
+        <ActivityIndicator size="large" color="#E07A5F" />
+      </View>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect href="/auth/login" />;
+  }
+  
   // Determine active key based on pathname
   const getActiveKey = (): AppNavKey => {
     if (pathname.includes('/admin')) return 'admin';
@@ -32,5 +44,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  loading: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
