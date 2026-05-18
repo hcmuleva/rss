@@ -1673,30 +1673,30 @@ exports.saveMyTeam = async (req, res) => {
       });
     }
 
-    const hasNodeAccess = await KaryakariniModel.hasNodeAccess({
-      nodeId,
-      userId: req.user?.id,
-      userRole: normalizeRole(req.userRole || req.user?.role),
-      versionId,
-    });
-    if (!hasNodeAccess) {
-      return res.status(403).json({
-        success: false,
-        message: 'You can create team only in your assigned scope',
-      });
-    }
+    const userRole = normalizeRole(req.userRole || req.user?.role);
+    if (userRole !== 'superadmin') {
+      const memberVisible = await KaryakariniModel.getMemberVisibleNodeIds({ userId: req.user?.id, versionId });
+      const adminVisible = await KaryakariniModel.getAssignableNodeIds(req.user?.id, versionId);
+      const allVisible = new Set([...memberVisible, ...adminVisible]);
+      if (!allVisible.has(Number(nodeId))) {
+        return res.status(403).json({
+          success: false,
+          message: 'You can create team only in your assigned scope',
+        });
+      }
 
-    const hasCategoryAccess = await KaryakariniModel.userHasCategoryAccessInNodeScope({
-      userId: req.user?.id,
-      versionId,
-      nodeId,
-      category,
-    });
-    if (!hasCategoryAccess) {
-      return res.status(403).json({
-        success: false,
-        message: 'You can create team only for your assigned category',
+      const hasCategoryAccess = await KaryakariniModel.userHasCategoryAccessInNodeScope({
+        userId: req.user?.id,
+        versionId,
+        nodeId,
+        category,
       });
+      if (!hasCategoryAccess) {
+        return res.status(403).json({
+          success: false,
+          message: 'You can create team only for your assigned category',
+        });
+      }
     }
 
     const saved = await KaryakariniModel.upsertMyCategoryTeam({
