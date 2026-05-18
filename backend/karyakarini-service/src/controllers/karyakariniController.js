@@ -431,6 +431,8 @@ exports.getMembers = async (req, res) => {
       versionId,
       page,
       limit,
+      category: req.query.category ? String(req.query.category) : undefined,
+      subcategory: req.query.subcategory ? String(req.query.subcategory) : undefined,
     });
 
     return res.status(200).json({
@@ -745,12 +747,24 @@ exports.getNodeMembersDirect = async (req, res) => {
       versionId,
     });
 
+    let filteredMembers = members;
+    if (userRole !== 'superadmin') {
+      const scopeRoots = await KaryakariniModel.getScopeRootNodes({
+        userId: req.user?.id,
+        versionId,
+      });
+      const scopeRootSet = new Set(
+        scopeRoots.map((row) => Number(row.node_id)).filter((id) => Number.isFinite(id) && id > 0)
+      );
+      filteredMembers = members.filter((m) => !scopeRootSet.has(Number(m.node_id)));
+    }
+
     return res.status(200).json({
       success: true,
       data: {
         nodeId,
         versionId,
-        members,
+        members: filteredMembers,
       },
     });
   } catch (error) {
@@ -1570,6 +1584,9 @@ exports.getTasks = async (req, res) => {
         l5: req.query.hierarchyL5,
         hierarchySublevel: req.query.hierarchySublevel,
       },
+      category: req.query.category,
+      subcategory: req.query.subcategory,
+      nodeLevel: req.query.nodeLevel,
       page: Number(req.query.page || 1),
       limit: Number(req.query.limit || 20),
     });
@@ -1978,6 +1995,7 @@ exports.getCategoryActivities = async (req, res) => {
       category: String(req.query.category || ''),
       subcategory: String(req.query.subcategory || ''),
       nodeLevel: String(req.query.nodeLevel || req.query.level || ''),
+      nodeId: req.query.nodeId ? Number(req.query.nodeId) : null,
     });
 
     return res.status(200).json({
@@ -2015,6 +2033,7 @@ exports.getMyCategoryActivities = async (req, res) => {
       category: String(req.query.category || ''),
       subcategory: String(req.query.subcategory || ''),
       nodeLevel: String(req.query.nodeLevel || req.query.level || ''),
+      nodeId: req.query.nodeId ? Number(req.query.nodeId) : null,
     });
 
     return res.status(200).json({

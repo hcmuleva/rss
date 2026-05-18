@@ -1265,14 +1265,14 @@ export default function KaryakariniMemberScreen() {
               कार्य ({filteredTasks.length})
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'myteams' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('myteams')}>
+          {/* <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'myteams' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('myteams')}>
             <Text style={[styles.tabSwitchText, activeTab === 'myteams' && styles.tabSwitchTextActive]}>
               टीम प्रबंधन ({teams.length})
             </Text>
-          </TouchableOpacity>
+          </TouchableOpacity> */}
           <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'activities' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('activities')}>
             <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>
-              कार्यक्रम ({filteredActivities.length})
+              गतिविधियाँ ({filteredActivities.length})
             </Text>
           </TouchableOpacity>
         </View>

@@ -1347,10 +1347,13 @@ class KaryakariniModel {
     }
   }
 
-  static async getMembersByNode({ nodeId, versionId, page = 1, limit = 20 }) {
+  static async getMembersByNode({ nodeId, versionId, page = 1, limit = 20, category, subcategory }) {
     const safePage = Math.max(1, Number(page) || 1);
     const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
     const offset = (safePage - 1) * safeLimit;
+
+    const hasCategory = Boolean(category);
+    const hasSubcategory = Boolean(subcategory);
 
     const countResult = await pool.query(
       `WITH RECURSIVE subtree AS (
@@ -1367,8 +1370,16 @@ class KaryakariniModel {
        FROM karyakarini_members m
        JOIN subtree s ON s.id = m.node_id
        WHERE m.version_id = $2
-         AND m.is_active = true`,
-      [nodeId, versionId]
+         AND m.is_active = true
+         AND ($3::boolean = false OR (
+           m.categories @> jsonb_build_array($4::text) OR 
+           lower(COALESCE(m.category, '')) = lower($4::text)
+         ))
+         AND ($5::boolean = false OR (
+           m.subcategories @> jsonb_build_array($6::text) OR 
+           lower(COALESCE(m.subcategory, '')) = lower($6::text)
+         ))`,
+      [nodeId, versionId, hasCategory, category || '', hasSubcategory, subcategory || '']
     );
     const total = Number(countResult.rows[0]?.total || 0);
 
@@ -1430,9 +1441,17 @@ class KaryakariniModel {
        LEFT JOIN node_paths np ON np.id = m.node_id
        WHERE m.version_id = $2
          AND m.is_active = true
+         AND ($5::boolean = false OR (
+           m.categories @> jsonb_build_array($6::text) OR 
+           lower(COALESCE(m.category, '')) = lower($6::text)
+         ))
+         AND ($7::boolean = false OR (
+           m.subcategories @> jsonb_build_array($8::text) OR 
+           lower(COALESCE(m.subcategory, '')) = lower($8::text)
+         ))
        ORDER BY m.created_at DESC, m.id DESC
        LIMIT $3 OFFSET $4`,
-      [nodeId, versionId, safeLimit, offset]
+      [nodeId, versionId, safeLimit, offset, hasCategory, category || '', hasSubcategory, subcategory || '']
     );
 
     return {
@@ -1672,12 +1691,15 @@ class KaryakariniModel {
              AND ($4::bigint IS NULL OR m.node_id IN (SELECT id FROM scoped_subtree))
              AND (
                COALESCE(to_jsonb(u) ->> 'email', '') ILIKE $1
-               OR COALESCE(to_jsonb(u) ->> 'phone', to_jsonb(u) ->> 'mobile_number', to_jsonb(u) ->> 'mobile', '') ILIKE $1
+               OR COALESCE(to_jsonb(u) ->> 'phone', to_jsonb(u) ->> 'mobile_number', to_jsonb(u) ->> 'mobile', m.mobile, '') ILIKE $1
                OR COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name', '') ILIKE $1
                OR COALESCE(to_jsonb(u) ->> 'father_name', to_jsonb(u) ->> 'last_name', '') ILIKE $1
                OR COALESCE(NULLIF(trim(m.pad), ''), '') ILIKE $1
                OR COALESCE(n.name, '') ILIKE $1
                OR COALESCE(np.path, '') ILIKE $1
+               OR u.id::text ILIKE $1
+               OR m.user_id::text ILIKE $1
+               OR m.id::text ILIKE $1
              )
          )
          SELECT
@@ -1722,6 +1744,7 @@ class KaryakariniModel {
          OR COALESCE(to_jsonb(u) ->> 'phone', to_jsonb(u) ->> 'mobile_number', to_jsonb(u) ->> 'mobile', '') ILIKE $1
          OR COALESCE(to_jsonb(u) ->> 'first_name', to_jsonb(u) ->> 'name', '') ILIKE $1
          OR COALESCE(to_jsonb(u) ->> 'father_name', to_jsonb(u) ->> 'last_name', '') ILIKE $1
+         OR u.id::text ILIKE $1
        )
        ORDER BY u.id DESC
        LIMIT $2`,
@@ -1962,18 +1985,7 @@ class KaryakariniModel {
     if (!safeUserIds.length) return [];
 
     const result = await client.query(
-      `WITH RECURSIVE subtree AS (
-         SELECT id
-         FROM karyakarini_nodes
-         WHERE id = $1
-           AND version_id = $2
-         UNION ALL
-         SELECT n.id
-         FROM karyakarini_nodes n
-         JOIN subtree s ON n.parent_id = s.id
-         WHERE n.version_id = $2
-       ),
-       ranked AS (
+      `WITH ranked AS (
          SELECT
            km.user_id,
            km.node_id,
@@ -1981,16 +1993,15 @@ class KaryakariniModel {
            n.name AS node_name,
            ROW_NUMBER() OVER (PARTITION BY km.user_id ORDER BY km.created_at DESC, km.id DESC) AS rn
          FROM karyakarini_members km
-         JOIN subtree s ON s.id = km.node_id
          JOIN karyakarini_nodes n ON n.id = km.node_id
-         WHERE km.version_id = $2
+         WHERE km.version_id = $1
            AND km.is_active = true
-           AND km.user_id = ANY($3::int[])
+           AND km.user_id = ANY($2::int[])
        )
        SELECT user_id, node_id, node_level, node_name
        FROM ranked
        WHERE rn = 1`,
-      [nodeId, versionId, safeUserIds]
+      [versionId, safeUserIds]
     );
     return result.rows;
   }
@@ -2039,7 +2050,7 @@ class KaryakariniModel {
     const invitableMap = new Map(invitableRows.map((row) => [Number(row.user_id), row]));
     const invalidUserIds = safeUserIds.filter((userId) => !invitableMap.has(userId));
     if (invalidUserIds.length > 0) {
-      throw new Error('Some invited users are outside selected node scope');
+      throw new Error('Some invited users are not active in this karyakarini version');
     }
 
     const inviteRows = [];
@@ -2711,29 +2722,17 @@ class KaryakariniModel {
       const memberIds = [...new Set((Array.isArray(attendeeUserIds) ? attendeeUserIds : []).map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0))];
       if (memberIds.length > 0) {
         const validMembersRes = await client.query(
-          `WITH RECURSIVE subtree AS (
-             SELECT id
-             FROM karyakarini_nodes
-             WHERE id = $1
-               AND version_id = $2
-             UNION ALL
-             SELECT n.id
-             FROM karyakarini_nodes n
-             JOIN subtree s ON n.parent_id = s.id
-             WHERE n.version_id = $2
-           )
-           SELECT DISTINCT km.user_id
+          `SELECT DISTINCT km.user_id
            FROM karyakarini_members km
-           JOIN subtree s ON s.id = km.node_id
-           WHERE km.version_id = $2
-             AND is_active = true
-             AND km.user_id = ANY($3::int[])`,
-          [nodeId, versionId, memberIds]
+           WHERE km.version_id = $1
+             AND km.is_active = true
+             AND km.user_id = ANY($2::int[])`,
+          [versionId, memberIds]
         );
         const validMemberIds = validMembersRes.rows.map((row) => Number(row.user_id)).filter((value) => Number.isFinite(value) && value > 0);
         const invalidMemberIds = memberIds.filter((id) => !validMemberIds.includes(id));
         if (invalidMemberIds.length > 0) {
-          throw new Error('Some selected members are not assigned to this node');
+          throw new Error('Some selected members are not active in this karyakarini version');
         }
 
         for (const userId of validMemberIds) {
@@ -2789,29 +2788,17 @@ class KaryakariniModel {
       const uniqueGuestIds = [...new Set(resolvedGuestIds)];
       if (uniqueGuestIds.length > 0) {
         const validGuestsRes = await client.query(
-          `WITH RECURSIVE subtree AS (
-             SELECT id
-             FROM karyakarini_nodes
-             WHERE id = $1
-               AND version_id = $2
-             UNION ALL
-             SELECT n.id
-             FROM karyakarini_nodes n
-             JOIN subtree s ON n.parent_id = s.id
-             WHERE n.version_id = $2
-           )
-           SELECT DISTINCT g.id
+          `SELECT DISTINCT g.id
            FROM karyakarini_guest_members g
-           JOIN subtree s ON s.id = g.node_id
-           WHERE g.version_id = $2
-             AND is_active = true
-             AND g.id = ANY($3::bigint[])`,
-          [nodeId, versionId, uniqueGuestIds]
+           WHERE g.version_id = $1
+             AND g.is_active = true
+             AND g.id = ANY($2::bigint[])`,
+          [versionId, uniqueGuestIds]
         );
         const validGuestIds = validGuestsRes.rows.map((row) => Number(row.id)).filter((value) => Number.isFinite(value) && value > 0);
         const invalidGuestIds = uniqueGuestIds.filter((id) => !validGuestIds.includes(id));
         if (invalidGuestIds.length > 0) {
-          throw new Error('Some selected guests are invalid for this node scope');
+          throw new Error('Some selected guests are not active in this karyakarini version');
         }
         for (const guestId of validGuestIds) {
           await client.query(
@@ -3053,29 +3040,17 @@ class KaryakariniModel {
       const memberIds = [...new Set((Array.isArray(attendeeUserIds) ? attendeeUserIds : []).map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0))];
       if (memberIds.length > 0) {
         const validMembersRes = await client.query(
-          `WITH RECURSIVE subtree AS (
-             SELECT id
-             FROM karyakarini_nodes
-             WHERE id = $1
-               AND version_id = $2
-             UNION ALL
-             SELECT n.id
-             FROM karyakarini_nodes n
-             JOIN subtree s ON n.parent_id = s.id
-             WHERE n.version_id = $2
-           )
-           SELECT DISTINCT km.user_id
+          `SELECT DISTINCT km.user_id
            FROM karyakarini_members km
-           JOIN subtree s ON s.id = km.node_id
-           WHERE km.version_id = $2
-             AND is_active = true
-             AND km.user_id = ANY($3::int[])`,
-          [targetNodeId, versionId, memberIds]
+           WHERE km.version_id = $1
+             AND km.is_active = true
+             AND km.user_id = ANY($2::int[])`,
+          [versionId, memberIds]
         );
         const validMemberIds = validMembersRes.rows.map((row) => Number(row.user_id)).filter((value) => Number.isFinite(value) && value > 0);
         const invalidMemberIds = memberIds.filter((id) => !validMemberIds.includes(id));
         if (invalidMemberIds.length > 0) {
-          throw new Error('Some selected members are not assigned to this node');
+          throw new Error('Some selected members are not active in this karyakarini version');
         }
       }
 
@@ -3121,29 +3096,17 @@ class KaryakariniModel {
       const uniqueGuestIds = [...new Set(resolvedGuestIds)];
       if (uniqueGuestIds.length > 0) {
         const validGuestsRes = await client.query(
-          `WITH RECURSIVE subtree AS (
-             SELECT id
-             FROM karyakarini_nodes
-             WHERE id = $1
-               AND version_id = $2
-             UNION ALL
-             SELECT n.id
-             FROM karyakarini_nodes n
-             JOIN subtree s ON n.parent_id = s.id
-             WHERE n.version_id = $2
-           )
-           SELECT DISTINCT g.id
+          `SELECT DISTINCT g.id
            FROM karyakarini_guest_members g
-           JOIN subtree s ON s.id = g.node_id
-           WHERE g.version_id = $2
-             AND is_active = true
-             AND g.id = ANY($3::bigint[])`,
-          [targetNodeId, versionId, uniqueGuestIds]
+           WHERE g.version_id = $1
+             AND g.is_active = true
+             AND g.id = ANY($2::bigint[])`,
+          [versionId, uniqueGuestIds]
         );
         const validGuestIds = validGuestsRes.rows.map((row) => Number(row.id)).filter((value) => Number.isFinite(value) && value > 0);
         const invalidGuestIds = uniqueGuestIds.filter((id) => !validGuestIds.includes(id));
         if (invalidGuestIds.length > 0) {
-          throw new Error('Some selected guests are invalid for this node');
+          throw new Error('Some selected guests are not active in this karyakarini version');
         }
       }
 
@@ -3868,7 +3831,14 @@ class KaryakariniModel {
 
     if (filteredNodeId) {
       queryValues.push(filteredNodeId);
-      filters.push(`t.node_id = $${queryValues.length}`);
+      filters.push(`t.node_id IN (
+        WITH RECURSIVE subtree AS (
+          SELECT id FROM karyakarini_nodes WHERE id = $${queryValues.length} AND version_id = $1
+          UNION ALL
+          SELECT c.id FROM karyakarini_nodes c JOIN subtree s ON c.parent_id = s.id WHERE c.version_id = $1
+        )
+        SELECT id FROM subtree
+      )`);
     }
 
     const pushHierarchyFilter = (column, value) => {
@@ -4695,6 +4665,7 @@ class KaryakariniModel {
     category = '',
     subcategory = '',
     nodeLevel = '',
+    nodeId = null,
   }) {
     const safeUserId = Number(userId);
     if (!Number.isFinite(safeUserId) || safeUserId <= 0) {
@@ -4711,9 +4682,11 @@ class KaryakariniModel {
     const normalizedCategory = String(category || '').trim().toLowerCase();
     const normalizedSubcategory = String(subcategory || '').trim().toLowerCase();
     const normalizedNodeLevel = String(nodeLevel || '').trim().toLowerCase();
+    const safeNodeId = Number(nodeId || 0);
     const hasCategory = Boolean(normalizedCategory);
     const hasSubcategory = Boolean(normalizedSubcategory);
     const hasNodeLevel = Boolean(normalizedNodeLevel);
+    const hasNodeId = Number.isFinite(safeNodeId) && safeNodeId > 0;
 
     const countQuery = `
       WITH RECURSIVE user_assigned_nodes AS (
@@ -4772,6 +4745,7 @@ class KaryakariniModel {
         AND ($3::boolean = false OR lower(COALESCE(a.category, '')) = $4)
         AND ($5::boolean = false OR lower(COALESCE(a.subcategory, '')) = $6)
         AND ($7::boolean = false OR lower(COALESCE(n.level, '')) = $8)
+        AND ($9::boolean = false OR a.node_id = $10)
     `;
 
     const countParams = [
@@ -4783,6 +4757,8 @@ class KaryakariniModel {
       normalizedSubcategory,
       hasNodeLevel,
       normalizedNodeLevel,
+      hasNodeId,
+      safeNodeId,
     ];
 
     const countResult = await pool.query(countQuery, countParams);
@@ -4880,6 +4856,7 @@ class KaryakariniModel {
         AND ($3::boolean = false OR lower(COALESCE(a.category, '')) = $4)
         AND ($5::boolean = false OR lower(COALESCE(a.subcategory, '')) = $6)
         AND ($7::boolean = false OR lower(COALESCE(n.level, '')) = $8)
+        AND ($11::boolean = false OR a.node_id = $12)
       ORDER BY a.created_at DESC, a.id DESC
       LIMIT $9 OFFSET $10
     `;
@@ -4895,6 +4872,8 @@ class KaryakariniModel {
       normalizedNodeLevel,
       safeLimit,
       offset,
+      hasNodeId,
+      safeNodeId,
     ];
 
     const rowsResult = await pool.query(rowsQuery, rowsParams);
@@ -4922,6 +4901,7 @@ class KaryakariniModel {
     subcategory = '',
     nodeLevel = '',
     submittedBy = null,
+    nodeId = null,
   }) {
     const safePage = Math.max(1, Number(page) || 1);
     const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
@@ -4937,10 +4917,12 @@ class KaryakariniModel {
     const normalizedSubcategory = String(subcategory || '').trim().toLowerCase();
     const normalizedNodeLevel = String(nodeLevel || '').trim().toLowerCase();
     const safeSubmittedBy = Number(submittedBy || 0);
+    const safeNodeId = Number(nodeId || 0);
     const hasCategory = Boolean(normalizedCategory);
     const hasSubcategory = Boolean(normalizedSubcategory);
     const hasNodeLevel = Boolean(normalizedNodeLevel);
     const hasSubmittedBy = Number.isFinite(safeSubmittedBy) && safeSubmittedBy > 0;
+    const hasNodeId = Number.isFinite(safeNodeId) && safeNodeId > 0;
 
     const countResult = await pool.query(
       `SELECT COUNT(*)::int AS total
@@ -4952,7 +4934,15 @@ class KaryakariniModel {
          AND ($3::boolean = false OR lower(COALESCE(a.category, '')) = $4)
          AND ($5::boolean = false OR lower(COALESCE(a.subcategory, '')) = $6)
          AND ($7::boolean = false OR lower(COALESCE(n.level, '')) = $8)
-         AND ($9::boolean = false OR a.submitted_by = $10)`,
+         AND ($9::boolean = false OR a.submitted_by = $10)
+         AND ($11::boolean = false OR a.node_id IN (
+           WITH RECURSIVE subtree AS (
+             SELECT id FROM karyakarini_nodes WHERE id = $12 AND version_id = $1
+             UNION ALL
+             SELECT c.id FROM karyakarini_nodes c JOIN subtree s ON c.parent_id = s.id WHERE c.version_id = $1
+           )
+           SELECT id FROM subtree
+         ))`,
       [
         Number(versionId),
         visibleNodeIds,
@@ -4964,6 +4954,8 @@ class KaryakariniModel {
         normalizedNodeLevel,
         hasSubmittedBy,
         safeSubmittedBy,
+        hasNodeId,
+        safeNodeId,
       ]
     );
     const total = Number(countResult.rows[0]?.total || 0);
@@ -5014,6 +5006,14 @@ class KaryakariniModel {
          AND ($5::boolean = false OR lower(COALESCE(a.subcategory, '')) = $6)
          AND ($7::boolean = false OR lower(COALESCE(n.level, '')) = $8)
          AND ($9::boolean = false OR a.submitted_by = $10)
+         AND ($13::boolean = false OR a.node_id IN (
+           WITH RECURSIVE subtree AS (
+             SELECT id FROM karyakarini_nodes WHERE id = $14 AND version_id = $1
+             UNION ALL
+             SELECT c.id FROM karyakarini_nodes c JOIN subtree s ON c.parent_id = s.id WHERE c.version_id = $1
+           )
+           SELECT id FROM subtree
+         ))
        ORDER BY a.created_at DESC, a.id DESC
        LIMIT $11 OFFSET $12`,
       [
@@ -5029,6 +5029,8 @@ class KaryakariniModel {
         safeSubmittedBy,
         safeLimit,
         offset,
+        hasNodeId,
+        safeNodeId,
       ]
     );
 
