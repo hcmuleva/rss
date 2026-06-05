@@ -310,6 +310,20 @@ exports.createNode = async (req, res) => {
       }
     }
 
+    const childLevel = String(level).trim().toLowerCase();
+    let parentLevel = null;
+    if (normalizedParentId) {
+      const parentNode = await KaryakariniModel.getNodeById(normalizedParentId, versionId);
+      if (!parentNode) {
+        return res.status(404).json({ success: false, message: 'Parent node not found' });
+      }
+      parentLevel = parentNode.level;
+    }
+    const constraintCheck = await KaryakariniModel.checkLevelConstraint(childLevel, parentLevel);
+    if (!constraintCheck.ok) {
+      return res.status(400).json({ success: false, message: constraintCheck.message });
+    }
+
     const created = await KaryakariniModel.createNode({
       name: String(name).trim(),
       level: String(level).trim().toLowerCase(),
@@ -375,6 +389,21 @@ exports.updateNode = async (req, res) => {
     if (req.body?.sortOrder !== undefined) payload.sort_order = Number(req.body.sortOrder || 0);
     if (req.body?.metadata !== undefined) payload.metadata = req.body.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {};
 
+    if (payload.level !== undefined) {
+      const current = await KaryakariniModel.getNodeById(nodeId, versionId);
+      const effectiveParentId =
+        payload.parent_id !== undefined ? payload.parent_id : current?.parent_id || null;
+      let parentLevel = null;
+      if (effectiveParentId) {
+        const parentNode = await KaryakariniModel.getNodeById(effectiveParentId, versionId);
+        parentLevel = parentNode ? parentNode.level : null;
+      }
+      const constraintCheck = await KaryakariniModel.checkLevelConstraint(payload.level, parentLevel);
+      if (!constraintCheck.ok) {
+        return res.status(400).json({ success: false, message: constraintCheck.message });
+      }
+    }
+
     const updated = await KaryakariniModel.updateNode(nodeId, versionId, payload);
     if (!updated) {
       return res.status(404).json({
@@ -393,6 +422,109 @@ exports.updateNode = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to update node',
+    });
+  }
+};
+
+exports.getNodeSubtree = async (req, res) => {
+  try {
+    const nodeId = parsePositiveNumber(req.params.nodeId);
+    if (!nodeId) {
+      return res.status(400).json({ success: false, message: 'Invalid node id' });
+    }
+    const versionId = await KaryakariniModel.resolveVersionId(req.query?.versionId || 'current');
+    if (!versionId) {
+      return res.status(404).json({ success: false, message: 'Version not found' });
+    }
+    const includeSelf = String(req.query?.includeSelf || 'true') !== 'false';
+    const nodes = await KaryakariniModel.getNodeSubtree(nodeId, versionId, includeSelf);
+    return res.status(200).json({ success: true, data: { nodes } });
+  } catch (error) {
+    console.error('Failed to load subtree:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load subtree' });
+  }
+};
+
+exports.bulkUpdateNode = async (req, res) => {
+  try {
+    const nodeId = parsePositiveNumber(req.params.nodeId);
+    if (!nodeId) {
+      return res.status(400).json({ success: false, message: 'Invalid node id' });
+    }
+    const versionId = await KaryakariniModel.resolveVersionId(
+      req.body?.versionId || req.query?.versionId || 'current'
+    );
+    if (!versionId) {
+      return res.status(404).json({ success: false, message: 'Version not found' });
+    }
+    const name = req.body?.name !== undefined ? String(req.body.name).trim() : '';
+    const level = req.body?.level !== undefined ? String(req.body.level).trim().toLowerCase() : '';
+    if (!name) {
+      return res.status(400).json({ success: false, message: 'Name is required' });
+    }
+    if (!level) {
+      return res.status(400).json({ success: false, message: 'Level is required' });
+    }
+    const includeSelf = req.body?.includeSelf !== false;
+    const result = await KaryakariniModel.bulkUpdateSubtree({ nodeId, versionId, name, level, includeSelf });
+    return res.status(200).json({
+      success: true,
+      message: 'Nodes updated successfully',
+      data: result,
+    });
+  } catch (error) {
+    console.error('Failed to bulk update nodes:', error);
+    return res.status(500).json({ success: false, message: 'Failed to bulk update nodes' });
+  }
+};
+
+exports.deleteNode = async (req, res) => {
+  try {
+    const nodeId = parsePositiveNumber(req.params.nodeId);
+    if (!nodeId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid node id',
+      });
+    }
+
+    const versionId = await KaryakariniModel.resolveVersionId(
+      req.body?.versionId || req.query?.versionId || 'current'
+    );
+    if (!versionId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Version not found',
+      });
+    }
+
+    const result = await KaryakariniModel.deleteNode({ nodeId, versionId });
+
+    if (result.status === 'not_found') {
+      return res.status(404).json({
+        success: false,
+        message: 'Node not found',
+      });
+    }
+
+    if (result.status === 'has_children') {
+      return res.status(409).json({
+        success: false,
+        message: `पहले इसके अंदर के ${result.childCount} उप-कार्यक्षेत्र डिलीट करें`,
+        data: { childCount: result.childCount },
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Node deleted successfully',
+      data: result.node,
+    });
+  } catch (error) {
+    console.error('Failed to delete node:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete node',
     });
   }
 };
@@ -2708,6 +2840,20 @@ exports.createMember = async (req, res) => {
       userRole: memberUserRole,
     });
 
+    const otherInfo = req.body?.otherInfo;
+    if (otherInfo && created?.userId) {
+      try {
+        await KaryakariniModel.upsertUserOtherInfo({
+          userId: created.userId,
+          genderType: otherInfo.genderType,
+          religion: otherInfo.religion,
+          createdBy: req.user?.id || null,
+        });
+      } catch (infoErr) {
+        console.error('Failed to save other information:', infoErr?.message || infoErr);
+      }
+    }
+
     if (created.status === 'skipped_existing_member') {
       return res.status(200).json({
         success: true,
@@ -2727,6 +2873,69 @@ exports.createMember = async (req, res) => {
       success: false,
       message: 'Failed to create member',
     });
+  }
+};
+
+exports.getUserOtherInfo = async (req, res) => {
+  try {
+    const userId = parsePositiveNumber(req.params.userId);
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'Valid userId is required' });
+    }
+    const info = await KaryakariniModel.getUserOtherInfo(userId);
+    return res.status(200).json({ success: true, data: { userId, otherInfo: info } });
+  } catch (error) {
+    console.error('Failed to load other information:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load other information' });
+  }
+};
+
+exports.updateUserOtherInfo = async (req, res) => {
+  try {
+    const userId = parsePositiveNumber(req.params.userId);
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'Valid userId is required' });
+    }
+    const info = await KaryakariniModel.upsertUserOtherInfo({
+      userId,
+      genderType: req.body?.genderType,
+      religion: req.body?.religion,
+      createdBy: req.user?.id || null,
+    });
+    return res.status(200).json({ success: true, data: { userId, otherInfo: info } });
+  } catch (error) {
+    console.error('Failed to save other information:', error);
+    return res.status(400).json({ success: false, message: error?.message || 'Failed to save other information' });
+  }
+};
+
+exports.getCategoryTree = async (req, res) => {
+  try {
+    const tree = await KaryakariniModel.getCategoryTree();
+    return res.status(200).json({ success: true, data: { categories: tree } });
+  } catch (error) {
+    console.error('Failed to load category tree:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load category tree' });
+  }
+};
+
+exports.getJangarna = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.query.versionId || req.query.version || 'current');
+    if (!versionId) {
+      return res.status(404).json({ success: false, message: 'Version not found' });
+    }
+    const userRole = normalizeRole(req.userRole || req.user?.role);
+    const data = await KaryakariniModel.getJangarna({
+      userId: req.user?.id,
+      userRole,
+      versionId,
+      level: req.query.level || null,
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error('Failed to load jangarna:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load jangarna' });
   }
 };
 

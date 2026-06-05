@@ -4,7 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const pool = require('../config/database');
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:4000';
-const DEFAULT_PAD_OPTIONS = ['संयोजक', 'सह संयोजक', 'प्रमुख', 'आयाम', 'Other'];
+const DEFAULT_PAD_OPTIONS = ['संयोजक', 'सह संयोजक', 'प्रमुख', 'आयाम', 'अन्य'];
+const OTHER_INFO_GENDERS = ['male', 'female', 'baccha', 'bacchi'];
+const OTHER_INFO_RELIGIONS = ['hindu', 'isai', 'muslim', 'other'];
 
 class KaryakariniModel {
   static async initTables() {
@@ -371,6 +373,18 @@ class KaryakariniModel {
       )
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_other_information (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        gender_type VARCHAR(20),
+        religion VARCHAR(20),
+        created_by INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_versions_current ON karyakarini_versions(is_current)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_nodes_version_parent ON karyakarini_nodes(version_id, parent_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_nodes_level ON karyakarini_nodes(level)');
@@ -434,7 +448,7 @@ class KaryakariniModel {
     if (!rootRes.rows[0]) {
       await pool.query(
         `INSERT INTO karyakarini_nodes (name, level, parent_id, version_id, sort_order)
-         VALUES ('Rashtriya', 'rashtriya', NULL, $1, 0)`,
+         VALUES ('राष्ट्रीय', 'rashtriya', NULL, $1, 0)`,
         [versionId]
       );
     }
@@ -678,7 +692,7 @@ class KaryakariniModel {
 
       await client.query(
         `INSERT INTO karyakarini_nodes (name, level, parent_id, version_id, sort_order, created_by)
-         VALUES ('Rashtriya', 'rashtriya', NULL, $1, 0, $2)`,
+         VALUES ('राष्ट्रीय', 'rashtriya', NULL, $1, 0, $2)`,
         [inserted.rows[0].id, createdBy || null]
       );
 
@@ -856,6 +870,109 @@ class KaryakariniModel {
       values
     );
     return result.rows[0] || null;
+  }
+
+  static async countChildNodes(nodeId, versionId) {
+    const result = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM karyakarini_nodes
+       WHERE parent_id = $1 AND version_id = $2`,
+      [nodeId, versionId]
+    );
+    return Number(result.rows[0]?.total || 0);
+  }
+
+  static async getNodeSubtree(nodeId, versionId, includeSelf = true) {
+    const result = await pool.query(
+      `WITH RECURSIVE subtree AS (
+         SELECT id, name, level, parent_id, 0 AS depth
+         FROM karyakarini_nodes
+         WHERE id = $1 AND version_id = $2
+         UNION ALL
+         SELECT c.id, c.name, c.level, c.parent_id, s.depth + 1
+         FROM karyakarini_nodes c
+         JOIN subtree s ON c.parent_id = s.id
+         WHERE c.version_id = $2
+       )
+       SELECT id, name, level, parent_id, depth
+       FROM subtree
+       ${includeSelf ? '' : 'WHERE depth > 0'}
+       ORDER BY depth ASC, name ASC`,
+      [nodeId, versionId]
+    );
+    return result.rows;
+  }
+
+  static async bulkUpdateSubtree({ nodeId, versionId, name, level, includeSelf = true }) {
+    const subtree = await this.getNodeSubtree(nodeId, versionId, includeSelf);
+    if (!subtree.length) return { count: 0, nodes: [] };
+    const ids = subtree.map((r) => Number(r.id));
+    const result = await pool.query(
+      `UPDATE karyakarini_nodes
+       SET name = $1, level = $2, updated_at = NOW()
+       WHERE version_id = $3 AND id = ANY($4::bigint[])
+       RETURNING id, name, level`,
+      [name, level, versionId, ids]
+    );
+    return { count: result.rowCount, nodes: result.rows };
+  }
+
+  static async deleteNode({ nodeId, versionId }) {
+    const node = await this.getNodeById(nodeId, versionId);
+    if (!node) return { status: 'not_found' };
+
+    const childCount = await this.countChildNodes(nodeId, versionId);
+    if (childCount > 0) {
+      return { status: 'has_children', childCount };
+    }
+
+    await pool.query(
+      `DELETE FROM karyakarini_nodes WHERE id = $1 AND version_id = $2`,
+      [nodeId, versionId]
+    );
+    return { status: 'deleted', node };
+  }
+
+  // Validates that a node of `childLevel` may sit under a parent of `parentLevel`
+  // (parentLevel === null means it would be a root node). Enforcement is lenient:
+  // levels with no configured rule are unrestricted, and a missing table is ignored.
+  static async checkLevelConstraint(childLevel, parentLevel) {
+    const child = String(childLevel || '').trim().toLowerCase();
+    if (!child) return { ok: true };
+    const parent = parentLevel ? String(parentLevel).trim().toLowerCase() : null;
+
+    let rows;
+    try {
+      const result = await pool.query(
+        `SELECT parent_level FROM level_constraints WHERE child_level = $1`,
+        [child]
+      );
+      rows = result.rows;
+    } catch (err) {
+      return { ok: true };
+    }
+    if (!rows.length) return { ok: true };
+
+    const allowed = rows.map((r) => (r.parent_level === null ? null : String(r.parent_level).toLowerCase()));
+    const labelOf = async (code) => {
+      if (!code) return null;
+      try {
+        const r = await pool.query(`SELECT name FROM levels WHERE LOWER(code) = $1 LIMIT 1`, [code]);
+        return r.rows[0]?.name || code;
+      } catch (err) {
+        return code;
+      }
+    };
+
+    if (parent === null) {
+      if (allowed.includes(null)) return { ok: true };
+      const childName = await labelOf(child);
+      return { ok: false, message: `"${childName}" को बिना पैरेंट (रूट) नहीं रखा जा सकता` };
+    }
+    if (allowed.includes(parent)) return { ok: true };
+    const childName = await labelOf(child);
+    const parentName = await labelOf(parent);
+    return { ok: false, message: `"${childName}" को "${parentName}" के नीचे नहीं रखा जा सकता` };
   }
 
   static async createMember({
@@ -1192,6 +1309,140 @@ class KaryakariniModel {
       member: createdMemberRes.member || null,
       memberId: createdMemberRes.memberId || createdMemberRes.member?.id || null,
     };
+  }
+
+  static normalizeGenderType(value) {
+    const v = String(value || '').trim().toLowerCase();
+    return OTHER_INFO_GENDERS.includes(v) ? v : null;
+  }
+
+  static normalizeReligion(value) {
+    const v = String(value || '').trim().toLowerCase();
+    return OTHER_INFO_RELIGIONS.includes(v) ? v : null;
+  }
+
+  static async getUserOtherInfo(userId) {
+    const id = Number(userId);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    const r = await pool.query(
+      `SELECT user_id, gender_type, religion FROM user_other_information WHERE user_id = $1 LIMIT 1`,
+      [id]
+    );
+    return r.rows[0] || null;
+  }
+
+  static async upsertUserOtherInfo({ userId, genderType, religion, createdBy = null }) {
+    const id = Number(userId);
+    if (!Number.isFinite(id) || id <= 0) throw new Error('Valid userId is required');
+    const g = this.normalizeGenderType(genderType);
+    const rel = this.normalizeReligion(religion);
+    if (!g && !rel) return this.getUserOtherInfo(id);
+    const r = await pool.query(
+      `INSERT INTO user_other_information (user_id, gender_type, religion, created_by, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         gender_type = COALESCE(EXCLUDED.gender_type, user_other_information.gender_type),
+         religion = COALESCE(EXCLUDED.religion, user_other_information.religion),
+         updated_at = NOW()
+       RETURNING user_id, gender_type, religion`,
+      [id, g, rel, createdBy]
+    );
+    return r.rows[0];
+  }
+
+  // Census aggregation grouped per node level, scoped to the caller's assignable
+  // subtree (their assigned node + descendants); superadmin sees the whole version.
+  static async getJangarna({ userId, userRole, versionId, level = null }) {
+    const safeVersionId = Number(versionId);
+    if (!Number.isFinite(safeVersionId) || safeVersionId <= 0) return { versionId: null, levels: [] };
+    const role = String(userRole || '').trim().toLowerCase();
+
+    let scopedNodeIds = null;
+    if (role !== 'superadmin') {
+      scopedNodeIds = await this.getAssignableNodeIds(userId, safeVersionId);
+      if (!scopedNodeIds.length) return { versionId: safeVersionId, levels: [] };
+    }
+
+    const params = [safeVersionId];
+    let nodeFilter = '';
+    if (Array.isArray(scopedNodeIds)) {
+      params.push(scopedNodeIds);
+      nodeFilter = `AND m.node_id = ANY($${params.length})`;
+    }
+    let levelFilter = '';
+    const safeLevel = level ? String(level).trim().toLowerCase() : null;
+    if (safeLevel) {
+      params.push(safeLevel);
+      levelFilter = `AND LOWER(n.level) = $${params.length}`;
+    }
+
+    const result = await pool.query(
+      `SELECT
+         n.level AS level_code,
+         MAX(l.name) AS level_name,
+         MAX(l.level_order) AS level_order,
+         COUNT(DISTINCT m.user_id)::int AS total,
+         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.gender_type = 'male')::int AS men,
+         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.gender_type = 'female')::int AS women,
+         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.gender_type IN ('baccha','bacchi'))::int AS children,
+         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.gender_type = 'baccha')::int AS baccha,
+         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.gender_type = 'bacchi')::int AS bacchi,
+         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.religion = 'hindu')::int AS hindu,
+         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.religion = 'isai')::int AS isai,
+         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.religion = 'muslim')::int AS muslim,
+         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.religion = 'other')::int AS other_religion
+       FROM karyakarini_members m
+       JOIN karyakarini_nodes n ON n.id = m.node_id
+       LEFT JOIN levels l ON LOWER(l.code) = LOWER(n.level)
+       LEFT JOIN user_other_information oi ON oi.user_id = m.user_id
+       WHERE m.version_id = $1
+         AND m.is_active = true
+         AND m.user_id IS NOT NULL
+         ${nodeFilter}
+         ${levelFilter}
+       GROUP BY n.level
+       ORDER BY MAX(l.level_order) NULLS LAST, n.level`,
+      params
+    );
+
+    const levels = result.rows.map((row) => ({
+      levelCode: row.level_code,
+      levelName: row.level_name || row.level_code,
+      levelOrder: row.level_order != null ? Number(row.level_order) : null,
+      total: Number(row.total || 0),
+      men: Number(row.men || 0),
+      women: Number(row.women || 0),
+      children: Number(row.children || 0),
+      baccha: Number(row.baccha || 0),
+      bacchi: Number(row.bacchi || 0),
+      hindu: Number(row.hindu || 0),
+      isai: Number(row.isai || 0),
+      muslim: Number(row.muslim || 0),
+      other: Number(row.other_religion || 0),
+    }));
+
+    return { versionId: safeVersionId, levels };
+  }
+
+  // Active categories (आयाम) with their active subcategories (टोली), from the
+  // shared master-data tables so the UI always reflects current admin edits.
+  static async getCategoryTree() {
+    const result = await pool.query(
+      `SELECT c.name AS category,
+              COALESCE(
+                json_agg(s.name ORDER BY s.name) FILTER (WHERE s.id IS NOT NULL),
+                '[]'
+              ) AS subcategories
+       FROM categories c
+       LEFT JOIN subcategories s ON s.category_id = c.id AND s.is_active = true
+       WHERE c.is_active = true
+       GROUP BY c.id, c.name
+       ORDER BY c.name ASC`
+    );
+    return result.rows.map((row) => ({
+      category: row.category,
+      subcategories: Array.isArray(row.subcategories) ? row.subcategories : [],
+    }));
   }
 
   static async getMemberById({ memberId, versionId }) {

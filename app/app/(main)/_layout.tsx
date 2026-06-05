@@ -22,6 +22,7 @@ export default function MainLayout() {
   
   // Determine active key based on pathname
   const getActiveKey = (): AppNavKey => {
+    if (pathname.includes('/karyakarini-superadmin')) return 'superadmin';
     if (pathname.includes('/admin')) return 'admin';
     if (pathname.includes('/karyakarini-admin')) return 'admin';
     if (pathname.includes('/karyakarini-report')) return 'report';
