@@ -44,8 +44,9 @@ type TeamMemberDraft = {
   profilePhotoUrl: string;
 };
 
-const HINDI_NO_DATA = 'कोई डेटा नहीं';
-const ACTIVITY_OPTIONS = ['धर्मरक्षा सूत्र', 'धर्मरक्षा दिवस', 'भारतमाता पूजन', 'संत यात्रा'];
+const HINDI_NO_DATA = 'उपलब्ध नहीं';
+const ACTIVITY_OPTIONS = ['धर्मरक्षा सूत्र', 'धर्मरक्षा दिवस', 'भारतमाता पूजन', 'संत यात्रा', 'शिक्षण', 'धर्म रक्षा सूत्र बंधन', 'धर्म'];
+const ACTIVITY_OTHER_LABEL = 'अन्य';
 const isEmptyData = (value?: string | number | null) => {
   if (value === null || value === undefined) return true;
   const normalized = String(value).trim().toLowerCase();
@@ -111,7 +112,7 @@ const formatDisplayLabel = (value?: string | null) => {
   if (normalized === 'general') return 'सामान्य';
   if (normalized === 'category') return 'आयाम';
   if (normalized === 'task assignee') return 'कार्य असाइनी';
-  if (normalized === 'activity submitter') return 'गतिविधि प्रस्तुतकर्ता';
+  if (normalized === 'activity submitter') return 'कार्यक्रम प्रस्तुतकर्ता';
   if (normalized === 'member') return 'कार्यकर्ता';
   if (normalized === 'attachment') return 'संलग्नक';
   return raw;
@@ -209,7 +210,7 @@ export default function KaryakariniMemberScreen() {
   }, [user]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<MemberTab>('tasks');
+  const [activeTab, setActiveTab] = useState<MemberTab>('myteams');
   const [versionId, setVersionId] = useState<number | null>(null);
   const [teams, setTeams] = useState<KaryakariniMyTeam[]>([]);
   const [categoryTeams, setCategoryTeams] = useState<KaryakariniCategoryTeam[]>([]);
@@ -232,6 +233,7 @@ export default function KaryakariniMemberScreen() {
   const [editingActivity, setEditingActivity] = useState<KaryakariniCategoryActivity | null>(null);
   const [activityForm, setActivityForm] = useState({
     title: '',
+    titleOther: false,
     description: '',
     fromDate: toDateTimeInput(),
     toDate: toDateTimeInput(),
@@ -469,9 +471,9 @@ export default function KaryakariniMemberScreen() {
       setEditingTeam(null);
       setTeamContext(null);
       setTeamMembersForm([{ fullName: '', mobileNumber: '', profilePhotoUrl: '' }]);
-      Alert.alert('सफल', 'टीम सफलतापूर्वक सेव हो गई');
+      Alert.alert('सफल', 'कार्यक्षेत्र सफलतापूर्वक सेव हो गई');
     } catch (err: any) {
-      Alert.alert('त्रुटि', err?.response?.data?.message || 'टीम सेव नहीं हो सकी');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'कार्यक्षेत्र सेव नहीं हो सकी');
     } finally {
       setSavingTeam(false);
     }
@@ -753,7 +755,7 @@ export default function KaryakariniMemberScreen() {
   const handleSaveActivity = useCallback(async () => {
     if (!versionId || !activityContext) return;
     if (!activityForm.title.trim()) {
-      Alert.alert('आवश्यक', 'गतिविधि शीर्षक आवश्यक है');
+      Alert.alert('आवश्यक', 'कार्यक्रम शीर्षक आवश्यक है');
       return;
     }
     try {
@@ -785,6 +787,7 @@ export default function KaryakariniMemberScreen() {
       setEditingActivity(null);
       setActivityForm({
         title: '',
+        titleOther: false,
         description: '',
         fromDate: toDateTimeInput(),
         toDate: toDateTimeInput(),
@@ -797,9 +800,9 @@ export default function KaryakariniMemberScreen() {
         attachments: [],
       });
       await loadData();
-      Alert.alert('सफल', editingActivity?.id ? 'गतिविधि सफलतापूर्वक अपडेट हुई' : 'गतिविधि सफलतापूर्वक जमा हुई');
+      Alert.alert('सफल', editingActivity?.id ? 'कार्यक्रम सफलतापूर्वक अपडेट हुई' : 'कार्यक्रम सफलतापूर्वक जमा हुई');
     } catch (err: any) {
-      Alert.alert('त्रुटि', err?.response?.data?.message || `गतिविधि ${editingActivity?.id ? 'अपडेट' : 'जमा'} करने में विफल`);
+      Alert.alert('त्रुटि', err?.response?.data?.message || `कार्यक्रम ${editingActivity?.id ? 'अपडेट' : 'जमा'} करने में विफल`);
     } finally {
       setSavingActivity(false);
     }
@@ -817,7 +820,7 @@ export default function KaryakariniMemberScreen() {
     setDeleteTarget({
       type: 'activity',
       id: Number(activityId),
-      title: String(title || '').trim() || 'गतिविधि',
+      title: String(title || '').trim() || 'कार्यक्रम',
     });
   }, []);
 
@@ -830,14 +833,14 @@ export default function KaryakariniMemberScreen() {
         Alert.alert('सफल', 'कार्य सफलता से हटा दिया गया है');
       } else {
         await karyakariniClient.delete(`/karyakarini/my/category-activities/${deleteTarget.id}`);
-        Alert.alert('सफल', 'गतिविधि सफलता से हटा दी गई है');
+        Alert.alert('सफल', 'कार्यक्रम सफलता से हटा दी गई है');
       }
       setDeleteTarget(null);
       await loadData();
     } catch (err: any) {
       Alert.alert(
         'त्रुटि',
-        err?.response?.data?.message || (deleteTarget.type === 'task' ? 'कार्य हटाने में विफल' : 'गतिविधि हटाने में विफल')
+        err?.response?.data?.message || (deleteTarget.type === 'task' ? 'कार्य हटाने में विफल' : 'कार्यक्रम हटाने में विफल')
       );
     } finally {
       setDeletingEntry(false);
@@ -1016,6 +1019,7 @@ export default function KaryakariniMemberScreen() {
     setEditingActivity(null);
     setActivityForm({
       title: '',
+      titleOther: false,
       description: '',
       fromDate: toDateTimeInput(),
       toDate: toDateTimeInput(),
@@ -1047,8 +1051,10 @@ export default function KaryakariniMemberScreen() {
 
     setActivityContext(nextContext);
     setEditingActivity(activity);
+    const editTitle = String(activity.title || '').trim();
     setActivityForm({
-      title: String(activity.title || '').trim(),
+      title: editTitle,
+      titleOther: Boolean(editTitle) && !ACTIVITY_OPTIONS.includes(editTitle),
       description: String(activity.description || '').trim(),
       fromDate: activity.from_date || toDateTimeInput(),
       toDate: activity.to_date || toDateTimeInput(),
@@ -1247,7 +1253,7 @@ export default function KaryakariniMemberScreen() {
     ]
       .map((value) => String(value || '').trim())
       .find((value) => !isEmptyData(value));
-    const createdByName = displayText(nameCandidate || '', 'अज्ञात');
+    const createdByName = displayText(nameCandidate || '');
     const createdByAvatar = avatarCandidate || '';
 
     return (
@@ -1286,7 +1292,7 @@ export default function KaryakariniMemberScreen() {
 
       <PageHeaderCard
         title="कार्यकारिणी"
-        subtitle="कार्य, टीम कार्यकर्ता और गतिविधियाँ"
+        subtitle="कार्य, कार्यक्षेत्र कार्यकर्ता और कार्यक्रम"
         icon={<MaterialIcons name="groups" size={24} color={theme.colors.primary} />}
       />
 
@@ -1329,19 +1335,19 @@ export default function KaryakariniMemberScreen() {
         ) : null}
 
         <View style={styles.tabSwitchRow}>
-          <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'tasks' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('tasks')}>
-            <Text style={[styles.tabSwitchText, activeTab === 'tasks' && styles.tabSwitchTextActive]}>
-              कार्य ({filteredTasks.length})
-            </Text>
-          </TouchableOpacity>
           <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'myteams' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('myteams')}>
             <Text style={[styles.tabSwitchText, activeTab === 'myteams' && styles.tabSwitchTextActive]}>
               टीम ({filteredCategoryTeams.length})
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'tasks' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('tasks')}>
+            <Text style={[styles.tabSwitchText, activeTab === 'tasks' && styles.tabSwitchTextActive]}>
+              कार्य ({filteredTasks.length})
+            </Text>
+          </TouchableOpacity>
           <TouchableOpacity style={[styles.tabSwitchBtn, activeTab === 'activities' && styles.tabSwitchBtnActive]} onPress={() => setActiveTab('activities')}>
             <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>
-              गतिविधियाँ ({filteredActivities.length})
+              कार्यक्रम ({filteredActivities.length})
             </Text>
           </TouchableOpacity>
         </View>
@@ -1349,15 +1355,15 @@ export default function KaryakariniMemberScreen() {
         {activeTab === 'myteams' ? (
           <View style={styles.listWrap}>
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.sectionTitle}>टीम प्रबंधन</Text>
+              <Text style={styles.sectionTitle}>कार्यक्षेत्र प्रबंधन</Text>
               {hasSelectedSubcategory ? (
                 <TouchableOpacity style={styles.taskEditBtn} onPress={() => handleOpenTeamCreate()}>
-                  <Text style={styles.taskEditBtnText}>+ टीम बनाएं</Text>
+                  <Text style={styles.taskEditBtnText}>+ कार्यक्षेत्र बनाएं</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
             {hasSelectedSubcategory ? (
-              <Text style={styles.subHeading}>चुनी गई आयाम के अनुसार टीमें दिख रही हैं</Text>
+              <Text style={styles.subHeading}>चुनी गई आयाम के अनुसार कार्यक्षेत्र दिख रही हैं</Text>
             ) : null}
 
             {teamLevelOptions.length > 0 ? (
@@ -1367,7 +1373,7 @@ export default function KaryakariniMemberScreen() {
                   onPress={() => setTeamLevelFilter('all')}
                 >
                   <Text style={[styles.levelFilterChipText, teamLevelFilter === 'all' && styles.levelFilterChipTextActive]}>
-                    सभी स्तर
+                    सभी कार्यक्षेत्र
                   </Text>
                 </TouchableOpacity>
                 {teamLevelOptions.map((entry) => (
@@ -1385,7 +1391,7 @@ export default function KaryakariniMemberScreen() {
             ) : null}
 
             {filteredCategoryTeams.length === 0 ? (
-              <Text style={styles.helper}>चुनी गई आयाम/स्तर के लिए कोई टीम नहीं मिली।</Text>
+              <Text style={styles.helper}>चुनी गई आयाम/कार्यक्षेत्र के लिए कोई कार्यक्षेत्र नहीं मिली।</Text>
             ) : (
               filteredCategoryTeams.map((group) => {
                 const members = Array.isArray(group.team_members) ? group.team_members : [];
@@ -1394,7 +1400,7 @@ export default function KaryakariniMemberScreen() {
                     <View style={styles.cardHeaderRow}>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.cardTitle}>{displayText(group.hierarchy_path || group.node_name || `नोड #${group.node_id}`)}</Text>
-                        <Text style={styles.cardMeta}>स्तर: {formatNodeLevelLabel(group.node_level)}</Text>
+                        <Text style={styles.cardMeta}>कार्यक्षेत्र: {formatNodeLevelLabel(group.node_level)}</Text>
                         <Text style={styles.cardMeta}>आयाम: {formatDisplayLabel(group.category)}</Text>
                         <Text style={styles.cardMeta}>टोली: {formatDisplayLabel(group.subcategory)}</Text>
                         {renderCreatedBy(
@@ -1406,13 +1412,13 @@ export default function KaryakariniMemberScreen() {
                       </View>
                       {Number(group.created_by || 0) === Number(user?.id) ? (
                         <TouchableOpacity style={styles.taskEditBtn} onPress={() => handleOpenTeamEditor(group)}>
-                          <Text style={styles.taskEditBtnText}>टीम संपादित करें</Text>
+                          <Text style={styles.taskEditBtnText}>कार्यक्षेत्र संपादित करें</Text>
                         </TouchableOpacity>
                       ) : null}
                     </View>
 
                     {members.length === 0 ? (
-                      <Text style={styles.helper}>इस टीम में अभी कार्यकर्ता नहीं जोड़े गए।</Text>
+                      <Text style={styles.helper}>इस कार्यक्षेत्र में अभी कार्यकर्ता नहीं जोड़े गए।</Text>
                     ) : (
                       <View style={{ marginTop: 8, gap: 8 }}>
                         {members.map((member: any, index: number) => {
@@ -1478,7 +1484,10 @@ export default function KaryakariniMemberScreen() {
                       <View key={`task-${task.id}`} style={styles.card}>
                         <View style={styles.cardHeaderRow}>
                           <Text style={styles.cardTitle}>शीर्षक: {displayText(task.title)}</Text>
-                          <Text style={[styles.statusBadge, { color: statusColor(task.status) }]}>{formatStatusLabel(task.status)}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                            <Text style={styles.cardMeta}>स्थिति:</Text>
+                            <Text style={[styles.statusBadge, { color: statusColor(task.status) }]}>{formatStatusLabel(task.status)}</Text>
+                          </View>
                         </View>
                         <Text style={styles.cardMeta}>{displayText(task.hierarchy_path || task.node_name)}</Text>
                         {renderCreatedBy(
@@ -1510,6 +1519,9 @@ export default function KaryakariniMemberScreen() {
                         </Text>
                         <Text style={styles.cardMeta}>
                           जनसंख्या: पुरुष {Number(task.male_count || 0)} • महिला {Number(task.female_count || 0)} • बच्चे {Number(task.children_count || 0)}
+                        </Text>
+                        <Text style={[styles.cardMeta, { color: theme.colors.primary, fontWeight: '700' }]}>
+                          कुल जनसंख्या: {Number(task.male_count || 0) + Number(task.female_count || 0) + Number(task.children_count || 0)}
                         </Text>
                         {Array.isArray(task.attachments) && task.attachments.length > 0 ? (
                           <View style={{ marginTop: 6, gap: 4 }}>
@@ -1559,10 +1571,10 @@ export default function KaryakariniMemberScreen() {
         {activeTab === 'activities' ? (
           <View style={styles.listWrap}>
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.sectionTitle}>गतिविधियाँ</Text>
+              <Text style={styles.sectionTitle}>कार्यक्रम</Text>
               {hasSelectedSubcategory ? (
                 <TouchableOpacity style={styles.taskEditBtn} onPress={() => handleOpenActivityCreate()}>
-                  <Text style={styles.taskEditBtnText}>+ गतिविधि बनाएं</Text>
+                  <Text style={styles.taskEditBtnText}>+ कार्यक्रम बनाएं</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -1570,22 +1582,27 @@ export default function KaryakariniMemberScreen() {
               <Text style={styles.subHeading}>चुनी गई आयाम के अनुसार फ़िल्टर</Text>
             ) : null}
             {filteredActivities.length === 0 ? (
-              <Text style={styles.helper}>अभी तक कोई गतिविधि नहीं मिली।</Text>
+              <Text style={styles.helper}>अभी तक कोई कार्यक्रम नहीं मिली।</Text>
             ) : (
               <View style={{ gap: 12 }}>
                 {filteredActivities.map((entry) => (
                   <View key={`activity-${entry.id}`} style={styles.card}>
                     <View style={styles.cardHeaderRow}>
                       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                        <Text style={[styles.cardTitle, { flex: undefined }]}>शीर्षक: {displayText(entry.title)}</Text>
-                        {ACTIVITY_OPTIONS.includes(entry.title) ? (
-                          <View style={{ backgroundColor: theme.colors.primary, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 16, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={[styles.cardTitle, { flexGrow: 0, flexShrink: 0, flexBasis: 'auto' }]}>शीर्षक:</Text>
+                        {String(entry.title || '').trim() ? (
+                          <View style={{ backgroundColor: theme.colors.primary, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 16, flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1, maxWidth: '100%' }}>
                             <MaterialIcons name="event-available" size={14} color="#fff" />
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: '#fff' }}>{entry.title}</Text>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: '#fff', flexShrink: 1 }}>{entry.title}</Text>
                           </View>
-                        ) : null}
+                        ) : (
+                          <Text style={[styles.cardTitle, { flexShrink: 1 }]}>{displayText(entry.title)}</Text>
+                        )}
                       </View>
-                      <Text style={[styles.statusBadge, { color: statusColor(entry.status) }]}>{formatStatusLabel(entry.status)}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                        <Text style={styles.cardMeta}>स्थिति:</Text>
+                        <Text style={[styles.statusBadge, { color: statusColor(entry.status) }]}>{formatStatusLabel(entry.status)}</Text>
+                      </View>
                     </View>
                     <Text style={styles.cardMeta}>{displayText(entry.hierarchy_path || entry.node_name)}</Text>
                     {renderCreatedBy(
@@ -1613,6 +1630,9 @@ export default function KaryakariniMemberScreen() {
                     <Text style={styles.cardMeta}>
                       जनसंख्या: पुरुष {Number(entry.male_count || 0)} • महिला {Number(entry.female_count || 0)} • बच्चे {Number(entry.children_count || 0)}
                     </Text>
+                    <Text style={[styles.cardMeta, { color: theme.colors.primary, fontWeight: '700' }]}>
+                      कुल जनसंख्या: {Number(entry.male_count || 0) + Number(entry.female_count || 0) + Number(entry.children_count || 0)}
+                    </Text>
                     {Array.isArray(entry.attachments) && entry.attachments.length > 0 ? (
                       <View style={{ marginTop: 6, gap: 4 }}>
                         <Text style={{ fontSize: 11, fontWeight: '700', color: theme.colors.text.secondary }}>संलग्नक ({entry.attachments.length}):</Text>
@@ -1639,7 +1659,7 @@ export default function KaryakariniMemberScreen() {
                     {Number(entry.submitted_by) === Number(user?.id) ? (
                       <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
                         <TouchableOpacity style={[styles.taskEditBtn, { flex: 1, marginTop: 0 }]} onPress={() => handleOpenActivityEditor(entry)}>
-                          <Text style={styles.taskEditBtnText}>गतिविधि अपडेट करें</Text>
+                          <Text style={styles.taskEditBtnText}>कार्यक्रम अपडेट करें</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={[styles.taskEditBtn, { flex: 1, marginTop: 0, borderColor: '#ff4d4f', backgroundColor: '#fff5f5' }]}
@@ -1674,7 +1694,7 @@ export default function KaryakariniMemberScreen() {
           setEditingTeam(null);
           setTeamContext(null);
         }}
-        title={editingTeam ? 'टीम संपादित करें' : 'टीम बनाएं'}
+        title={editingTeam ? 'कार्यक्षेत्र संपादित करें' : 'कार्यक्षेत्र बनाएं'}
         subtitle={teamContext?.subcategory || teamContext?.category || HINDI_NO_DATA}
         footer={
           <>
@@ -1693,7 +1713,7 @@ export default function KaryakariniMemberScreen() {
               onPress={() => void handleSaveTeam()}
               disabled={savingTeam}
             >
-              <Text style={styles.btnText}>{savingTeam ? 'सेव हो रहा है...' : 'टीम सेव करें'}</Text>
+              <Text style={styles.btnText}>{savingTeam ? 'सेव हो रहा है...' : 'कार्यक्षेत्र सेव करें'}</Text>
             </TouchableOpacity>
           </>
         }
@@ -1705,11 +1725,11 @@ export default function KaryakariniMemberScreen() {
             </Text>
             <Text style={styles.cardMeta}>आयाम: {formatDisplayLabel(teamContext.category)}</Text>
             <Text style={styles.cardMeta}>स्थान: {teamContext.nodeName || teamContext.path || `#${teamContext.nodeId}`}</Text>
-            <Text style={styles.cardMeta}>स्तर: {formatNodeLevelLabel(teamContext.nodeLevel)}</Text>
+            <Text style={styles.cardMeta}>कार्यक्षेत्र: {formatNodeLevelLabel(teamContext.nodeLevel)}</Text>
           </View>
         ) : null}
 
-        <Text style={styles.sectionTitle}>टीम कार्यकर्ता</Text>
+        <Text style={styles.sectionTitle}>कार्यक्षेत्र कार्यकर्ता</Text>
         <View style={{ gap: 10, marginTop: 8 }}>
           {teamMembersForm.map((member, idx) => (
             <View key={`team-form-member-${idx}`} style={styles.teamMemberFormCard}>
@@ -1769,7 +1789,7 @@ export default function KaryakariniMemberScreen() {
           setActivityContext(null);
           setEditingActivity(null);
         }}
-        title={editingActivity ? 'गतिविधि अपडेट करें' : 'गतिविधि बनाएं'}
+        title={editingActivity ? 'कार्यक्रम अपडेट करें' : 'कार्यक्रम बनाएं'}
         subtitle={activityContext?.subcategory || activityContext?.category || HINDI_NO_DATA}
         footer={
           <>
@@ -1777,7 +1797,7 @@ export default function KaryakariniMemberScreen() {
               <Text style={styles.btnTextDark}>रद्द करें</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.btn, savingActivity && styles.btnDisabled]} disabled={savingActivity} onPress={() => void handleSaveActivity()}>
-              <Text style={styles.btnText}>{savingActivity ? 'सेव हो रहा है...' : editingActivity ? 'गतिविधि अपडेट करें' : 'गतिविधि सेव करें'}</Text>
+              <Text style={styles.btnText}>{savingActivity ? 'सेव हो रहा है...' : editingActivity ? 'कार्यक्रम अपडेट करें' : 'कार्यक्रम सेव करें'}</Text>
             </TouchableOpacity>
           </>
         }
@@ -1792,25 +1812,37 @@ export default function KaryakariniMemberScreen() {
           </View>
         ) : null}
 
-        <Text style={styles.sectionTitle}>गतिविधि शीर्षक *</Text>
+        <Text style={styles.sectionTitle}>कार्यक्रम शीर्षक *</Text>
         <TouchableOpacity
           style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
           onPress={() => {
-            const options = ACTIVITY_OPTIONS.map(item => ({ label: item, value: item }));
-            setSearchPickerTitle('गतिविधि शीर्षक चुनें');
+            const options = [...ACTIVITY_OPTIONS, ACTIVITY_OTHER_LABEL].map(item => ({ label: item, value: item }));
+            setSearchPickerTitle('कार्यक्रम शीर्षक चुनें');
             setSearchPickerOptions(options);
             setSearchPickerSearchText('');
             setOnSearchPickerSelect(() => (val: string) => {
-              setActivityForm(prev => ({ ...prev, title: val }));
+              if (val === ACTIVITY_OTHER_LABEL) {
+                setActivityForm(prev => ({ ...prev, titleOther: true, title: ACTIVITY_OPTIONS.includes(prev.title) ? '' : prev.title }));
+              } else {
+                setActivityForm(prev => ({ ...prev, titleOther: false, title: val }));
+              }
             });
             setSearchPickerVisible(true);
           }}
         >
-          <Text style={activityForm.title ? styles.inputText : styles.inputPlaceholder}>
-            {activityForm.title || 'गतिविधि शीर्षक चुनें *'}
+          <Text style={(activityForm.titleOther || activityForm.title) ? styles.inputText : styles.inputPlaceholder}>
+            {activityForm.title || (activityForm.titleOther ? ACTIVITY_OTHER_LABEL : 'कार्यक्रम शीर्षक चुनें *')}
           </Text>
           <MaterialIcons name="arrow-drop-down" size={24} color={theme.colors.text.secondary} />
         </TouchableOpacity>
+        {activityForm.titleOther ? (
+          <TextInput
+            style={[styles.input, { marginTop: 8 }]}
+            value={activityForm.title}
+            onChangeText={(value) => setActivityForm((prev) => ({ ...prev, title: value }))}
+            placeholder="कार्यक्रम शीर्षक लिखें *"
+          />
+        ) : null}
 
         <Text style={[styles.sectionTitle, { marginTop: 10 }]}>विवरण</Text>
         <TextInput
@@ -1818,7 +1850,7 @@ export default function KaryakariniMemberScreen() {
           multiline
           value={activityForm.description}
           onChangeText={(value) => setActivityForm((prev) => ({ ...prev, description: value }))}
-          placeholder="गतिविधि का विवरण लिखें"
+          placeholder="कार्यक्रम का विवरण लिखें"
         />
 
         <View style={[styles.inlineRow, { marginTop: 10 }]}>
@@ -2031,7 +2063,7 @@ export default function KaryakariniMemberScreen() {
             </Text>
             <Text style={styles.cardMeta}>आयाम: {formatDisplayLabel(taskContext.category)}</Text>
             <Text style={styles.cardMeta}>नोड नाम: {taskContext.nodeName || taskContext.path || `#${taskContext.nodeId}`}</Text>
-            <Text style={styles.cardMeta}>स्तर: {formatNodeLevelLabel(taskContext.nodeLevel)}</Text>
+            <Text style={styles.cardMeta}>कार्यक्षेत्र: {formatNodeLevelLabel(taskContext.nodeLevel)}</Text>
           </View>
         ) : null}
 
@@ -2232,7 +2264,7 @@ export default function KaryakariniMemberScreen() {
         onClose={() => {
           if (!deletingEntry) setDeleteTarget(null);
         }}
-        title={deleteTarget?.type === 'task' ? 'कार्य हटाएं' : 'गतिविधि हटाएं'}
+        title={deleteTarget?.type === 'task' ? 'कार्य हटाएं' : 'कार्यक्रम हटाएं'}
         subtitle={deleteTarget?.title || HINDI_NO_DATA}
         footer={
           <>
@@ -2255,7 +2287,7 @@ export default function KaryakariniMemberScreen() {
       >
         <View style={{ paddingHorizontal: 10, paddingVertical: 8 }}>
           <Text style={styles.cardMeta}>
-            क्या आप वाकई इस {deleteTarget?.type === 'task' ? 'कार्य' : 'गतिविधि'} को हटाना चाहते हैं?
+            क्या आप वाकई इस {deleteTarget?.type === 'task' ? 'कार्य' : 'कार्यक्रम'} को हटाना चाहते हैं?
           </Text>
           <Text style={[styles.cardMeta, { marginTop: 6, color: theme.colors.error }]}>
             यह क्रिया वापस नहीं की जा सकती।

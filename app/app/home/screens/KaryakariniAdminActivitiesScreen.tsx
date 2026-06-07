@@ -61,7 +61,7 @@ export default function KaryakariniAdminActivitiesScreen() {
         setLoading(true);
         await loadAll();
       } catch (err: any) {
-        Alert.alert('त्रुटि', err?.response?.data?.message || 'गतिविधि असाइनमेंट डेटा लोड नहीं हो पाया');
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'कार्यक्रम असाइनमेंट डेटा लोड नहीं हो पाया');
       } finally {
         setLoading(false);
       }
@@ -104,9 +104,9 @@ export default function KaryakariniAdminActivitiesScreen() {
       });
       setForm((prev) => ({ ...prev, description: '', assignedUserId: '' }));
       await loadAll();
-      Alert.alert('सफल', 'गतिविधि सफलतापूर्वक असाइन की गई');
+      Alert.alert('सफल', 'कार्यक्रम सफलतापूर्वक असाइन की गई');
     } catch (err: any) {
-      Alert.alert('त्रुटि', err?.response?.data?.message || 'गतिविधि असाइन नहीं हो पाई');
+      Alert.alert('त्रुटि', err?.response?.data?.message || 'कार्यक्रम असाइन नहीं हो पाई');
     } finally {
       setSaving(false);
     }
@@ -124,8 +124,8 @@ export default function KaryakariniAdminActivitiesScreen() {
     <View style={styles.root}>
       <ScreenHeader title="कार्यकारिणी एडमिन" showBack user={user} />
       <PageHeaderCard
-        title="गतिविधि असाइनमेंट"
-        subtitle="कार्यकर्ताओं को गतिविधि असाइन करें"
+        title="कार्यक्रम असाइनमेंट"
+        subtitle="कार्यकर्ताओं को कार्यक्रम असाइन करें"
         icon={<MaterialIcons name="assignment-ind" size={24} color={theme.colors.primary} />}
       />
       <ScrollView
@@ -134,7 +134,7 @@ export default function KaryakariniAdminActivitiesScreen() {
       >
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>असाइनमेंट बनाएं</Text>
-          <Text style={styles.label}>गतिविधि नाम</Text>
+          <Text style={styles.label}>कार्यक्रम नाम</Text>
           <View style={styles.chipRow}>
             {ACTIVITY_OPTIONS.map((entry) => {
               const selected = form.activityName === entry;
@@ -213,12 +213,12 @@ export default function KaryakariniAdminActivitiesScreen() {
           />
 
           <TouchableOpacity style={[styles.saveBtn, saving && styles.disabled]} disabled={saving} onPress={() => void handleCreateAssignment()}>
-            <Text style={styles.saveBtnText}>{saving ? 'असाइन हो रहा है...' : 'गतिविधि असाइन करें'}</Text>
+            <Text style={styles.saveBtnText}>{saving ? 'असाइन हो रहा है...' : 'कार्यक्रम असाइन करें'}</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>असाइन की गई गतिविधियाँ</Text>
+          <Text style={styles.sectionTitle}>असाइन की गई कार्यक्रम</Text>
           {rows.length === 0 ? (
             <Text style={styles.helper}>अभी तक कोई असाइनमेंट नहीं</Text>
           ) : (

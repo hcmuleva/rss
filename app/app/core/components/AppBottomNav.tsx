@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
 
-export type AppNavKey = 'karyakarini' | 'report' | 'admin';
+export type AppNavKey = 'karyakarini' | 'report' | 'admin' | 'superadmin';
 
 interface AppBottomNavProps {
   activeKey: AppNavKey;
@@ -20,16 +20,23 @@ const isAdminRole = (role?: string | null) => {
   return value === 'admin' || value === 'superadmin';
 };
 
+const isSuperAdminRole = (role?: string | null) => String(role || '').toLowerCase() === 'superadmin';
+
 export function AppBottomNav({ activeKey, userRole }: AppBottomNavProps) {
   const insets = useSafeAreaInsets();
-  const navItems: { key: AppNavKey; icon: string; label: string; labelHi: string }[] = isAdminRole(userRole)
-    ? [...BASE_NAV_ITEMS, { key: 'admin', icon: '🛠️', label: 'Admin', labelHi: 'एडमिन' }]
-    : BASE_NAV_ITEMS;
-  
+  const navItems: { key: AppNavKey; icon: string; label: string; labelHi: string }[] = [...BASE_NAV_ITEMS];
+  if (isAdminRole(userRole)) {
+    navItems.push({ key: 'admin', icon: '🛠️', label: 'Admin', labelHi: 'एडमिन' });
+  }
+  if (isSuperAdminRole(userRole)) {
+    navItems.push({ key: 'superadmin', icon: '👑', label: 'SuperAdmin', labelHi: 'सुपर एडमिन' });
+  }
+
   const handlePress = (key: AppNavKey) => {
     if (key === 'karyakarini') return router.replace('/karyakarini-member');
     if (key === 'report') return router.replace('/karyakarini-report');
     if (key === 'admin') return router.replace('/karyakarini-admin');
+    if (key === 'superadmin') return router.replace('/karyakarini-superadmin');
   };
 
   return (

@@ -7,6 +7,7 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "import:mahasabha": "node scripts/importMahasabhaCsv.js",
+    "import:tree": "node scripts/importTree.js",
     "backfill:mahasabha-families": "node scripts/backfillMahasabhaFamilies.js"
   },
   "dependencies": {

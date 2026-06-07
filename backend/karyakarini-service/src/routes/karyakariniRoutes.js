@@ -13,9 +13,12 @@ router.post('/versions', requireSuperAdmin, controller.createVersion);
 
 router.get('/tree', controller.getTree);
 router.post('/nodes', requireAdmin, controller.createNode);
-router.put('/nodes/:nodeId', requireAdmin, controller.updateNode);
 router.get('/nodes/assignable', controller.getAssignableNodes);
 router.get('/nodes/members', controller.getNodeMembersDirect);
+router.get('/nodes/:nodeId/subtree', requireSuperAdmin, controller.getNodeSubtree);
+router.put('/nodes/:nodeId/bulk-update', requireSuperAdmin, controller.bulkUpdateNode);
+router.put('/nodes/:nodeId', requireAdmin, controller.updateNode);
+router.delete('/nodes/:nodeId', requireSuperAdmin, controller.deleteNode);
 
 router.get('/members', controller.getMembers);
 router.get('/members/search-users', controller.searchUsers);
@@ -23,6 +26,10 @@ router.get('/pads', controller.getPadOptions);
 router.post('/member', requireAdmin, controller.createMember);
 router.put('/member/:memberId', requireAdmin, controller.updateMember);
 router.post('/member-with-user', requireAdmin, controller.createMemberWithUserMapping);
+router.get('/jangarna', requireAdmin, controller.getJangarna);
+router.get('/master/categories', controller.getCategoryTree);
+router.get('/users/:userId/other-info', requireAdmin, controller.getUserOtherInfo);
+router.put('/users/:userId/other-info', requireAdmin, controller.updateUserOtherInfo);
 router.get('/guests/search', controller.searchGuests);
 router.post('/guests', controller.createGuest);
 

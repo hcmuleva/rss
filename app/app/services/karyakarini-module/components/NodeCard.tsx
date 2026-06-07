@@ -30,7 +30,7 @@ export function NodeCard({ node, selected = false, onPress, onMembersPress, onAd
           <Text style={styles.badgeText}>सदस्य: {Number(node.member_count || 0)}</Text>
         </View>
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>उप-स्तर: {Number(node.child_count || 0)}</Text>
+          <Text style={styles.badgeText}>उप-कार्यक्षेत्र: {Number(node.child_count || 0)}</Text>
         </View>
       </View>
 

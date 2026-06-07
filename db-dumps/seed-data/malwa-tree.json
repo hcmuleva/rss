@@ -1,0 +1,579 @@
+{
+  "version": {
+    "name": "मालवा नमूना वृक्ष",
+    "startYear": 2026,
+    "endYear": 2028
+  },
+  "tree": [
+    {
+      "name": "मालवा",
+      "level": "prant",
+      "children": [
+        {
+          "name": "इन्दौर संभाग",
+          "level": "sambhag",
+          "children": [
+            {
+              "name": "इन्दौर विभाग",
+              "level": "vibhag",
+              "children": [
+                {
+                  "name": "इन्दौर",
+                  "level": "jila",
+                  "children": [
+                    {
+                      "name": "इन्दौर",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "इन्दौर नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "राजवाड़ा बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "सराफा मोहल्ला", "level": "mohalla" },
+                                { "name": "बड़ा गणपति मोहल्ला", "level": "mohalla" }
+                              ]
+                            },
+                            {
+                              "name": "विजय नगर बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "स्कीम 54 मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "इन्दौर ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "कनाड़िया", "level": "gram" },
+                            { "name": "बिचौली हप्सी", "level": "gram" },
+                            { "name": "राऊ", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "महू",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "महू नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "छावनी बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "मुख्य बाजार मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "महू ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "सिमरोल", "level": "gram" },
+                            { "name": "मानपुर", "level": "gram" },
+                            { "name": "किशनगंज", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "धार",
+                  "level": "jila",
+                  "children": [
+                    {
+                      "name": "धार",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "धार नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "किला बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "मोचीपुरा मोहल्ला", "level": "mohalla" },
+                                { "name": "सराफा मोहल्ला", "level": "mohalla" }
+                              ]
+                            },
+                            {
+                              "name": "नालछा रोड बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "गांधी नगर मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "धार ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "तिरला", "level": "gram" },
+                            { "name": "नालछा", "level": "gram" },
+                            { "name": "लेबड़", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "पीथमपुर",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "पीथमपुर नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "सेक्टर एक बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "औद्योगिक मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "पीथमपुर ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "सागौर", "level": "gram" },
+                            { "name": "अकोलिया", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "निमाड़ विभाग",
+              "level": "vibhag",
+              "children": [
+                {
+                  "name": "खरगोन",
+                  "level": "jila",
+                  "children": [
+                    {
+                      "name": "खरगोन",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "खरगोन नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "बीस्टान रोड बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "सनावद नाका मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "खरगोन ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "ऊन", "level": "gram" },
+                            { "name": "बिस्टान", "level": "gram" },
+                            { "name": "गोगांवा", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "बड़वाह",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "बड़वाह नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "नर्मदा घाट बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "घाट मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "बड़वाह ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "करही", "level": "gram" },
+                            { "name": "बलकवाड़ा", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "बड़वानी",
+                  "level": "jila",
+                  "children": [
+                    {
+                      "name": "बड़वानी",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "बड़वानी नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "राजघाट बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "कस्बा मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "बड़वानी ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "सिलावद", "level": "gram" },
+                            { "name": "वरला", "level": "gram" },
+                            { "name": "तलून", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "सेंधवा",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "सेंधवा नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "बस स्टैंड बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "मंडी मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "सेंधवा ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "निवाली", "level": "gram" },
+                            { "name": "चाचरिया", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "उज्जैन संभाग",
+          "level": "sambhag",
+          "children": [
+            {
+              "name": "उज्जैन विभाग",
+              "level": "vibhag",
+              "children": [
+                {
+                  "name": "उज्जैन",
+                  "level": "jila",
+                  "children": [
+                    {
+                      "name": "उज्जैन",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "उज्जैन नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "महाकाल बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "महाकाल मोहल्ला", "level": "mohalla" },
+                                { "name": "गोपाल मंदिर मोहल्ला", "level": "mohalla" }
+                              ]
+                            },
+                            {
+                              "name": "फ्रीगंज बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "टावर चौक मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "उज्जैन ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "चिंतामन", "level": "gram" },
+                            { "name": "पंवासा", "level": "gram" },
+                            { "name": "जैथल", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "नागदा",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "नागदा नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "बिरलाग्राम बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "ग्रासिम मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "नागदा ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "उन्हेल", "level": "gram" },
+                            { "name": "भैरोगढ़", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "देवास",
+                  "level": "jila",
+                  "children": [
+                    {
+                      "name": "देवास",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "देवास नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "टेकरी बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "माता टेकरी मोहल्ला", "level": "mohalla" }
+                              ]
+                            },
+                            {
+                              "name": "स्टेशन रोड बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "सिविल लाइन मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "देवास ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "टोंक खुर्द", "level": "gram" },
+                            { "name": "नेमावर", "level": "gram" },
+                            { "name": "बरोठा", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "सोनकच्छ",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "सोनकच्छ नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "मुख्य बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "मंडी मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "सोनकच्छ ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "पीपलरावां", "level": "gram" },
+                            { "name": "लसूड़िया", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "मंदसौर विभाग",
+              "level": "vibhag",
+              "children": [
+                {
+                  "name": "रतलाम",
+                  "level": "jila",
+                  "children": [
+                    {
+                      "name": "रतलाम",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "रतलाम नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "माणक चौक बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "चांदनी चौक मोहल्ला", "level": "mohalla" },
+                                { "name": "दौलतगंज मोहल्ला", "level": "mohalla" }
+                              ]
+                            },
+                            {
+                              "name": "डालूमोदी बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "सैलाना बस स्टैंड मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "रतलाम ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "नामली", "level": "gram" },
+                            { "name": "धराड़", "level": "gram" },
+                            { "name": "सेजावता", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "जावरा",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "जावरा नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "हुसैन टेकरी बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "मंडी मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "जावरा ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "पिपलौदा", "level": "gram" },
+                            { "name": "ढोढर", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "मंदसौर",
+                  "level": "jila",
+                  "children": [
+                    {
+                      "name": "मंदसौर",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "मंदसौर नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "किला बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "गांधी चौराहा मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "मंदसौर ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "दलौदा", "level": "gram" },
+                            { "name": "नाहरगढ़", "level": "gram" },
+                            { "name": "पिपलिया मंडी", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "मल्हारगढ़",
+                      "level": "khand",
+                      "children": [
+                        {
+                          "name": "मल्हारगढ़ नगर",
+                          "level": "nagar",
+                          "children": [
+                            {
+                              "name": "मुख्य बस्ती",
+                              "level": "basti",
+                              "children": [
+                                { "name": "बाजार मोहल्ला", "level": "mohalla" }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "मल्हारगढ़ ग्रामीण मंडल",
+                          "level": "mandal",
+                          "children": [
+                            { "name": "पिपलिया", "level": "gram" },
+                            { "name": "नारायणगढ़", "level": "gram" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -150,7 +150,7 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ user, onLogout, notifi
               )}
               <View style={styles.menuUserInfo}>
                 <Text style={styles.menuUserName}>{resolvedName || 'उपयोगकर्ता'}</Text>
-                <Text style={styles.menuUserEmail}>{String(user.email || '') || 'कोई डेटा नहीं'}</Text>
+                <Text style={styles.menuUserEmail}>{String(user.email || '') || 'उपलब्ध नहीं'}</Text>
               </View>
             </View>
 

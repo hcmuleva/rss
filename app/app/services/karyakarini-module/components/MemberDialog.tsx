@@ -15,6 +15,17 @@ type Props = {
   onEditMember?: (member: KaryakariniMember) => void;
 };
 
+const NOT_AVAILABLE = 'उपलब्ध नहीं';
+
+const cleanUri = (value?: string | null) => {
+  const raw = String(value ?? '').trim();
+  const normalized = raw.toLowerCase();
+  if (!raw || normalized === 'null' || normalized === 'undefined' || normalized === 'nan') return '';
+  return raw;
+};
+
+const displayValue = (value?: string | null) => cleanUri(value) || NOT_AVAILABLE;
+
 const initials = (value: string) =>
   String(value || '')
     .trim()
@@ -26,17 +37,17 @@ const initials = (value: string) =>
 
 const RowValue = ({ text }: { text?: string | null }) => (
   <Text style={styles.value} numberOfLines={2}>
-    {text || '-'}
+    {displayValue(text)}
   </Text>
 );
 
 const memberName = (member: KaryakariniMember) =>
-  [member.first_name, member.father_name].filter(Boolean).join(' ').trim() || '-';
+  [member.first_name, member.father_name].filter(Boolean).join(' ').trim();
 
 const memberPeriod = (member: KaryakariniMember) =>
   member.period ||
   [member.start_date || null, member.end_date || null].filter(Boolean).join(' to ') ||
-  '-';
+  '';
 
 const parseLabelList = (value?: string | string[] | null) => {
   if (Array.isArray(value)) {
@@ -164,8 +175,8 @@ export function MemberDialog({ visible, loading, node, members, pagination, onCl
                     {padGroup.rows.map((member, rowIndex) => (
                       <View key={`${member.id}-${member.user_id || member.mobile_number || 'member'}`} style={[styles.row, rowIndex % 2 === 1 && styles.rowEven]}>
                         <View style={[styles.cell, styles.colAvatar]}>
-                          {member.avatar ? (
-                            <Image source={{ uri: member.avatar }} style={styles.avatar} />
+                          {cleanUri(member.avatar) ? (
+                            <Image source={{ uri: cleanUri(member.avatar) }} style={styles.avatar} />
                           ) : (
                             <View style={styles.avatarFallback}>
                               <Text style={styles.avatarFallbackText}>{initials(memberName(member))}</Text>
@@ -197,7 +208,7 @@ export function MemberDialog({ visible, loading, node, members, pagination, onCl
                                       <Text style={[styles.pillText, { color: '#FFF' }]}>+{list.length - 2} और</Text>
                                     </TouchableOpacity>
                                   ) : null}
-                                  {list.length === 0 ? <Text style={styles.value}>-</Text> : null}
+                                  {list.length === 0 ? <Text style={styles.value}>{NOT_AVAILABLE}</Text> : null}
                                 </>
                               );
                             })()}
@@ -225,7 +236,7 @@ export function MemberDialog({ visible, loading, node, members, pagination, onCl
                                       <Text style={[styles.pillText, { color: '#FFF' }]}>+{list.length - 2} और</Text>
                                     </TouchableOpacity>
                                   ) : null}
-                                  {list.length === 0 ? <Text style={styles.value}>-</Text> : null}
+                                  {list.length === 0 ? <Text style={styles.value}>{NOT_AVAILABLE}</Text> : null}
                                 </>
                               );
                             })()}
@@ -272,7 +283,7 @@ export function MemberDialog({ visible, loading, node, members, pagination, onCl
           setPillsModalMember(null);
         }}
         title="आवंटित श्रेणियां और उप-श्रेणियां"
-        subtitle={memberName(pillsModalMember)}
+        subtitle={displayValue(memberName(pillsModalMember))}
       >
         <View style={{ padding: 4, gap: 16 }}>
           <View style={{ gap: 8 }}>
