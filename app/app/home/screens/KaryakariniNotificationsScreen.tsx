@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 import { router } from 'expo-router';
+import { MaterialIcons } from '@expo/vector-icons';
 import { karyakariniClient } from '../../api/client';
 import { AppBottomNav } from '../../core/components/AppBottomNav';
 import { ScreenHeader } from '../../core/components/ScreenHeader';
@@ -8,7 +11,7 @@ import { useProfile } from '../../core/context/ProfileContext';
 import { theme } from '../../theme';
 import type { KaryakariniNotificationItem, KaryakariniVersion } from '../../services/karyakarini-module/types';
 
-type NotificationCategory = 'all' | 'tasks' | 'invitations';
+type NotificationCategory = 'invitations';
 
 const toDateText = (value?: string | null) => {
   if (!value) return '-';
@@ -25,13 +28,20 @@ const statusColor = (status?: string | null) => {
   return '#1d4ed8';
 };
 
+const sanitizeUrl = (value?: string | null) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return '';
+};
+
 export default function KaryakariniNotificationsScreen() {
   const { user, logout } = useProfile();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [versionId, setVersionId] = useState<number | null>(null);
   const [notifications, setNotifications] = useState<KaryakariniNotificationItem[]>([]);
-  const [activeCategory, setActiveCategory] = useState<NotificationCategory>('all');
+  const [activeCategory] = useState<NotificationCategory>('invitations');
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [updatingItemId, setUpdatingItemId] = useState<number | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -48,7 +58,7 @@ export default function KaryakariniNotificationsScreen() {
       return;
     }
 
-    const [notificationRes, unreadRes] = await Promise.all([
+    const [notificationRes, invitationRes, meetingsRes, unreadRes] = await Promise.all([
       karyakariniClient.get('/karyakarini/my/notifications', {
         params: {
           versionId: selectedVersionId,
@@ -57,14 +67,112 @@ export default function KaryakariniNotificationsScreen() {
           limit: 100,
         },
       }),
+      karyakariniClient.get('/karyakarini/my/invitations', {
+        params: {
+          versionId: selectedVersionId,
+          limit: 200,
+        },
+      }),
+      karyakariniClient.get('/karyakarini/meetings', {
+        params: {
+          versionId: selectedVersionId,
+          page: 1,
+          limit: 200,
+        },
+      }),
       karyakariniClient.get('/karyakarini/my/notifications/unread-count', {
         params: {
           versionId: selectedVersionId,
         },
       }),
     ]);
-    setNotifications((notificationRes?.data?.data?.notifications || []) as KaryakariniNotificationItem[]);
-    setUnreadCount(Number(unreadRes?.data?.data?.total || 0));
+    const notificationRows = ((notificationRes?.data?.data?.notifications || []) as KaryakariniNotificationItem[]).filter(
+      (entry) => entry.source === 'invitation'
+    );
+    const invitationRows = ((invitationRes?.data?.data?.invitations || []) as any[]).filter((invite) =>
+      unreadOnly ? !invite?.notification_read_at : true
+    );
+    const invitedMeetingIds = new Set<number>();
+    const byInvitationId = new Map<number, KaryakariniNotificationItem>();
+    notificationRows.forEach((row) => {
+      byInvitationId.set(Number(row.id), row);
+      const meetingId = Number(row.entity_id || row.metadata?.meetingId || 0);
+      if (meetingId > 0) invitedMeetingIds.add(meetingId);
+    });
+    invitationRows.forEach((invite) => {
+      const inviteId = Number(invite.id || 0);
+      if (!inviteId || byInvitationId.has(inviteId)) return;
+      const meetingId = Number(invite.meeting_id || 0);
+      if (meetingId > 0) invitedMeetingIds.add(meetingId);
+      byInvitationId.set(inviteId, {
+        id: inviteId,
+        source: 'invitation',
+        category: 'invitations',
+        type: 'meeting-invitation',
+        title: String(invite.meeting_title || 'बैठक आमंत्रण'),
+        message: `${String(invite.meeting_title || 'बैठक')} • ${toDateText(invite.meeting_date)}`,
+        status: String(invite.invitation_status || 'pending'),
+        entity_type: 'meeting',
+        entity_id: meetingId || null,
+        metadata: {
+          meetingId: meetingId || null,
+          meetingTitle: String(invite.meeting_title || ''),
+          meetingDescription: String(invite.meeting_description || ''),
+          meetingDate: invite.meeting_date || null,
+          meetingAreaName: String(invite.meeting_node_name || ''),
+          meetingAreaLevel: String(invite.meeting_node_level || ''),
+          invitedByName: String(invite.invited_by_name || ''),
+          attachments: [],
+        },
+        is_read: Boolean(invite.notification_read_at),
+        read_at: invite.notification_read_at || null,
+        created_at: invite.invited_at || invite.meeting_date || null,
+      });
+    });
+    const mergedInvitationRows = Array.from(byInvitationId.values()).sort((a, b) => {
+      const ta = new Date(String(a.created_at || '')).getTime() || 0;
+      const tb = new Date(String(b.created_at || '')).getTime() || 0;
+      return tb - ta;
+    });
+    const meetingRows = ((meetingsRes?.data?.data?.meetings || []) as any[])
+      .map((meeting) => {
+        const meetingId = Number(meeting.id || 0);
+        if (!meetingId || invitedMeetingIds.has(meetingId)) return null;
+        return {
+          id: meetingId,
+          source: 'meeting',
+          category: 'invitations',
+          type: 'meeting-history',
+          title: String(meeting.title || 'बैठक'),
+          message: `${String(meeting.node_name || '-')} • ${toDateText(meeting.meeting_date)}`,
+          status: 'scheduled',
+          entity_type: 'meeting',
+          entity_id: meetingId,
+          metadata: {
+            meetingId,
+            meetingTitle: String(meeting.title || ''),
+            meetingDescription: String(meeting.description || ''),
+            meetingDate: meeting.meeting_date || null,
+            meetingAreaName: String(meeting.node_name || ''),
+            meetingAreaLevel: String(meeting.node_level || ''),
+            meetingHierarchyPath: String(meeting.hierarchy_path || ''),
+            attachmentCount: Number(meeting.attachment_count || 0),
+            attachments: [],
+            meetingUpdatedAt: meeting.updated_at || null,
+          },
+          is_read: true,
+          created_at: meeting.created_at || meeting.meeting_date || null,
+        } as KaryakariniNotificationItem;
+      })
+      .filter(Boolean) as KaryakariniNotificationItem[];
+
+    const mergedRows = [...mergedInvitationRows, ...(unreadOnly ? [] : meetingRows)].sort((a, b) => {
+      const ta = new Date(String(a.created_at || '')).getTime() || 0;
+      const tb = new Date(String(b.created_at || '')).getTime() || 0;
+      return tb - ta;
+    });
+    setNotifications(mergedRows);
+    setUnreadCount(Number((unreadRes?.data?.data?.invitations ?? unreadRes?.data?.data?.total) || 0));
   }, []);
 
   const boot = useCallback(async () => {
@@ -105,10 +213,11 @@ export default function KaryakariniNotificationsScreen() {
   const handleMarkRead = useCallback(async (entry: KaryakariniNotificationItem) => {
     try {
       setUpdatingItemId(Number(entry.id));
-      await karyakariniClient.post('/karyakarini/my/notifications/read', {
-        notificationIds: entry.source === 'task_notification' ? [Number(entry.id)] : [],
-        invitationIds: entry.source === 'invitation' ? [Number(entry.id)] : [],
-      });
+      if (entry.source === 'invitation') {
+        await karyakariniClient.post('/karyakarini/my/invitations/read', {
+          invitationIds: [Number(entry.id)],
+        });
+      }
       await loadData(activeCategory, onlyUnread);
     } catch (err: any) {
       Alert.alert('Error', err?.response?.data?.message || 'Failed to mark notification as read');
@@ -118,17 +227,13 @@ export default function KaryakariniNotificationsScreen() {
   }, [activeCategory, loadData, onlyUnread]);
 
   const handleMarkAllRead = useCallback(async () => {
-    const taskNotificationIds = notifications
-      .filter((entry) => entry.source === 'task_notification' && !entry.is_read)
-      .map((entry) => Number(entry.id));
     const invitationIds = notifications
       .filter((entry) => entry.source === 'invitation' && !entry.is_read)
       .map((entry) => Number(entry.id));
-    if (!taskNotificationIds.length && !invitationIds.length) return;
+    if (!invitationIds.length) return;
 
     try {
-      await karyakariniClient.post('/karyakarini/my/notifications/read', {
-        notificationIds: taskNotificationIds,
+      await karyakariniClient.post('/karyakarini/my/invitations/read', {
         invitationIds,
       });
       await loadData(activeCategory, onlyUnread);
@@ -161,7 +266,7 @@ export default function KaryakariniNotificationsScreen() {
   );
 
   const handleInvitationResponse = useCallback(
-    async (entry: KaryakariniNotificationItem, status: 'accepted' | 'tentative' | 'rejected') => {
+    async (entry: KaryakariniNotificationItem, status: 'accepted' | 'rejected') => {
       const invitationId = Number(entry.id);
       if (!invitationId) return;
       try {
@@ -182,7 +287,40 @@ export default function KaryakariniNotificationsScreen() {
     [activeCategory, loadData, onlyUnread]
   );
 
-  const categoryButtons: NotificationCategory[] = ['all', 'tasks', 'invitations'];
+  const handleOpenAttachment = useCallback(async (url?: string | null, fileName?: string | null) => {
+    const safeUrl = sanitizeUrl(url);
+    if (!safeUrl) {
+      Alert.alert('त्रुटि', 'अवैध फ़ाइल लिंक');
+      return;
+    }
+    try {
+      if (Platform.OS === 'web') {
+        const a = document.createElement('a');
+        a.href = safeUrl;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.download = String(fileName || safeUrl.split('/').pop() || 'attachment');
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return;
+      }
+      if (typeof (FileSystem as any).downloadAsync === 'function') {
+        const targetPath = `${(FileSystem as any).cacheDirectory || ''}${Date.now()}-${String(fileName || 'attachment').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+        const result = await (FileSystem as any).downloadAsync(safeUrl, targetPath);
+        if (result?.status === 200) {
+          Alert.alert('डाउनलोड पूर्ण', `फाइल सेव हुई: ${result.uri}`);
+          return;
+        }
+      }
+      await Linking.openURL(safeUrl);
+    } catch {
+      Linking.openURL(safeUrl).catch(() => {
+        Alert.alert('त्रुटि', 'फ़ाइल डाउनलोड/खोलना संभव नहीं हुआ');
+      });
+    }
+  }, []);
+
   const unreadRows = useMemo(() => notifications.filter((entry) => !entry.is_read).length, [notifications]);
 
   return (
@@ -207,38 +345,37 @@ export default function KaryakariniNotificationsScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void handleRefresh()} />}
         >
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Category</Text>
-            <TouchableOpacity style={styles.markAllBtn} onPress={() => void handleMarkAllRead()} disabled={unreadRows === 0}>
-              <Text style={styles.markAllText}>Mark all read</Text>
-            </TouchableOpacity>
+            <Text style={styles.sectionTitle}>बैठक सूचनाएं</Text>
+            <View style={styles.headerActions}>
+              <TouchableOpacity style={styles.markAllBtn} onPress={() => void handleRefresh()} disabled={refreshing}>
+                <Text style={styles.markAllText}>{refreshing ? 'रिफ्रेश...' : 'रिफ्रेश'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.markAllBtn} onPress={() => void handleMarkAllRead()} disabled={unreadRows === 0}>
+                <Text style={styles.markAllText}>सभी पढ़ा हुआ करें</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.filterRow}>
-            {categoryButtons.map((entry) => (
-              <TouchableOpacity
-                key={entry}
-                style={[styles.filterChip, activeCategory === entry && styles.filterChipActive]}
-                onPress={() => setActiveCategory(entry)}
-              >
-                <Text style={[styles.filterChipText, activeCategory === entry && styles.filterChipTextActive]}>{entry}</Text>
-              </TouchableOpacity>
-            ))}
             <TouchableOpacity
               style={[styles.filterChip, onlyUnread && styles.filterChipActive]}
               onPress={() => setOnlyUnread((prev) => !prev)}
             >
-              <Text style={[styles.filterChipText, onlyUnread && styles.filterChipTextActive]}>Unread only</Text>
+              <Text style={[styles.filterChipText, onlyUnread && styles.filterChipTextActive]}>केवल अपठित</Text>
             </TouchableOpacity>
           </View>
 
           {notifications.length === 0 ? (
-            <Text style={styles.helper}>No notifications found.</Text>
+            <Text style={styles.helper}>कोई बैठक सूचना नहीं मिली।</Text>
           ) : (
             notifications.map((entry) => {
               const isPendingInvitation =
                 entry.source === 'invitation' && String(entry.status || '').trim().toLowerCase() === 'pending';
               const isTaskEntry = entry.source === 'task_notification';
+              const isMeetingHistoryEntry = entry.source === 'meeting';
               const entryStatus = String(entry.status || '').trim().toLowerCase();
+              const attachmentItems = Array.isArray(entry.metadata?.attachments) ? entry.metadata.attachments : [];
+              const attachmentCount = Number(entry.metadata?.attachmentCount || attachmentItems.length || 0);
               return (
                 <View key={`${entry.source}-${entry.id}`} style={[styles.card, !entry.is_read && styles.unreadCard]}>
                   <View style={styles.cardHeader}>
@@ -250,13 +387,48 @@ export default function KaryakariniNotificationsScreen() {
                   <Text style={styles.cardMeta}>{entry.message || '-'}</Text>
                   <Text style={styles.cardMeta}>{toDateText(entry.created_at)}</Text>
 
-                  {!entry.is_read ? (
+                  {entry.source === 'invitation' || isMeetingHistoryEntry ? (
+                    <View style={styles.detailsBlock}>
+                      <Text style={styles.detailLine}><Text style={styles.detailLabel}>बैठक का शीर्षक / नाम: </Text>{String(entry.metadata?.meetingTitle || entry.title || '-')}</Text>
+                      <Text style={styles.detailLine}><Text style={styles.detailLabel}>विवरण (एजेंडा): </Text>{String(entry.metadata?.meetingDescription || '-')}</Text>
+                      <Text style={styles.detailLine}><Text style={styles.detailLabel}>बैठक की तिथि: </Text>{toDateText(entry.metadata?.meetingDate || entry.created_at)}</Text>
+                      <Text style={styles.detailLine}>
+                        <Text style={styles.detailLabel}>कार्यक्षेत्र: </Text>
+                        {String(entry.metadata?.meetingHierarchyPath || entry.metadata?.meetingAreaName || '-')}
+                      </Text>
+                      <Text style={styles.detailLabel}>संलग्नक (फ़ाइल/फोटो/वीडियो):</Text>
+                      {attachmentItems.length > 0 ? (
+                        <View style={styles.actionRow}>
+                          {attachmentItems.map((att: any, idx: number) => (
+                            <TouchableOpacity
+                              key={`notif-att-${entry.id}-${idx}`}
+                              style={styles.attachmentBtn}
+                              onPress={() => void handleOpenAttachment(att?.url, att?.name)}
+                            >
+                              <View style={styles.attachmentBtnContent}>
+                                <MaterialIcons name="download" size={14} color={theme.colors.primary} />
+                                <Text style={styles.secondaryBtnText} numberOfLines={1} ellipsizeMode="middle">
+                                  {String(att?.name || `फाइल ${idx + 1}`)}
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      ) : attachmentCount > 0 ? (
+                        <Text style={styles.cardMeta}>{attachmentCount} संलग्नक उपलब्ध</Text>
+                      ) : (
+                        <Text style={styles.cardMeta}>कोई संलग्नक नहीं</Text>
+                      )}
+                    </View>
+                  ) : null}
+
+                  {entry.source === 'invitation' && !entry.is_read ? (
                     <TouchableOpacity
                       style={styles.secondaryBtn}
                       disabled={updatingItemId === Number(entry.id)}
                       onPress={() => void handleMarkRead(entry)}
                     >
-                      <Text style={styles.secondaryBtnText}>{updatingItemId === Number(entry.id) ? 'Please wait...' : 'Mark read'}</Text>
+                      <Text style={styles.secondaryBtnText}>{updatingItemId === Number(entry.id) ? 'कृपया प्रतीक्षा करें...' : 'पढ़ा हुआ करें'}</Text>
                     </TouchableOpacity>
                   ) : null}
 
@@ -282,21 +454,14 @@ export default function KaryakariniNotificationsScreen() {
                         disabled={updatingItemId === Number(entry.id)}
                         onPress={() => void handleInvitationResponse(entry, 'accepted')}
                       >
-                        <Text style={styles.actionTextWhite}>Accept</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.actionBtn, styles.actionBtnWarning]}
-                        disabled={updatingItemId === Number(entry.id)}
-                        onPress={() => void handleInvitationResponse(entry, 'tentative')}
-                      >
-                        <Text style={styles.actionTextWhite}>Tentative</Text>
+                        <Text style={styles.actionTextWhite}>स्वीकार करें</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.actionBtn, styles.actionBtnDanger]}
                         disabled={updatingItemId === Number(entry.id)}
                         onPress={() => void handleInvitationResponse(entry, 'rejected')}
                       >
-                        <Text style={styles.actionTextWhite}>Reject</Text>
+                        <Text style={styles.actionTextWhite}>अस्वीकार करें</Text>
                       </TouchableOpacity>
                     </View>
                   ) : null}
@@ -373,6 +538,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   sectionTitle: {
     fontSize: 15,
@@ -456,12 +626,29 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border,
     borderRadius: 8,
     paddingVertical: 8,
+    paddingHorizontal: 8,
     alignItems: 'center',
+  },
+  attachmentBtn: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    maxWidth: '100%',
+  },
+  attachmentBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    width: '100%',
   },
   secondaryBtnText: {
     color: theme.colors.primary,
     fontSize: 12,
     fontWeight: '700',
+    flexShrink: 1,
   },
   actionRow: {
     flexDirection: 'row',
@@ -502,6 +689,23 @@ const styles = StyleSheet.create({
   actionTextWhite: {
     color: '#fff',
     fontSize: 11,
+    fontWeight: '700',
+  },
+  detailsBlock: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 8,
+    padding: 8,
+    gap: 6,
+    backgroundColor: theme.colors.background,
+  },
+  detailLine: {
+    color: theme.colors.text.secondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  detailLabel: {
+    color: theme.colors.text.primary,
     fontWeight: '700',
   },
 });

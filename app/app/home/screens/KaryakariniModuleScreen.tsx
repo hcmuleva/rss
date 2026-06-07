@@ -20,6 +20,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { MaterialIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { karyakariniClient } from '../../api/client';
 import { AppBottomNav } from '../../core/components/AppBottomNav';
 import { ProfileMenu } from '../../core/components/ProfileMenu';
@@ -196,6 +197,11 @@ const sanitizeInputValue = (value?: string | null) => {
 const NOT_AVAILABLE = 'उपलब्ध नहीं';
 
 const displayValue = (value?: string | null) => sanitizeInputValue(value) || NOT_AVAILABLE;
+const toNonNegativeInt = (value: string | number | null | undefined) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.floor(n);
+};
 
 const appendPickerAssetToFormData = async (
   formData: FormData,
@@ -262,22 +268,63 @@ const parseLabelList = (value?: string | string[] | null) => {
   return [...new Set(raw.split(',').map((entry) => sanitizeInputValue(entry)).filter(Boolean))];
 };
 
-type KaryakariniTab = 'tree' | 'members' | 'meetings' | 'tasks' | 'activities' | 'roles' | 'jangarna';
+type KaryakariniTab = 'tree' | 'members' | 'meetings' | 'tasks' | 'activities' | 'roles' | 'jansankhiya';
 
-interface JangarnaLevel {
+interface JansankhiyaVillageOption {
+  nodeId: number;
+  nodeName: string;
+  nodeLevel: string;
+  familyCounts?: {
+    hindu?: number;
+    isai?: number;
+    muslim?: number;
+    other?: number;
+  };
+  memberCounts?: {
+    hindu?: number;
+    isai?: number;
+    muslim?: number;
+    other?: number;
+  };
+}
+
+interface JansankhiyaLevel {
   levelCode: string;
   levelName: string;
   levelOrder: number | null;
-  total: number;
-  men: number;
-  women: number;
-  children: number;
-  baccha: number;
-  bacchi: number;
-  hindu: number;
-  isai: number;
-  muslim: number;
-  other: number;
+  familyHindu: number;
+  familyIsai: number;
+  familyMuslim: number;
+  familyOther: number;
+  familyTotal: number;
+  memberHindu: number;
+  memberIsai: number;
+  memberMuslim: number;
+  memberOther: number;
+  memberTotal: number;
+}
+
+interface JansankhiyaNodeRow {
+  nodeId: number;
+  nodeName: string;
+  nodeLevel: string;
+  familyHindu: number;
+  familyIsai: number;
+  familyMuslim: number;
+  familyOther: number;
+  familyTotal: number;
+  memberHindu: number;
+  memberIsai: number;
+  memberMuslim: number;
+  memberOther: number;
+  memberTotal: number;
+}
+
+interface JansankhiyaSelectedNode {
+  nodeId: number;
+  nodeName: string;
+  nodeLevel: string;
+  hierarchyPath?: string;
 }
 
 const GENDER_TYPE_OPTIONS: { value: string; label: string }[] = [
@@ -293,6 +340,7 @@ const RELIGION_OPTIONS: { value: string; label: string }[] = [
   { value: 'muslim', label: 'मुस्लिम' },
   { value: 'other', label: 'अन्य' },
 ];
+const SHOW_OTHER_INFO_SECTION = false;
 
 interface SingleCascaderPickerProps {
   levels: TreeLevelState[];
@@ -753,9 +801,36 @@ export default function KaryakariniModuleScreen() {
     religion: null,
   });
 
-  const [jangarnaData, setJangarnaData] = useState<JangarnaLevel[]>([]);
-  const [jangarnaLoading, setJangarnaLoading] = useState(false);
-  const [jangarnaLevelFilter, setJangarnaLevelFilter] = useState<string>('all');
+  const [jansankhiyaData, setJansankhiyaData] = useState<JansankhiyaLevel[]>([]);
+  const [jansankhiyaNodeRows, setJansankhiyaNodeRows] = useState<JansankhiyaNodeRow[]>([]);
+  const [jansankhiyaLoading, setJansankhiyaLoading] = useState(false);
+  const [jansankhiyaLevelFilter, setJansankhiyaLevelFilter] = useState<string>('all');
+  const [jansankhiyaEditableVillages, setJansankhiyaEditableVillages] = useState<JansankhiyaVillageOption[]>([]);
+  const [jansankhiyaSelectedNode, setJansankhiyaSelectedNode] = useState<JansankhiyaSelectedNode | null>(null);
+  const [jansankhiyaFilterNodeId, setJansankhiyaFilterNodeId] = useState('');
+  const [jansankhiyaFilterLevels, setJansankhiyaFilterLevels] = useState<TreeLevelState[]>([]);
+  const [showJansankhiyaModal, setShowJansankhiyaModal] = useState(false);
+  const [savingJansankhiya, setSavingJansankhiya] = useState(false);
+  const [jansankhiyaForm, setJansankhiyaForm] = useState({
+    nodeId: '',
+    familyHindu: '0',
+    familyIsai: '0',
+    familyMuslim: '0',
+    familyOther: '0',
+    memberHindu: '0',
+    memberIsai: '0',
+    memberMuslim: '0',
+    memberOther: '0',
+  });
+  const jansankhiyaActiveNodeName = useMemo(() => {
+    if (jansankhiyaSelectedNode?.nodeName) return jansankhiyaSelectedNode.nodeName;
+    if (jansankhiyaEditableVillages.length === 1) return jansankhiyaEditableVillages[0]?.nodeName || '';
+    if (jansankhiyaFilterNodeId) {
+      const byAssignable = assignableNodes.find((n) => String(n.id) === String(jansankhiyaFilterNodeId));
+      if (byAssignable?.name) return byAssignable.name;
+    }
+    return '';
+  }, [jansankhiyaSelectedNode, jansankhiyaEditableVillages, jansankhiyaFilterNodeId, assignableNodes]);
 
   const [showMeetingModal, setShowMeetingModal] = useState(false);
   const [creatingMeeting, setCreatingMeeting] = useState(false);
@@ -1281,11 +1356,20 @@ export default function KaryakariniModuleScreen() {
       const response = await karyakariniClient.get('/karyakarini/my/notifications/unread-count', {
         params: { versionId },
       });
-      setNotificationUnreadCount(Number(response?.data?.data?.total || 0));
+      setNotificationUnreadCount(Number((response?.data?.data?.invitations ?? response?.data?.data?.total) || 0));
     } catch {
       setNotificationUnreadCount(0);
     }
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (selectedVersionId) {
+        void loadNotificationCount(selectedVersionId);
+      }
+      return undefined;
+    }, [loadNotificationCount, selectedVersionId])
+  );
 
   const loadMeetings = useCallback(
     async (versionId: number, page = 1) => {
@@ -1674,6 +1758,16 @@ export default function KaryakariniModuleScreen() {
             level: node.level,
             parent_id: node.parent_id ?? null,
             version_id: node.version_id,
+            hindu_member_count: Number((node as any).hindu_member_count || 0),
+            muslim_member_count: Number((node as any).muslim_member_count || 0),
+            isai_member_count: Number((node as any).isai_member_count || 0),
+            other_member_count: Number((node as any).other_member_count || 0),
+            hindu_family_count: Number((node as any).hindu_family_count || 0),
+            muslim_family_count: Number((node as any).muslim_family_count || 0),
+            isai_family_count: Number((node as any).isai_family_count || 0),
+            other_family_count: Number((node as any).other_family_count || 0),
+            member_count: Number((node as any).member_count || (node as any).members_count || 0),
+            members_count: Number((node as any).members_count || 0),
             child_count: Number(childCountByParent.get(Number(node.id)) || 0),
             can_assign_member: !scopeRootSet.has(Number(node.id)),
           }))
@@ -1738,9 +1832,19 @@ export default function KaryakariniModuleScreen() {
           level: node.level,
           parent_id: node.parent_id ?? null,
           version_id: node.version_id,
+          hindu_member_count: Number((node as any).hindu_member_count || 0),
+          muslim_member_count: Number((node as any).muslim_member_count || 0),
+          isai_member_count: Number((node as any).isai_member_count || 0),
+          other_member_count: Number((node as any).other_member_count || 0),
+          hindu_family_count: Number((node as any).hindu_family_count || 0),
+          muslim_family_count: Number((node as any).muslim_family_count || 0),
+          isai_family_count: Number((node as any).isai_family_count || 0),
+          other_family_count: Number((node as any).other_family_count || 0),
           can_assign_member: (node as any).can_assign_member,
           can_manage_hierarchy: (node as any).can_manage_hierarchy,
+          member_count: Number((node as any).member_count || (node as any).members_count || 0),
           members_count: (node as any).members_count || 0,
+          child_count: Number((node as any).child_count || childCountByParent.get(Number(node.id)) || 0),
           has_children: (childCountByParent.get(Number(node.id)) || 0) > 0,
         });
 
@@ -1754,6 +1858,7 @@ export default function KaryakariniModuleScreen() {
 
       setRoleLevels([{ parentNode: null, nodes: roleRootNodes, selectedNodeId: null }]);
       setMemberLevels([{ parentNode: null, nodes: memberRootNodes, selectedNodeId: null }]);
+      setJansankhiyaFilterLevels([{ parentNode: null, nodes: memberRootNodes, selectedNodeId: null }]);
       setActivityLevels([{ parentNode: null, nodes: memberRootNodes, selectedNodeId: null }]);
       setActivityBrowseLevels([{ parentNode: null, nodes: memberRootNodes, selectedNodeId: null }]);
       setTaskBrowseLevels([{ parentNode: null, nodes: memberRootNodes, selectedNodeId: null }]);
@@ -1763,6 +1868,7 @@ export default function KaryakariniModuleScreen() {
       setActivityBrowseNodeId('');
       setTaskBrowseNodeId('');
       setMembersNode(null);
+      setJansankhiyaFilterNodeId('');
     },
     [currentUserRole, fetchNodes, fetchStartingRootNodes]
   );
@@ -2028,6 +2134,30 @@ export default function KaryakariniModuleScreen() {
       }
     },
     [fetchNodes, taskBrowseLevels, selectedVersionId, loadTasks]
+  );
+
+  const handleJansankhiyaFilterNodeSelect = useCallback(
+    async (levelIndex: number, node: KaryakariniNode) => {
+      if (!selectedVersionId) return;
+      const trimmed = jansankhiyaFilterLevels.slice(0, levelIndex + 1).map((level, idx) =>
+        idx === levelIndex ? { ...level, selectedNodeId: node.id } : level
+      );
+      setJansankhiyaFilterLevels(trimmed);
+      setJansankhiyaFilterNodeId(String(node.id));
+
+      try {
+        const children = await fetchNodes(selectedVersionId, node.id);
+        if (children.length > 0) {
+          setJansankhiyaFilterLevels([
+            ...trimmed,
+            { parentNode: node, nodes: children, selectedNodeId: null },
+          ]);
+        }
+      } catch (err: any) {
+        Alert.alert('त्रुटि', err?.response?.data?.message || 'चाइल्ड नोड लोड करने में विफल');
+      }
+    },
+    [fetchNodes, jansankhiyaFilterLevels, selectedVersionId]
   );
 
   useEffect(() => {
@@ -2429,24 +2559,101 @@ export default function KaryakariniModuleScreen() {
     [subToCategory]
   );
 
-  const loadJangarna = useCallback(async (versionId: number) => {
+  const loadJansankhiya = useCallback(async (versionId: number, nodeId?: string) => {
     try {
-      setJangarnaLoading(true);
-      const res = await karyakariniClient.get('/karyakarini/jangarna', { params: { versionId } });
+      setJansankhiyaLoading(true);
+      const res = await karyakariniClient.get('/karyakarini/jansankhiya', {
+        params: {
+          versionId,
+          nodeId: nodeId || undefined,
+        },
+      });
       const levels = res?.data?.data?.levels || [];
-      setJangarnaData(Array.isArray(levels) ? levels : []);
+      const nodeRows = res?.data?.data?.nodeRows || [];
+      const editableVillages = res?.data?.data?.editableVillages || [];
+      const selectedNode = res?.data?.data?.selectedNode || null;
+      setJansankhiyaData(Array.isArray(levels) ? levels : []);
+      setJansankhiyaNodeRows(Array.isArray(nodeRows) ? nodeRows : []);
+      setJansankhiyaEditableVillages(Array.isArray(editableVillages) ? editableVillages : []);
+      setJansankhiyaSelectedNode(selectedNode || null);
     } catch {
-      setJangarnaData([]);
+      setJansankhiyaData([]);
+      setJansankhiyaNodeRows([]);
+      setJansankhiyaEditableVillages([]);
+      setJansankhiyaSelectedNode(null);
     } finally {
-      setJangarnaLoading(false);
+      setJansankhiyaLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (activeTab !== 'jangarna') return;
+    if (activeTab !== 'jansankhiya') return;
     if (!selectedVersionId) return;
-    void loadJangarna(selectedVersionId);
-  }, [activeTab, selectedVersionId, loadJangarna]);
+    void loadJansankhiya(selectedVersionId, jansankhiyaFilterNodeId);
+  }, [activeTab, selectedVersionId, loadJansankhiya, jansankhiyaFilterNodeId]);
+
+  const prefillJansankhiyaForm = useCallback(
+    (villageNodeId?: number) => {
+      const selectedVillage =
+        jansankhiyaEditableVillages.find((entry) => Number(entry.nodeId) === Number(villageNodeId)) ||
+        jansankhiyaEditableVillages[0] ||
+        null;
+      const familyCounts = selectedVillage?.familyCounts || {};
+      const memberCounts = selectedVillage?.memberCounts || {};
+      setJansankhiyaForm({
+        nodeId: selectedVillage ? String(selectedVillage.nodeId) : '',
+        familyHindu: String(Number(familyCounts.hindu || 0)),
+        familyIsai: String(Number(familyCounts.isai || 0)),
+        familyMuslim: String(Number(familyCounts.muslim || 0)),
+        familyOther: String(Number(familyCounts.other || 0)),
+        memberHindu: String(Number(memberCounts.hindu || 0)),
+        memberIsai: String(Number(memberCounts.isai || 0)),
+        memberMuslim: String(Number(memberCounts.muslim || 0)),
+        memberOther: String(Number(memberCounts.other || 0)),
+      });
+    },
+    [jansankhiyaEditableVillages]
+  );
+
+  const openJansankhiyaModal = useCallback(() => {
+    prefillJansankhiyaForm();
+    setShowJansankhiyaModal(true);
+  }, [prefillJansankhiyaForm]);
+
+  const handleSaveJansankhiya = useCallback(async () => {
+    if (!selectedVersionId) return;
+    const nodeId = Number(jansankhiyaForm.nodeId);
+    if (!Number.isFinite(nodeId) || nodeId <= 0) {
+      Alert.alert('त्रुटि', 'कृपया ग्राम/मोहल्ला चुनें');
+      return;
+    }
+    try {
+      setSavingJansankhiya(true);
+      await karyakariniClient.post('/karyakarini/jansankhiya', {
+        versionId: selectedVersionId,
+        nodeId,
+        familyCounts: {
+          hindu: toNonNegativeInt(jansankhiyaForm.familyHindu),
+          isai: toNonNegativeInt(jansankhiyaForm.familyIsai),
+          muslim: toNonNegativeInt(jansankhiyaForm.familyMuslim),
+          other: toNonNegativeInt(jansankhiyaForm.familyOther),
+        },
+        memberCounts: {
+          hindu: toNonNegativeInt(jansankhiyaForm.memberHindu),
+          isai: toNonNegativeInt(jansankhiyaForm.memberIsai),
+          muslim: toNonNegativeInt(jansankhiyaForm.memberMuslim),
+          other: toNonNegativeInt(jansankhiyaForm.memberOther),
+        },
+      });
+      setShowJansankhiyaModal(false);
+      await loadJansankhiya(selectedVersionId);
+      Alert.alert('सफल', 'जनसंख्या डेटा सेव हो गया');
+    } catch (error: any) {
+      Alert.alert('त्रुटि', error?.response?.data?.message || 'जनसंख्या डेटा सेव नहीं हो पाया');
+    } finally {
+      setSavingJansankhiya(false);
+    }
+  }, [jansankhiyaForm, loadJansankhiya, selectedVersionId]);
 
   const renderOtherInfoSection = () => (
     <View style={styles.otherInfoBlock}>
@@ -2829,6 +3036,54 @@ export default function KaryakariniModuleScreen() {
     selectedVersionId,
   ]);
 
+  const buildMeetingPickerLevels = useCallback(
+    async (versionId: number, targetNodeId?: number | null): Promise<TreeLevelState[]> => {
+      const safeTargetNodeId = Number(targetNodeId || 0);
+      const rootNodes =
+        levels.length > 0 && Array.isArray(levels[0]?.nodes) && levels[0].nodes.length > 0
+          ? levels[0].nodes
+          : await fetchStartingRootNodes(versionId);
+      const rebuilt: TreeLevelState[] = [{ parentNode: null, nodes: rootNodes, selectedNodeId: null }];
+      if (!safeTargetNodeId) return rebuilt;
+
+      const nodeById = new Map(
+        (Array.isArray(assignableNodes) ? assignableNodes : [])
+          .map((node) => [Number(node.id), node] as const)
+          .filter(([id]) => Number.isFinite(id) && id > 0)
+      );
+      const pathIds: number[] = [];
+      const seen = new Set<number>();
+      let cursor = nodeById.get(safeTargetNodeId);
+      while (cursor) {
+        const cursorId = Number(cursor.id);
+        if (!Number.isFinite(cursorId) || cursorId <= 0 || seen.has(cursorId)) break;
+        seen.add(cursorId);
+        pathIds.unshift(cursorId);
+        const parentId = Number(cursor.parent_id || 0);
+        if (!parentId) break;
+        cursor = nodeById.get(parentId);
+      }
+      if (!pathIds.length) pathIds.push(safeTargetNodeId);
+
+      for (const selectedId of pathIds) {
+        const levelIndex = rebuilt.length - 1;
+        const selectedNode = rebuilt[levelIndex].nodes.find((node) => Number(node.id) === Number(selectedId));
+        if (!selectedNode) break;
+        rebuilt[levelIndex] = { ...rebuilt[levelIndex], selectedNodeId: selectedNode.id };
+        const children = await fetchNodes(versionId, Number(selectedNode.id));
+        if (!children.length) break;
+        rebuilt.push({
+          parentNode: selectedNode,
+          nodes: children,
+          selectedNodeId: null,
+        });
+      }
+
+      return rebuilt;
+    },
+    [assignableNodes, fetchNodes, fetchStartingRootNodes, levels]
+  );
+
   const handleOpenMeetingModal = useCallback(async () => {
     if (!selectedVersionId) return;
     if (!assignableNodes.length) {
@@ -2861,15 +3116,16 @@ export default function KaryakariniModuleScreen() {
     setMeetingInvitePreview([]);
     setShowAttendanceTransferModal(false);
     setShowInvitationTransferModal(false);
-    setMeetingLevels(levels.length > 0 ? [{ ...levels[0], selectedNodeId: null }] : []);
-    setAttendanceLevels(levels.length > 0 ? [{ ...levels[0], selectedNodeId: null }] : []);
-    setInvitationLevels(levels.length > 0 ? [{ ...levels[0], selectedNodeId: null }] : []);
+    const meetingPickerLevels = await buildMeetingPickerLevels(selectedVersionId, Number(defaultNodeId || 0));
+    setMeetingLevels(meetingPickerLevels);
+    setAttendanceLevels(meetingPickerLevels.map((level) => ({ ...level })));
+    setInvitationLevels(meetingPickerLevels.map((level) => ({ ...level })));
     if (defaultNodeId) {
       await loadNodeMembersForForm(Number(defaultNodeId), selectedVersionId, 'meeting');
       await loadGuestsForNode(Number(defaultNodeId), selectedVersionId, '');
     }
     setShowMeetingModal(true);
-  }, [assignableNodes, loadGuestsForNode, loadNodeMembersForForm, selectedVersionId, levels]);
+  }, [assignableNodes, buildMeetingPickerLevels, loadGuestsForNode, loadNodeMembersForForm, selectedVersionId]);
 
   const fetchMeetingDetails = useCallback(
     async (meetingId: number) => {
@@ -2963,9 +3219,10 @@ export default function KaryakariniModuleScreen() {
           attachmentInput: '',
           attachments: Array.isArray(details.attachments) ? details.attachments : [],
         });
-        setMeetingLevels(levels.length > 0 ? [{ ...levels[0], selectedNodeId: null }] : []);
-        setAttendanceLevels(levels.length > 0 ? [{ ...levels[0], selectedNodeId: null }] : []);
-        setInvitationLevels(levels.length > 0 ? [{ ...levels[0], selectedNodeId: null }] : []);
+        const meetingPickerLevels = await buildMeetingPickerLevels(selectedVersionId, Number(nodeId || 0));
+        setMeetingLevels(meetingPickerLevels);
+        setAttendanceLevels(meetingPickerLevels.map((level) => ({ ...level })));
+        setInvitationLevels(meetingPickerLevels.map((level) => ({ ...level })));
         if (nodeId) {
           await loadNodeMembersForForm(Number(nodeId), selectedVersionId, 'meeting');
           await loadGuestsForNode(Number(nodeId), selectedVersionId, '');
@@ -2977,7 +3234,7 @@ export default function KaryakariniModuleScreen() {
         setMeetingDetailLoading(false);
       }
     },
-    [fetchMeetingDetails, loadGuestsForNode, loadNodeMembersForForm, selectedVersionId, levels]
+    [buildMeetingPickerLevels, fetchMeetingDetails, loadGuestsForNode, loadNodeMembersForForm, selectedVersionId]
   );
 
   const handleViewMeetingAttachments = useCallback(
@@ -3845,10 +4102,10 @@ export default function KaryakariniModuleScreen() {
               <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>कार्यक्रम</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.tabSwitchBtn, activeTab === 'jangarna' && styles.tabSwitchBtnActive]}
-              onPress={() => setActiveTab('jangarna')}
+              style={[styles.tabSwitchBtn, activeTab === 'jansankhiya' && styles.tabSwitchBtnActive]}
+              onPress={() => setActiveTab('jansankhiya')}
             >
-              <Text style={[styles.tabSwitchText, activeTab === 'jangarna' && styles.tabSwitchTextActive]}>जनगणना</Text>
+              <Text style={[styles.tabSwitchText, activeTab === 'jansankhiya' && styles.tabSwitchTextActive]}>जनसंख्या</Text>
             </TouchableOpacity>
             {/* <TouchableOpacity
               style={[styles.tabSwitchBtn, activeTab === 'roles' && styles.tabSwitchBtnActive]}
@@ -4689,130 +4946,234 @@ export default function KaryakariniModuleScreen() {
           </View>
         ) : null}
 
-        {activeTab === 'jangarna' ? (
+        {activeTab === 'jansankhiya' ? (
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>जनगणना</Text>
-              <TouchableOpacity
-                style={styles.primaryAction}
-                onPress={() => selectedVersionId && void loadJangarna(selectedVersionId)}
-                disabled={jangarnaLoading || !selectedVersionId}
-              >
-                <MaterialIcons name="refresh" size={18} color="#FFFFFF" />
-                <Text style={styles.primaryActionText}>रिफ्रेश</Text>
-              </TouchableOpacity>
+              <Text style={styles.sectionTitle}>जनसंख्या</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity
+                  style={styles.primaryAction}
+                  onPress={() => selectedVersionId && void loadJansankhiya(selectedVersionId, jansankhiyaFilterNodeId)}
+                  disabled={jansankhiyaLoading || !selectedVersionId}
+                >
+                  <MaterialIcons name="refresh" size={18} color="#FFFFFF" />
+                  <Text style={styles.primaryActionText}>रिफ्रेश</Text>
+                </TouchableOpacity>
+                {jansankhiyaEditableVillages.length > 0 ? (
+                  <TouchableOpacity style={styles.primaryAction} onPress={openJansankhiyaModal}>
+                    <MaterialIcons name="add" size={18} color="#FFFFFF" />
+                    <Text style={styles.primaryActionText}>जोड़ें/एडिट</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             </View>
 
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
-            >
-              <TouchableOpacity
-                style={[styles.optionChip, jangarnaLevelFilter === 'all' && styles.optionChipActive]}
-                onPress={() => setJangarnaLevelFilter('all')}
+            {jansankhiyaEditableVillages.length > 0 ? (
+              <Text style={styles.helper}>
+                आवंटित ग्राम/मोहल्ला: {jansankhiyaEditableVillages.map((entry) => entry.nodeName).join(', ')}
+              </Text>
+            ) : null}
+
+            {jansankhiyaEditableVillages.length === 0 ? (
+              <>
+                <Text style={styles.sectionLabel}>कार्यक्षेत्र/नोड फ़िल्टर</Text>
+                <SingleCascaderPicker
+                  levels={jansankhiyaFilterLevels}
+                  onSelectLevelNode={(levelIndex, node) => void handleJansankhiyaFilterNodeSelect(levelIndex, node)}
+                  title="कार्यक्षेत्र चुनें"
+                  placeholder="आवंटित लेवल/नोड चुनें"
+                  selectedValue={jansankhiyaFilterNodeId}
+                  allNodes={assignableNodes}
+                  onClear={() => {
+                    setJansankhiyaFilterNodeId('');
+                    if (jansankhiyaFilterLevels.length > 0) {
+                      const rootNodes = jansankhiyaFilterLevels[0]?.nodes || [];
+                      setJansankhiyaFilterLevels([{ parentNode: null, nodes: rootNodes, selectedNodeId: null }]);
+                    }
+                  }}
+                />
+                {jansankhiyaSelectedNode ? (
+                  <Text style={styles.helper}>
+                    चयनित कार्य क्षेत्र: {jansankhiyaSelectedNode.nodeName} ({formatNodeLevelLabel(jansankhiyaSelectedNode.nodeLevel)})
+                    {jansankhiyaSelectedNode.hierarchyPath ? ` • ${jansankhiyaSelectedNode.hierarchyPath}` : ''}
+                  </Text>
+                ) : jansankhiyaActiveNodeName ? (
+                  <Text style={styles.helper}>चयनित कार्य क्षेत्र: {jansankhiyaActiveNodeName}</Text>
+                ) : (
+                  <Text style={styles.helper}>ऊपर से नोड चुनें, फिर नीचे स्तरवार व कुल डेटा दिखेगा।</Text>
+                )}
+              </>
+            ) : null}
+
+            {jansankhiyaEditableVillages.length === 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
               >
-                <Text style={[styles.optionChipText, jangarnaLevelFilter === 'all' && styles.optionChipTextActive]}>
-                  सभी स्तर
-                </Text>
-              </TouchableOpacity>
-              {jangarnaData.map((lvl) => (
                 <TouchableOpacity
-                  key={`jfilter-${lvl.levelCode}`}
-                  style={[styles.optionChip, jangarnaLevelFilter === lvl.levelCode && styles.optionChipActive]}
-                  onPress={() => setJangarnaLevelFilter(lvl.levelCode)}
+                  style={[styles.optionChip, jansankhiyaLevelFilter === 'all' && styles.optionChipActive]}
+                  onPress={() => setJansankhiyaLevelFilter('all')}
                 >
-                  <Text style={[styles.optionChipText, jangarnaLevelFilter === lvl.levelCode && styles.optionChipTextActive]}>
-                    {lvl.levelName}
+                  <Text style={[styles.optionChipText, jansankhiyaLevelFilter === 'all' && styles.optionChipTextActive]}>
+                    सभी स्तर
                   </Text>
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
+                {jansankhiyaData.map((lvl) => (
+                  <TouchableOpacity
+                    key={`jsfilter-${lvl.levelCode}`}
+                    style={[styles.optionChip, jansankhiyaLevelFilter === lvl.levelCode && styles.optionChipActive]}
+                    onPress={() => setJansankhiyaLevelFilter(lvl.levelCode)}
+                  >
+                    <Text style={[styles.optionChipText, jansankhiyaLevelFilter === lvl.levelCode && styles.optionChipTextActive]}>
+                      {lvl.levelName}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            ) : null}
 
-            {jangarnaLoading ? (
+            {jansankhiyaLoading ? (
               <Text style={styles.helper}>लोड हो रहा है...</Text>
-            ) : jangarnaData.length === 0 ? (
-              <Text style={styles.helper}>कोई जनगणना डेटा उपलब्ध नहीं है।</Text>
+            ) : jansankhiyaData.length === 0 ? (
+              <Text style={styles.helper}>कोई जनसंख्या डेटा उपलब्ध नहीं है।</Text>
             ) : (
               (() => {
-                const jFiltered = jangarnaData.filter((lvl) => jangarnaLevelFilter === 'all' || lvl.levelCode === jangarnaLevelFilter);
-                const jSum = (key: keyof JangarnaLevel) => jFiltered.reduce((s, l) => s + Number((l[key] as number) || 0), 0);
+                const jFiltered = jansankhiyaData.filter(
+                  (lvl) =>
+                    jansankhiyaEditableVillages.length > 0
+                      ? true
+                      : jansankhiyaLevelFilter === 'all' || lvl.levelCode === jansankhiyaLevelFilter
+                );
+                const jSum = (key: keyof JansankhiyaLevel) =>
+                  jFiltered.reduce((s, l) => s + Number((l[key] as number) || 0), 0);
                 return (
                   <>
                     <View style={[styles.jangarnaCard, styles.jangarnaSummaryCard]}>
                       <View style={styles.jangarnaCardHeader}>
-                        <Text style={styles.jangarnaLevelName}>कुल (सभी {jFiltered.length} स्तर)</Text>
+                        <Text style={styles.jangarnaLevelName}>
+                          {jansankhiyaSelectedNode
+                            ? `कुल (${jansankhiyaSelectedNode.nodeName} के ${jFiltered.length} स्तर)`
+                            : `कुल (सभी ${jFiltered.length} स्तर)`}
+                        </Text>
                         <View style={[styles.jangarnaTotalBadge, { backgroundColor: theme.colors.primary }]}>
-                          <Text style={[styles.jangarnaTotalText, { color: '#FFFFFF' }]}>कुल सदस्य: {jSum('total')}</Text>
+                          <Text style={[styles.jangarnaTotalText, { color: '#FFFFFF' }]}>
+                            कुल सदस्य: {jSum('memberTotal')}
+                          </Text>
                         </View>
                       </View>
-                      <Text style={styles.jangarnaSectionLabel}>लिंग / प्रकार</Text>
+                      <Text style={styles.jangarnaSectionLabel}>परिवार संख्या</Text>
                       <View style={styles.jangarnaStatRow}>
-                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('men')}</Text><Text style={styles.jangarnaStatLabel}>पुरुष</Text></View>
-                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('women')}</Text><Text style={styles.jangarnaStatLabel}>महिला</Text></View>
-                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('baccha')}</Text><Text style={styles.jangarnaStatLabel}>बच्चा</Text></View>
-                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('bacchi')}</Text><Text style={styles.jangarnaStatLabel}>बच्ची</Text></View>
+                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('familyHindu')}</Text><Text style={styles.jangarnaStatLabel}>हिंदू</Text></View>
+                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('familyIsai')}</Text><Text style={styles.jangarnaStatLabel}>ईसाई</Text></View>
+                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('familyMuslim')}</Text><Text style={styles.jangarnaStatLabel}>मुस्लिम</Text></View>
+                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('familyOther')}</Text><Text style={styles.jangarnaStatLabel}>अन्य</Text></View>
                       </View>
-                      <Text style={styles.jangarnaChildrenLine}>कुल बच्चे: {jSum('children')}</Text>
-                      <Text style={styles.jangarnaSectionLabel}>धर्म</Text>
+                      <Text style={styles.jangarnaChildrenLine}>कुल परिवार: {jSum('familyTotal')}</Text>
+                      <Text style={styles.jangarnaSectionLabel}>कुल सदस्य संख्या</Text>
                       <View style={styles.jangarnaStatRow}>
-                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('hindu')}</Text><Text style={styles.jangarnaStatLabel}>हिंदू</Text></View>
-                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('isai')}</Text><Text style={styles.jangarnaStatLabel}>ईसाई</Text></View>
-                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('muslim')}</Text><Text style={styles.jangarnaStatLabel}>मुस्लिम</Text></View>
-                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('other')}</Text><Text style={styles.jangarnaStatLabel}>अन्य</Text></View>
+                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('memberHindu')}</Text><Text style={styles.jangarnaStatLabel}>हिंदू</Text></View>
+                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('memberIsai')}</Text><Text style={styles.jangarnaStatLabel}>ईसाई</Text></View>
+                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('memberMuslim')}</Text><Text style={styles.jangarnaStatLabel}>मुस्लिम</Text></View>
+                        <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{jSum('memberOther')}</Text><Text style={styles.jangarnaStatLabel}>अन्य</Text></View>
                       </View>
+                      <Text style={styles.jangarnaChildrenLine}>कुल सदस्य: {jSum('memberTotal')}</Text>
                     </View>
                     {jFiltered.map((lvl) => (
-                  <View key={`jcard-${lvl.levelCode}`} style={styles.jangarnaCard}>
+                  <View key={`jscard-${lvl.levelCode}`} style={styles.jangarnaCard}>
                     <View style={styles.jangarnaCardHeader}>
                       <Text style={styles.jangarnaLevelName}>{lvl.levelName}</Text>
                       <View style={styles.jangarnaTotalBadge}>
-                        <Text style={styles.jangarnaTotalText}>कुल सदस्य: {lvl.total}</Text>
+                        <Text style={styles.jangarnaTotalText}>कुल सदस्य: {lvl.memberTotal}</Text>
                       </View>
                     </View>
+                    {lvl.levelCode === 'village' && jansankhiyaActiveNodeName ? (
+                      <Text style={styles.jangarnaChildrenLine}>
+                        कार्य क्षेत्र: {jansankhiyaActiveNodeName}
+                      </Text>
+                    ) : null}
 
-                    <Text style={styles.jangarnaSectionLabel}>लिंग / प्रकार</Text>
+                    <Text style={styles.jangarnaSectionLabel}>परिवार संख्या</Text>
                     <View style={styles.jangarnaStatRow}>
                       <View style={styles.jangarnaStat}>
-                        <Text style={styles.jangarnaStatValue}>{lvl.men}</Text>
-                        <Text style={styles.jangarnaStatLabel}>पुरुष</Text>
-                      </View>
-                      <View style={styles.jangarnaStat}>
-                        <Text style={styles.jangarnaStatValue}>{lvl.women}</Text>
-                        <Text style={styles.jangarnaStatLabel}>महिला</Text>
-                      </View>
-                      <View style={styles.jangarnaStat}>
-                        <Text style={styles.jangarnaStatValue}>{lvl.baccha}</Text>
-                        <Text style={styles.jangarnaStatLabel}>बच्चा</Text>
-                      </View>
-                      <View style={styles.jangarnaStat}>
-                        <Text style={styles.jangarnaStatValue}>{lvl.bacchi}</Text>
-                        <Text style={styles.jangarnaStatLabel}>बच्ची</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.jangarnaChildrenLine}>कुल बच्चे: {lvl.children}</Text>
-
-                    <Text style={styles.jangarnaSectionLabel}>धर्म</Text>
-                    <View style={styles.jangarnaStatRow}>
-                      <View style={styles.jangarnaStat}>
-                        <Text style={styles.jangarnaStatValue}>{lvl.hindu}</Text>
+                        <Text style={styles.jangarnaStatValue}>{lvl.familyHindu}</Text>
                         <Text style={styles.jangarnaStatLabel}>हिंदू</Text>
                       </View>
                       <View style={styles.jangarnaStat}>
-                        <Text style={styles.jangarnaStatValue}>{lvl.isai}</Text>
+                        <Text style={styles.jangarnaStatValue}>{lvl.familyIsai}</Text>
                         <Text style={styles.jangarnaStatLabel}>ईसाई</Text>
                       </View>
                       <View style={styles.jangarnaStat}>
-                        <Text style={styles.jangarnaStatValue}>{lvl.muslim}</Text>
+                        <Text style={styles.jangarnaStatValue}>{lvl.familyMuslim}</Text>
                         <Text style={styles.jangarnaStatLabel}>मुस्लिम</Text>
                       </View>
                       <View style={styles.jangarnaStat}>
-                        <Text style={styles.jangarnaStatValue}>{lvl.other}</Text>
+                        <Text style={styles.jangarnaStatValue}>{lvl.familyOther}</Text>
                         <Text style={styles.jangarnaStatLabel}>अन्य</Text>
                       </View>
                     </View>
+                    <Text style={styles.jangarnaChildrenLine}>कुल परिवार: {lvl.familyTotal}</Text>
+
+                    <Text style={styles.jangarnaSectionLabel}>कुल सदस्य संख्या</Text>
+                    <View style={styles.jangarnaStatRow}>
+                      <View style={styles.jangarnaStat}>
+                        <Text style={styles.jangarnaStatValue}>{lvl.memberHindu}</Text>
+                        <Text style={styles.jangarnaStatLabel}>हिंदू</Text>
+                      </View>
+                      <View style={styles.jangarnaStat}>
+                        <Text style={styles.jangarnaStatValue}>{lvl.memberIsai}</Text>
+                        <Text style={styles.jangarnaStatLabel}>ईसाई</Text>
+                      </View>
+                      <View style={styles.jangarnaStat}>
+                        <Text style={styles.jangarnaStatValue}>{lvl.memberMuslim}</Text>
+                        <Text style={styles.jangarnaStatLabel}>मुस्लिम</Text>
+                      </View>
+                      <View style={styles.jangarnaStat}>
+                        <Text style={styles.jangarnaStatValue}>{lvl.memberOther}</Text>
+                        <Text style={styles.jangarnaStatLabel}>अन्य</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.jangarnaChildrenLine}>कुल सदस्य: {lvl.memberTotal}</Text>
                   </View>
                     ))}
+                    {jansankhiyaNodeRows.length > 0 ? (
+                      <>
+                        <Text style={[styles.sectionLabel, { marginTop: 8 }]}>
+                          नीचे के कार्य क्षेत्रों का अलग विवरण ({jansankhiyaNodeRows.length})
+                        </Text>
+                        {jansankhiyaNodeRows.map((row) => (
+                          <View key={`js-node-${row.nodeId}`} style={styles.jangarnaCard}>
+                            <View style={styles.jangarnaCardHeader}>
+                              <Text style={styles.jangarnaLevelName}>
+                                कार्य क्षेत्र: {row.nodeName}
+                              </Text>
+                              <View style={styles.jangarnaTotalBadge}>
+                                <Text style={styles.jangarnaTotalText}>कुल सदस्य: {row.memberTotal}</Text>
+                              </View>
+                            </View>
+                            <Text style={styles.jangarnaChildrenLine}>
+                              स्तर: {formatNodeLevelLabel(row.nodeLevel)}
+                            </Text>
+                            <Text style={styles.jangarnaSectionLabel}>परिवार संख्या</Text>
+                            <View style={styles.jangarnaStatRow}>
+                              <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{row.familyHindu}</Text><Text style={styles.jangarnaStatLabel}>हिंदू</Text></View>
+                              <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{row.familyIsai}</Text><Text style={styles.jangarnaStatLabel}>ईसाई</Text></View>
+                              <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{row.familyMuslim}</Text><Text style={styles.jangarnaStatLabel}>मुस्लिम</Text></View>
+                              <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{row.familyOther}</Text><Text style={styles.jangarnaStatLabel}>अन्य</Text></View>
+                            </View>
+                            <Text style={styles.jangarnaChildrenLine}>कुल परिवार: {row.familyTotal}</Text>
+                            <Text style={styles.jangarnaSectionLabel}>कुल सदस्य संख्या</Text>
+                            <View style={styles.jangarnaStatRow}>
+                              <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{row.memberHindu}</Text><Text style={styles.jangarnaStatLabel}>हिंदू</Text></View>
+                              <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{row.memberIsai}</Text><Text style={styles.jangarnaStatLabel}>ईसाई</Text></View>
+                              <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{row.memberMuslim}</Text><Text style={styles.jangarnaStatLabel}>मुस्लिम</Text></View>
+                              <View style={styles.jangarnaStat}><Text style={styles.jangarnaStatValue}>{row.memberOther}</Text><Text style={styles.jangarnaStatLabel}>अन्य</Text></View>
+                            </View>
+                            <Text style={styles.jangarnaChildrenLine}>कुल सदस्य: {row.memberTotal}</Text>
+                          </View>
+                        ))}
+                      </>
+                    ) : null}
                   </>
                 );
               })()
@@ -5101,7 +5462,7 @@ export default function KaryakariniModuleScreen() {
             ))}
           </View>
 
-          {renderOtherInfoSection()}
+          {SHOW_OTHER_INFO_SECTION ? renderOtherInfoSection() : null}
 
           <Text style={styles.fieldLabel}>पता</Text>
           <View style={styles.twoColRow}>
@@ -5321,7 +5682,7 @@ export default function KaryakariniModuleScreen() {
               ))}
             </View>
 
-            {renderOtherInfoSection()}
+            {SHOW_OTHER_INFO_SECTION ? renderOtherInfoSection() : null}
 
             <Text style={styles.fieldLabel}>पता</Text>
             <View style={styles.twoColRow}>
@@ -5595,6 +5956,87 @@ export default function KaryakariniModuleScreen() {
       </StandardModal>
 
       <StandardModal
+        visible={showJansankhiyaModal}
+        onClose={() => setShowJansankhiyaModal(false)}
+        title="जनसंख्या दर्ज करें"
+        subtitle="ग्राम/मोहल्ला स्तर"
+        footer={
+          <>
+            <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowJansankhiyaModal(false)}>
+              <Text style={styles.btnTextDark}>रद्द करें</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.btn, savingJansankhiya && styles.btnDisabled]}
+              onPress={() => void handleSaveJansankhiya()}
+              disabled={savingJansankhiya}
+            >
+              <Text style={styles.btnText}>{savingJansankhiya ? 'सेव हो रहा है...' : 'सेव करें'}</Text>
+            </TouchableOpacity>
+          </>
+        }
+      >
+        <Text style={styles.fieldLabel}>आवंटित ग्राम/मोहल्ला *</Text>
+        <View style={styles.optionRow}>
+          {jansankhiyaEditableVillages.map((entry) => {
+            const selected = jansankhiyaForm.nodeId === String(entry.nodeId);
+            return (
+              <TouchableOpacity
+                key={`jansankhiya-node-${entry.nodeId}`}
+                style={[styles.optionChip, selected && styles.optionChipActive]}
+                onPress={() => prefillJansankhiyaForm(Number(entry.nodeId))}
+              >
+                <Text style={[styles.optionChipText, selected && styles.optionChipTextActive]}>{entry.nodeName}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Text style={[styles.sectionLabel, { marginTop: 10 }]}>परिवार संख्या</Text>
+        <View style={styles.twoColRow}>
+          <View style={styles.twoColField}>
+            <Text style={styles.fieldLabel}>हिंदू</Text>
+            <TextInput style={styles.input} keyboardType="numeric" value={jansankhiyaForm.familyHindu} onChangeText={(v) => setJansankhiyaForm((p) => ({ ...p, familyHindu: v }))} />
+          </View>
+          <View style={styles.twoColField}>
+            <Text style={styles.fieldLabel}>ईसाई</Text>
+            <TextInput style={styles.input} keyboardType="numeric" value={jansankhiyaForm.familyIsai} onChangeText={(v) => setJansankhiyaForm((p) => ({ ...p, familyIsai: v }))} />
+          </View>
+        </View>
+        <View style={styles.twoColRow}>
+          <View style={styles.twoColField}>
+            <Text style={styles.fieldLabel}>मुस्लिम</Text>
+            <TextInput style={styles.input} keyboardType="numeric" value={jansankhiyaForm.familyMuslim} onChangeText={(v) => setJansankhiyaForm((p) => ({ ...p, familyMuslim: v }))} />
+          </View>
+          <View style={styles.twoColField}>
+            <Text style={styles.fieldLabel}>अन्य</Text>
+            <TextInput style={styles.input} keyboardType="numeric" value={jansankhiyaForm.familyOther} onChangeText={(v) => setJansankhiyaForm((p) => ({ ...p, familyOther: v }))} />
+          </View>
+        </View>
+
+        <Text style={[styles.sectionLabel, { marginTop: 10 }]}>कुल सदस्य संख्या</Text>
+        <View style={styles.twoColRow}>
+          <View style={styles.twoColField}>
+            <Text style={styles.fieldLabel}>हिंदू</Text>
+            <TextInput style={styles.input} keyboardType="numeric" value={jansankhiyaForm.memberHindu} onChangeText={(v) => setJansankhiyaForm((p) => ({ ...p, memberHindu: v }))} />
+          </View>
+          <View style={styles.twoColField}>
+            <Text style={styles.fieldLabel}>ईसाई</Text>
+            <TextInput style={styles.input} keyboardType="numeric" value={jansankhiyaForm.memberIsai} onChangeText={(v) => setJansankhiyaForm((p) => ({ ...p, memberIsai: v }))} />
+          </View>
+        </View>
+        <View style={styles.twoColRow}>
+          <View style={styles.twoColField}>
+            <Text style={styles.fieldLabel}>मुस्लिम</Text>
+            <TextInput style={styles.input} keyboardType="numeric" value={jansankhiyaForm.memberMuslim} onChangeText={(v) => setJansankhiyaForm((p) => ({ ...p, memberMuslim: v }))} />
+          </View>
+          <View style={styles.twoColField}>
+            <Text style={styles.fieldLabel}>अन्य</Text>
+            <TextInput style={styles.input} keyboardType="numeric" value={jansankhiyaForm.memberOther} onChangeText={(v) => setJansankhiyaForm((p) => ({ ...p, memberOther: v }))} />
+          </View>
+        </View>
+      </StandardModal>
+
+      <StandardModal
         visible={showMeetingModal}
         onClose={() => {
           setShowMeetingModal(false);
@@ -5664,30 +6106,7 @@ export default function KaryakariniModuleScreen() {
         />
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.fieldLabel}>आमंत्रित कार्यकर्ता ({meetingTransferSelectedItems.length})</Text>
-          <TouchableOpacity style={styles.rowActionBtn} onPress={() => setShowAttendanceTransferModal(true)}>
-            <Text style={styles.rowActionText}>प्रबंधित करें</Text>
-          </TouchableOpacity>
-        </View>
-        {meetingTransferSelectedItems.length > 0 ? (
-          <View style={styles.avatarSummaryRow}>
-            {meetingTransferSelectedItems.slice(0, 8).map((item) => (
-              <View key={`preview-${item.key}`} style={styles.avatarBadge}>
-                <Text style={styles.avatarBadgeText}>{getInitials(item.name)}</Text>
-              </View>
-            ))}
-            {meetingTransferSelectedItems.length > 8 ? (
-              <View style={[styles.avatarBadge, styles.avatarBadgeMore]}>
-                <Text style={styles.avatarBadgeText}>+{meetingTransferSelectedItems.length - 8}</Text>
-              </View>
-            ) : null}
-          </View>
-        ) : (
-          <Text style={styles.modalSub}>अभी कोई आमंत्रित कार्यकर्ता चयनित नहीं है</Text>
-        )}
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.fieldLabel}>उपस्थिति ({meetingInviteSelectedItems.length})</Text>
+          <Text style={styles.fieldLabel}>आमंत्रित कार्यकर्ता ({meetingInviteSelectedItems.length})</Text>
           <TouchableOpacity style={styles.rowActionBtn} onPress={() => setShowInvitationTransferModal(true)}>
             <Text style={styles.rowActionText}>प्रबंधित करें</Text>
           </TouchableOpacity>
@@ -5702,6 +6121,29 @@ export default function KaryakariniModuleScreen() {
             {meetingInviteSelectedItems.length > 8 ? (
               <View style={[styles.avatarBadge, styles.avatarBadgeMore]}>
                 <Text style={styles.avatarBadgeText}>+{meetingInviteSelectedItems.length - 8}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : (
+          <Text style={styles.modalSub}>अभी कोई आमंत्रित कार्यकर्ता चयनित नहीं है</Text>
+        )}
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.fieldLabel}>उपस्थिति ({meetingTransferSelectedItems.length})</Text>
+          <TouchableOpacity style={styles.rowActionBtn} onPress={() => setShowAttendanceTransferModal(true)}>
+            <Text style={styles.rowActionText}>प्रबंधित करें</Text>
+          </TouchableOpacity>
+        </View>
+        {meetingTransferSelectedItems.length > 0 ? (
+          <View style={styles.avatarSummaryRow}>
+            {meetingTransferSelectedItems.slice(0, 8).map((item) => (
+              <View key={`preview-${item.key}`} style={styles.avatarBadge}>
+                <Text style={styles.avatarBadgeText}>{getInitials(item.name)}</Text>
+              </View>
+            ))}
+            {meetingTransferSelectedItems.length > 8 ? (
+              <View style={[styles.avatarBadge, styles.avatarBadgeMore]}>
+                <Text style={styles.avatarBadgeText}>+{meetingTransferSelectedItems.length - 8}</Text>
               </View>
             ) : null}
           </View>
@@ -5739,7 +6181,7 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showAttendanceTransferModal}
         onClose={() => setShowAttendanceTransferModal(false)}
-        title="आमंत्रित कार्यकर्ताओं का प्रबंधन"
+        title="उपस्थिति प्रबंधन"
         footer={
           <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowAttendanceTransferModal(false)}>
             <Text style={styles.btnTextDark}>पूर्ण</Text>
@@ -5810,7 +6252,7 @@ export default function KaryakariniModuleScreen() {
                   </Text>
                 </TouchableOpacity>
               ))}
-              {meetingTransferAvailableItems.length === 0 ? <Text style={styles.modalSub}>कोई उपलब्ध आमंत्रित कार्यकर्ता नहीं</Text> : null}
+              {meetingTransferAvailableItems.length === 0 ? <Text style={styles.modalSub}>कोई उपलब्ध उपस्थित कार्यकर्ता नहीं</Text> : null}
             </ScrollView>
           </View>
 
@@ -5827,7 +6269,7 @@ export default function KaryakariniModuleScreen() {
                   </Text>
                 </TouchableOpacity>
               ))}
-              {meetingTransferSelectedItems.length === 0 ? <Text style={styles.modalSub}>कोई चयनित आमंत्रित कार्यकर्ता नहीं</Text> : null}
+              {meetingTransferSelectedItems.length === 0 ? <Text style={styles.modalSub}>कोई उपस्थित कार्यकर्ता नहीं</Text> : null}
             </ScrollView>
           </View>
         </View>
@@ -5908,7 +6350,7 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showInvitationTransferModal}
         onClose={() => setShowInvitationTransferModal(false)}
-        title="उपस्थिति प्रबंधन"
+        title="आमंत्रित कार्यकर्ताओं का प्रबंधन"
         footer={
           <TouchableOpacity style={[styles.btn, styles.btnLight]} onPress={() => setShowInvitationTransferModal(false)}>
             <Text style={styles.btnTextDark}>पूर्ण</Text>
@@ -5952,7 +6394,7 @@ export default function KaryakariniModuleScreen() {
           </View>
 
           <View style={styles.transferColumn}>
-            <Text style={styles.transferTitle}>उपस्थित कार्यकर्ता</Text>
+            <Text style={styles.transferTitle}>आमंत्रित कार्यकर्ता</Text>
             <ScrollView style={styles.transferList}>
               {meetingInviteSelectedItems.map((item) => (
                 <TouchableOpacity key={`invite-selected-${item.key}`} style={styles.transferItemSelected} onPress={() => handleRemoveInviteMember(item)}>
@@ -5964,7 +6406,7 @@ export default function KaryakariniModuleScreen() {
                   </Text>
                 </TouchableOpacity>
               ))}
-              {meetingInviteSelectedItems.length === 0 ? <Text style={styles.modalSub}>कोई उपस्थित कार्यकर्ता नहीं</Text> : null}
+              {meetingInviteSelectedItems.length === 0 ? <Text style={styles.modalSub}>कोई आमंत्रित कार्यकर्ता नहीं</Text> : null}
             </ScrollView>
           </View>
         </View>
@@ -8167,9 +8609,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
+    overflow: 'hidden',
   },
   attachmentText: {
     flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
     color: theme.colors.text.primary,
     fontSize: 12,
   },

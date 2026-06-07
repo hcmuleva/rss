@@ -7,6 +7,7 @@ const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:4000'
 const DEFAULT_PAD_OPTIONS = ['संयोजक', 'सह संयोजक', 'प्रमुख', 'आयाम', 'अन्य'];
 const OTHER_INFO_GENDERS = ['male', 'female', 'baccha', 'bacchi'];
 const OTHER_INFO_RELIGIONS = ['hindu', 'isai', 'muslim', 'other'];
+const JANSANKHIYA_RELIGIONS = ['hindu', 'isai', 'muslim', 'other'];
 
 class KaryakariniModel {
   static async initTables() {
@@ -385,12 +386,29 @@ class KaryakariniModel {
       )
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS karyakarini_jansankhiya_entries (
+        id BIGSERIAL PRIMARY KEY,
+        version_id INTEGER NOT NULL REFERENCES karyakarini_versions(id) ON DELETE CASCADE,
+        node_id BIGINT NOT NULL REFERENCES karyakarini_nodes(id) ON DELETE CASCADE,
+        religion VARCHAR(20) NOT NULL,
+        family_count INTEGER NOT NULL DEFAULT 0,
+        member_count INTEGER NOT NULL DEFAULT 0,
+        created_by INTEGER,
+        updated_by INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(version_id, node_id, religion)
+      )
+    `);
+
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_versions_current ON karyakarini_versions(is_current)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_nodes_version_parent ON karyakarini_nodes(version_id, parent_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_nodes_level ON karyakarini_nodes(level)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_members_node_version ON karyakarini_members(node_id, version_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_members_user_id ON karyakarini_members(user_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_scopes_user_version ON karyakarini_admin_scopes(user_id, version_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_jansankhiya_version_node ON karyakarini_jansankhiya_entries(version_id, node_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_guest_node_version ON karyakarini_guest_members(node_id, version_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_guest_mobile_email ON karyakarini_guest_members(mobile, email)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_karyakarini_meetings_node_date ON karyakarini_meetings(node_id, meeting_date)');
@@ -728,7 +746,15 @@ class KaryakariniModel {
          n.sort_order,
          n.metadata,
          COALESCE(mc.member_count, 0)::int AS member_count,
-         COALESCE(cc.child_count, 0)::int AS child_count
+         COALESCE(cc.child_count, 0)::int AS child_count,
+         COALESCE(js.hindu_member_count, 0)::int AS hindu_member_count,
+         COALESCE(js.muslim_member_count, 0)::int AS muslim_member_count,
+         COALESCE(js.isai_member_count, 0)::int AS isai_member_count,
+         COALESCE(js.other_member_count, 0)::int AS other_member_count,
+         COALESCE(js.hindu_family_count, 0)::int AS hindu_family_count,
+         COALESCE(js.muslim_family_count, 0)::int AS muslim_family_count,
+         COALESCE(js.isai_family_count, 0)::int AS isai_family_count,
+         COALESCE(js.other_family_count, 0)::int AS other_family_count
        FROM karyakarini_nodes n
        LEFT JOIN LATERAL (
          SELECT COUNT(*) AS member_count
@@ -743,6 +769,20 @@ class KaryakariniModel {
          WHERE cn.parent_id = n.id
            AND cn.version_id = n.version_id
        ) cc ON true
+       LEFT JOIN LATERAL (
+         SELECT
+           SUM(CASE WHEN e.religion = 'hindu' THEN e.member_count ELSE 0 END) AS hindu_member_count,
+           SUM(CASE WHEN e.religion = 'muslim' THEN e.member_count ELSE 0 END) AS muslim_member_count,
+           SUM(CASE WHEN e.religion = 'isai' THEN e.member_count ELSE 0 END) AS isai_member_count,
+           SUM(CASE WHEN e.religion = 'other' THEN e.member_count ELSE 0 END) AS other_member_count,
+           SUM(CASE WHEN e.religion = 'hindu' THEN e.family_count ELSE 0 END) AS hindu_family_count,
+           SUM(CASE WHEN e.religion = 'muslim' THEN e.family_count ELSE 0 END) AS muslim_family_count,
+           SUM(CASE WHEN e.religion = 'isai' THEN e.family_count ELSE 0 END) AS isai_family_count,
+           SUM(CASE WHEN e.religion = 'other' THEN e.family_count ELSE 0 END) AS other_family_count
+         FROM karyakarini_jansankhiya_entries e
+         WHERE e.version_id = n.version_id
+           AND e.node_id = n.id
+       ) js ON true
        WHERE n.version_id = $1
          AND (($2::bigint IS NULL AND n.parent_id IS NULL) OR n.parent_id = $2::bigint)
        ORDER BY n.sort_order ASC, n.name ASC`,
@@ -1350,58 +1390,215 @@ class KaryakariniModel {
     return r.rows[0];
   }
 
-  // Census aggregation grouped per node level, scoped to the caller's assignable
-  // subtree (their assigned node + descendants); superadmin sees the whole version.
-  static async getJangarna({ userId, userRole, versionId, level = null }) {
+  static async getDirectVillageScopeNodes({ userId, versionId }) {
+    const safeUserId = Number(userId);
+    const safeVersionId = Number(versionId);
+    if (!Number.isFinite(safeUserId) || safeUserId <= 0) return [];
+    if (!Number.isFinite(safeVersionId) || safeVersionId <= 0) return [];
+
+    const result = await pool.query(
+      `SELECT
+         s.node_id,
+         n.name AS node_name,
+         LOWER(n.level) AS node_level,
+         COALESCE(js.hindu_family_count, 0)::int AS hindu_family_count,
+         COALESCE(js.isai_family_count, 0)::int AS isai_family_count,
+         COALESCE(js.muslim_family_count, 0)::int AS muslim_family_count,
+         COALESCE(js.other_family_count, 0)::int AS other_family_count,
+         COALESCE(js.hindu_member_count, 0)::int AS hindu_member_count,
+         COALESCE(js.isai_member_count, 0)::int AS isai_member_count,
+         COALESCE(js.muslim_member_count, 0)::int AS muslim_member_count,
+         COALESCE(js.other_member_count, 0)::int AS other_member_count
+       FROM karyakarini_admin_scopes s
+       JOIN karyakarini_nodes n ON n.id = s.node_id
+       LEFT JOIN LATERAL (
+         SELECT
+           SUM(CASE WHEN e.religion = 'hindu' THEN e.family_count ELSE 0 END) AS hindu_family_count,
+           SUM(CASE WHEN e.religion = 'isai' THEN e.family_count ELSE 0 END) AS isai_family_count,
+           SUM(CASE WHEN e.religion = 'muslim' THEN e.family_count ELSE 0 END) AS muslim_family_count,
+           SUM(CASE WHEN e.religion = 'other' THEN e.family_count ELSE 0 END) AS other_family_count,
+           SUM(CASE WHEN e.religion = 'hindu' THEN e.member_count ELSE 0 END) AS hindu_member_count,
+           SUM(CASE WHEN e.religion = 'isai' THEN e.member_count ELSE 0 END) AS isai_member_count,
+           SUM(CASE WHEN e.religion = 'muslim' THEN e.member_count ELSE 0 END) AS muslim_member_count,
+           SUM(CASE WHEN e.religion = 'other' THEN e.member_count ELSE 0 END) AS other_member_count
+         FROM karyakarini_jansankhiya_entries e
+         WHERE e.version_id = s.version_id
+           AND e.node_id = s.node_id
+       ) js ON true
+       WHERE s.user_id = $1
+         AND s.version_id = $2
+         AND s.is_active = true
+         AND LOWER(n.level) IN ('gram', 'mohalla')
+       ORDER BY n.name ASC`,
+      [safeUserId, safeVersionId]
+    );
+
+    return result.rows.map((row) => ({
+      nodeId: Number(row.node_id),
+      nodeName: row.node_name,
+      nodeLevel: row.node_level,
+      familyCounts: {
+        hindu: Number(row.hindu_family_count || 0),
+        isai: Number(row.isai_family_count || 0),
+        muslim: Number(row.muslim_family_count || 0),
+        other: Number(row.other_family_count || 0),
+      },
+      memberCounts: {
+        hindu: Number(row.hindu_member_count || 0),
+        isai: Number(row.isai_member_count || 0),
+        muslim: Number(row.muslim_member_count || 0),
+        other: Number(row.other_member_count || 0),
+      },
+    }));
+  }
+
+  static normalizeJansankhiyaCountMap(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const out = {};
+    JANSANKHIYA_RELIGIONS.forEach((religion) => {
+      const raw = Number(source[religion] || 0);
+      out[religion] = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+    });
+    return out;
+  }
+
+  // Jansankhiya aggregation grouped per node level, scoped to the caller's assignable
+  // subtree (their assigned node + descendants); gram+mohalla are treated as village.
+  static async getJansankhiya({ userId, userRole, versionId, level = null, nodeId = null }) {
     const safeVersionId = Number(versionId);
     if (!Number.isFinite(safeVersionId) || safeVersionId <= 0) return { versionId: null, levels: [] };
     const role = String(userRole || '').trim().toLowerCase();
+    const safeNodeId = Number(nodeId);
+    const hasNodeFilter = Number.isFinite(safeNodeId) && safeNodeId > 0;
+
+    const editableVillages = await this.getDirectVillageScopeNodes({
+      userId,
+      versionId: safeVersionId,
+    });
 
     let scopedNodeIds = null;
     if (role !== 'superadmin') {
       scopedNodeIds = await this.getAssignableNodeIds(userId, safeVersionId);
-      if (!scopedNodeIds.length) return { versionId: safeVersionId, levels: [] };
+      if (!scopedNodeIds.length) {
+        return {
+          versionId: safeVersionId,
+          levels: [],
+          canEdit: editableVillages.length > 0,
+          editableVillages,
+        };
+      }
+    }
+
+    let selectedNode = null;
+    let nodeScopedIds = null;
+    if (hasNodeFilter) {
+      const nodeRes = await pool.query(
+        `SELECT id, name, LOWER(level) AS level
+         FROM karyakarini_nodes
+         WHERE id = $1
+           AND version_id = $2
+         LIMIT 1`,
+        [safeNodeId, safeVersionId]
+      );
+      const node = nodeRes.rows[0];
+      if (!node) {
+        throw new Error('Selected node not found');
+      }
+
+      if (Array.isArray(scopedNodeIds)) {
+        const scopedSet = new Set(scopedNodeIds.map((id) => Number(id)));
+        if (!scopedSet.has(safeNodeId)) {
+          throw new Error('You can filter only within your assigned scope');
+        }
+      }
+
+      const subtreeRes = await pool.query(
+        `WITH RECURSIVE subtree AS (
+           SELECT id
+           FROM karyakarini_nodes
+           WHERE id = $1
+             AND version_id = $2
+           UNION ALL
+           SELECT c.id
+           FROM karyakarini_nodes c
+           JOIN subtree s ON c.parent_id = s.id
+           WHERE c.version_id = $2
+         )
+         SELECT id FROM subtree`,
+        [safeNodeId, safeVersionId]
+      );
+      nodeScopedIds = subtreeRes.rows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0);
+
+      const breadcrumb = await this.getNodeBreadcrumb(safeNodeId, safeVersionId);
+      selectedNode = {
+        nodeId: safeNodeId,
+        nodeName: node.name,
+        nodeLevel: node.level,
+        hierarchyPath: breadcrumb.map((entry) => entry.name).join(' > '),
+      };
+    }
+
+    let effectiveNodeIds = null;
+    if (Array.isArray(scopedNodeIds) && Array.isArray(nodeScopedIds)) {
+      const scopedSet = new Set(scopedNodeIds.map((id) => Number(id)));
+      effectiveNodeIds = nodeScopedIds.filter((id) => scopedSet.has(Number(id)));
+    } else if (Array.isArray(scopedNodeIds)) {
+      effectiveNodeIds = scopedNodeIds;
+    } else if (Array.isArray(nodeScopedIds)) {
+      effectiveNodeIds = nodeScopedIds;
+    }
+
+    if (Array.isArray(effectiveNodeIds) && !effectiveNodeIds.length) {
+      return {
+        versionId: safeVersionId,
+        levels: [],
+        canEdit: editableVillages.length > 0,
+        editableVillages,
+        selectedNode,
+      };
     }
 
     const params = [safeVersionId];
     let nodeFilter = '';
-    if (Array.isArray(scopedNodeIds)) {
-      params.push(scopedNodeIds);
-      nodeFilter = `AND m.node_id = ANY($${params.length})`;
+    if (Array.isArray(effectiveNodeIds)) {
+      params.push(effectiveNodeIds);
+      nodeFilter = `AND e.node_id = ANY($${params.length})`;
     }
     let levelFilter = '';
     const safeLevel = level ? String(level).trim().toLowerCase() : null;
     if (safeLevel) {
-      params.push(safeLevel);
-      levelFilter = `AND LOWER(n.level) = $${params.length}`;
+      if (safeLevel === 'village') {
+        levelFilter = `AND LOWER(n.level) IN ('gram', 'mohalla')`;
+      } else {
+        params.push(safeLevel);
+        levelFilter = `AND LOWER(n.level) = $${params.length}`;
+      }
     }
 
     const result = await pool.query(
       `SELECT
-         n.level AS level_code,
-         MAX(l.name) AS level_name,
-         MAX(l.level_order) AS level_order,
-         COUNT(DISTINCT m.user_id)::int AS total,
-         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.gender_type = 'male')::int AS men,
-         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.gender_type = 'female')::int AS women,
-         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.gender_type IN ('baccha','bacchi'))::int AS children,
-         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.gender_type = 'baccha')::int AS baccha,
-         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.gender_type = 'bacchi')::int AS bacchi,
-         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.religion = 'hindu')::int AS hindu,
-         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.religion = 'isai')::int AS isai,
-         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.religion = 'muslim')::int AS muslim,
-         COUNT(DISTINCT m.user_id) FILTER (WHERE oi.religion = 'other')::int AS other_religion
-       FROM karyakarini_members m
-       JOIN karyakarini_nodes n ON n.id = m.node_id
+         CASE WHEN LOWER(n.level) IN ('gram', 'mohalla') THEN 'village' ELSE LOWER(n.level) END AS level_code,
+         COALESCE(
+           MAX(CASE WHEN LOWER(n.level) IN ('gram', 'mohalla') THEN 'ग्राम/मोहल्ला' ELSE l.name END),
+           MAX(CASE WHEN LOWER(n.level) IN ('gram', 'mohalla') THEN 'ग्राम/मोहल्ला' ELSE n.level END)
+         ) AS level_name,
+         MIN(l.level_order) AS level_order,
+         COALESCE(SUM(e.family_count) FILTER (WHERE e.religion = 'hindu'), 0)::int AS family_hindu,
+         COALESCE(SUM(e.family_count) FILTER (WHERE e.religion = 'isai'), 0)::int AS family_isai,
+         COALESCE(SUM(e.family_count) FILTER (WHERE e.religion = 'muslim'), 0)::int AS family_muslim,
+         COALESCE(SUM(e.family_count) FILTER (WHERE e.religion = 'other'), 0)::int AS family_other,
+         COALESCE(SUM(e.member_count) FILTER (WHERE e.religion = 'hindu'), 0)::int AS member_hindu,
+         COALESCE(SUM(e.member_count) FILTER (WHERE e.religion = 'isai'), 0)::int AS member_isai,
+         COALESCE(SUM(e.member_count) FILTER (WHERE e.religion = 'muslim'), 0)::int AS member_muslim,
+         COALESCE(SUM(e.member_count) FILTER (WHERE e.religion = 'other'), 0)::int AS member_other
+       FROM karyakarini_jansankhiya_entries e
+       JOIN karyakarini_nodes n ON n.id = e.node_id
        LEFT JOIN levels l ON LOWER(l.code) = LOWER(n.level)
-       LEFT JOIN user_other_information oi ON oi.user_id = m.user_id
-       WHERE m.version_id = $1
-         AND m.is_active = true
-         AND m.user_id IS NOT NULL
+       WHERE e.version_id = $1
          ${nodeFilter}
          ${levelFilter}
-       GROUP BY n.level
-       ORDER BY MAX(l.level_order) NULLS LAST, n.level`,
+       GROUP BY CASE WHEN LOWER(n.level) IN ('gram', 'mohalla') THEN 'village' ELSE LOWER(n.level) END
+       ORDER BY MIN(l.level_order) NULLS LAST, level_code`,
       params
     );
 
@@ -1409,19 +1606,166 @@ class KaryakariniModel {
       levelCode: row.level_code,
       levelName: row.level_name || row.level_code,
       levelOrder: row.level_order != null ? Number(row.level_order) : null,
-      total: Number(row.total || 0),
-      men: Number(row.men || 0),
-      women: Number(row.women || 0),
-      children: Number(row.children || 0),
-      baccha: Number(row.baccha || 0),
-      bacchi: Number(row.bacchi || 0),
-      hindu: Number(row.hindu || 0),
-      isai: Number(row.isai || 0),
-      muslim: Number(row.muslim || 0),
-      other: Number(row.other_religion || 0),
+      familyHindu: Number(row.family_hindu || 0),
+      familyIsai: Number(row.family_isai || 0),
+      familyMuslim: Number(row.family_muslim || 0),
+      familyOther: Number(row.family_other || 0),
+      familyTotal:
+        Number(row.family_hindu || 0) +
+        Number(row.family_isai || 0) +
+        Number(row.family_muslim || 0) +
+        Number(row.family_other || 0),
+      memberHindu: Number(row.member_hindu || 0),
+      memberIsai: Number(row.member_isai || 0),
+      memberMuslim: Number(row.member_muslim || 0),
+      memberOther: Number(row.member_other || 0),
+      memberTotal:
+        Number(row.member_hindu || 0) +
+        Number(row.member_isai || 0) +
+        Number(row.member_muslim || 0) +
+        Number(row.member_other || 0),
     }));
 
-    return { versionId: safeVersionId, levels };
+    let nodeRows = [];
+    if (Array.isArray(effectiveNodeIds) && effectiveNodeIds.length > 0) {
+      const nodeRowsRes = await pool.query(
+        `SELECT
+           n.id AS node_id,
+           n.name AS node_name,
+           LOWER(n.level) AS node_level,
+           COALESCE(SUM(e.family_count) FILTER (WHERE e.religion = 'hindu'), 0)::int AS family_hindu,
+           COALESCE(SUM(e.family_count) FILTER (WHERE e.religion = 'isai'), 0)::int AS family_isai,
+           COALESCE(SUM(e.family_count) FILTER (WHERE e.religion = 'muslim'), 0)::int AS family_muslim,
+           COALESCE(SUM(e.family_count) FILTER (WHERE e.religion = 'other'), 0)::int AS family_other,
+           COALESCE(SUM(e.member_count) FILTER (WHERE e.religion = 'hindu'), 0)::int AS member_hindu,
+           COALESCE(SUM(e.member_count) FILTER (WHERE e.religion = 'isai'), 0)::int AS member_isai,
+           COALESCE(SUM(e.member_count) FILTER (WHERE e.religion = 'muslim'), 0)::int AS member_muslim,
+           COALESCE(SUM(e.member_count) FILTER (WHERE e.religion = 'other'), 0)::int AS member_other
+         FROM karyakarini_nodes n
+         LEFT JOIN karyakarini_jansankhiya_entries e
+           ON e.version_id = $1
+          AND e.node_id = n.id
+         WHERE n.version_id = $1
+           AND n.id = ANY($2::bigint[])
+           AND ($3::bigint IS NULL OR n.id <> $3::bigint)
+           AND LOWER(n.level) IN ('gram', 'mohalla')
+         GROUP BY n.id, n.name, n.level
+         ORDER BY n.name ASC, n.id ASC`,
+        [safeVersionId, effectiveNodeIds, hasNodeFilter ? safeNodeId : null]
+      );
+
+      nodeRows = nodeRowsRes.rows.map((row) => ({
+        nodeId: Number(row.node_id),
+        nodeName: row.node_name,
+        nodeLevel: row.node_level,
+        familyHindu: Number(row.family_hindu || 0),
+        familyIsai: Number(row.family_isai || 0),
+        familyMuslim: Number(row.family_muslim || 0),
+        familyOther: Number(row.family_other || 0),
+        familyTotal:
+          Number(row.family_hindu || 0) +
+          Number(row.family_isai || 0) +
+          Number(row.family_muslim || 0) +
+          Number(row.family_other || 0),
+        memberHindu: Number(row.member_hindu || 0),
+        memberIsai: Number(row.member_isai || 0),
+        memberMuslim: Number(row.member_muslim || 0),
+        memberOther: Number(row.member_other || 0),
+        memberTotal:
+          Number(row.member_hindu || 0) +
+          Number(row.member_isai || 0) +
+          Number(row.member_muslim || 0) +
+          Number(row.member_other || 0),
+      }));
+    }
+
+    return {
+      versionId: safeVersionId,
+      levels,
+      nodeRows,
+      canEdit: editableVillages.length > 0,
+      editableVillages,
+      selectedNode,
+    };
+  }
+
+  static async upsertJansankhiyaEntry({ userId, userRole, versionId, nodeId, familyCounts = {}, memberCounts = {} }) {
+    const safeVersionId = Number(versionId);
+    const safeNodeId = Number(nodeId);
+    const safeUserId = Number(userId);
+    const role = String(userRole || '').trim().toLowerCase();
+
+    if (!Number.isFinite(safeVersionId) || safeVersionId <= 0) throw new Error('Valid versionId is required');
+    if (!Number.isFinite(safeNodeId) || safeNodeId <= 0) throw new Error('Valid nodeId is required');
+
+    const nodeRes = await pool.query(
+      `SELECT id, name, LOWER(level) AS level
+       FROM karyakarini_nodes
+       WHERE id = $1 AND version_id = $2
+       LIMIT 1`,
+      [safeNodeId, safeVersionId]
+    );
+    const node = nodeRes.rows[0];
+    if (!node) throw new Error('Village node not found');
+    if (!['gram', 'mohalla'].includes(node.level)) {
+      throw new Error('Counts can be updated only for ग्राम/मोहल्ला level nodes');
+    }
+
+    if (role !== 'superadmin') {
+      const editableVillages = await this.getDirectVillageScopeNodes({
+        userId: safeUserId,
+        versionId: safeVersionId,
+      });
+      const editableNodeSet = new Set(editableVillages.map((row) => Number(row.nodeId)));
+      if (!editableNodeSet.has(safeNodeId)) {
+        throw new Error('You can update counts only for your assigned village');
+      }
+    }
+
+    const normalizedFamily = this.normalizeJansankhiyaCountMap(familyCounts);
+    const normalizedMembers = this.normalizeJansankhiyaCountMap(memberCounts);
+
+    await pool.query('BEGIN');
+    try {
+      for (const religion of JANSANKHIYA_RELIGIONS) {
+        await pool.query(
+          `INSERT INTO karyakarini_jansankhiya_entries
+             (version_id, node_id, religion, family_count, member_count, created_by, updated_by, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+           ON CONFLICT (version_id, node_id, religion) DO UPDATE SET
+             family_count = EXCLUDED.family_count,
+             member_count = EXCLUDED.member_count,
+             updated_by = EXCLUDED.updated_by,
+             updated_at = NOW()`,
+          [
+            safeVersionId,
+            safeNodeId,
+            religion,
+            normalizedFamily[religion],
+            normalizedMembers[religion],
+            Number.isFinite(safeUserId) && safeUserId > 0 ? safeUserId : null,
+            Number.isFinite(safeUserId) && safeUserId > 0 ? safeUserId : null,
+          ]
+        );
+      }
+      await pool.query('COMMIT');
+    } catch (error) {
+      await pool.query('ROLLBACK');
+      throw error;
+    }
+
+    return {
+      versionId: safeVersionId,
+      nodeId: safeNodeId,
+      nodeName: node.name,
+      nodeLevel: node.level,
+      familyCounts: normalizedFamily,
+      memberCounts: normalizedMembers,
+    };
+  }
+
+  static async getJangarna(args) {
+    return this.getJansankhiya(args);
   }
 
   // Active categories (आयाम) with their active subcategories (टोली), from the
@@ -2179,9 +2523,31 @@ class KaryakariniModel {
          n.level,
          n.parent_id,
          n.version_id,
-         COALESCE(np.path, n.name) AS hierarchy_path
+         COALESCE(np.path, n.name) AS hierarchy_path,
+         COALESCE(js.hindu_member_count, 0)::int AS hindu_member_count,
+         COALESCE(js.muslim_member_count, 0)::int AS muslim_member_count,
+         COALESCE(js.isai_member_count, 0)::int AS isai_member_count,
+         COALESCE(js.other_member_count, 0)::int AS other_member_count,
+         COALESCE(js.hindu_family_count, 0)::int AS hindu_family_count,
+         COALESCE(js.muslim_family_count, 0)::int AS muslim_family_count,
+         COALESCE(js.isai_family_count, 0)::int AS isai_family_count,
+         COALESCE(js.other_family_count, 0)::int AS other_family_count
        FROM karyakarini_nodes n
        LEFT JOIN node_paths np ON np.id = n.id
+       LEFT JOIN LATERAL (
+         SELECT
+           SUM(CASE WHEN e.religion = 'hindu' THEN e.member_count ELSE 0 END) AS hindu_member_count,
+           SUM(CASE WHEN e.religion = 'muslim' THEN e.member_count ELSE 0 END) AS muslim_member_count,
+           SUM(CASE WHEN e.religion = 'isai' THEN e.member_count ELSE 0 END) AS isai_member_count,
+           SUM(CASE WHEN e.religion = 'other' THEN e.member_count ELSE 0 END) AS other_member_count,
+           SUM(CASE WHEN e.religion = 'hindu' THEN e.family_count ELSE 0 END) AS hindu_family_count,
+           SUM(CASE WHEN e.religion = 'muslim' THEN e.family_count ELSE 0 END) AS muslim_family_count,
+           SUM(CASE WHEN e.religion = 'isai' THEN e.family_count ELSE 0 END) AS isai_family_count,
+           SUM(CASE WHEN e.religion = 'other' THEN e.family_count ELSE 0 END) AS other_family_count
+         FROM karyakarini_jansankhiya_entries e
+         WHERE e.version_id = n.version_id
+           AND e.node_id = n.id
+       ) js ON true
        WHERE n.version_id = $1
          AND n.id = ANY($2::bigint[])
        ORDER BY COALESCE(np.path, n.name) ASC, n.id ASC`,
@@ -2352,14 +2718,18 @@ class KaryakariniModel {
       [safeMeetingId]
     );
     const oldActiveSet = new Set(oldActiveRes.rows.map((row) => Number(row.invited_user_id)).filter((id) => Number.isFinite(id) && id > 0));
-
-    await client.query(
-      `UPDATE karyakarini_meeting_invites
-       SET is_active = false,
-           updated_at = NOW()
-       WHERE meeting_id = $1`,
-      [safeMeetingId]
-    );
+    const deactivateUserIds = [...oldActiveSet].filter((id) => !safeUserIds.includes(id));
+    if (deactivateUserIds.length > 0) {
+      await client.query(
+        `UPDATE karyakarini_meeting_invites
+         SET is_active = false,
+             updated_at = NOW()
+         WHERE meeting_id = $1
+           AND invited_user_id = ANY($2::int[])
+           AND is_active = true`,
+        [safeMeetingId, deactivateUserIds]
+      );
+    }
 
     if (!safeUserIds.length) {
       return {
@@ -3128,7 +3498,18 @@ class KaryakariniModel {
     const total = Number(countResult.rows[0]?.total || 0);
 
     const rows = await pool.query(
-      `SELECT
+      `WITH RECURSIVE node_paths AS (
+         SELECT n.id, n.parent_id, n.name, n.level, n.version_id, n.name::text AS path
+         FROM karyakarini_nodes n
+         WHERE n.version_id = $3
+           AND n.parent_id IS NULL
+         UNION ALL
+         SELECT c.id, c.parent_id, c.name, c.level, c.version_id, np.path || ' > ' || c.name AS path
+         FROM karyakarini_nodes c
+         JOIN node_paths np ON c.parent_id = np.id
+         WHERE c.version_id = $3
+       )
+       SELECT
          i.id,
          i.meeting_id,
          i.version_id,
@@ -3147,14 +3528,32 @@ class KaryakariniModel {
          m.node_id AS meeting_node_id,
          mn.name AS meeting_node_name,
          mn.level AS meeting_node_level,
+         COALESCE(np.path, mn.name) AS hierarchy_path,
          invn.name AS invited_node_name,
          invn.level AS invited_node_level,
-         COALESCE(to_jsonb(cb) ->> 'first_name', to_jsonb(cb) ->> 'name', 'Coordinator') AS invited_by_name
+         COALESCE(to_jsonb(cb) ->> 'first_name', to_jsonb(cb) ->> 'name', 'Coordinator') AS invited_by_name,
+         COALESCE(att.attachments, '[]'::jsonb) AS attachments
        FROM karyakarini_meeting_invites i
        JOIN karyakarini_meetings m ON m.id = i.meeting_id
        LEFT JOIN karyakarini_nodes mn ON mn.id = m.node_id
+       LEFT JOIN node_paths np ON np.id = mn.id
        LEFT JOIN karyakarini_nodes invn ON invn.id = i.invited_node_id
        LEFT JOIN users cb ON cb.id = i.invited_by
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(
+           jsonb_agg(
+             jsonb_build_object(
+               'url', ma.attachment_url,
+               'type', ma.attachment_type,
+               'name', ma.file_name
+             )
+             ORDER BY ma.id DESC
+           ),
+           '[]'::jsonb
+         ) AS attachments
+         FROM karyakarini_meeting_attachments ma
+         WHERE ma.meeting_id = m.id
+       ) att ON true
        WHERE i.invited_user_id = $1
          AND i.is_active = true
          AND m.is_active = true
@@ -3324,13 +3723,68 @@ class KaryakariniModel {
            AND invited_user_id = $4
            AND is_active = true
          RETURNING id, meeting_id, version_id, invited_user_id, invited_node_id, invitation_status, response_note, responded_at, notification_read_at, invited_by, invited_at, updated_at
+       ),
+       accepted_attendee AS (
+         INSERT INTO karyakarini_meeting_attendees (
+           meeting_id, attendee_type, user_id, attendance_status
+         )
+         SELECT u.meeting_id, 'member', u.invited_user_id, 'present'
+         FROM updated u
+         WHERE $1 = 'accepted'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM karyakarini_meeting_attendees a
+             WHERE a.meeting_id = u.meeting_id
+               AND a.attendee_type = 'member'
+               AND a.user_id = u.invited_user_id
+           )
+         RETURNING id
+       ),
+       removed_attendee AS (
+         DELETE FROM karyakarini_meeting_attendees a
+         USING updated u
+         WHERE $1 = 'rejected'
+           AND a.meeting_id = u.meeting_id
+           AND a.attendee_type = 'member'
+           AND a.user_id = u.invited_user_id
+         RETURNING a.id
        )
        SELECT
          u.*,
          m.title AS meeting_title,
          m.meeting_date,
+         m.created_by AS meeting_created_by,
          n.name AS meeting_node_name,
-         n.level AS meeting_node_level
+         n.level AS meeting_node_level,
+         EXISTS (SELECT 1 FROM accepted_attendee) AS attendee_added,
+         EXISTS (SELECT 1 FROM removed_attendee) AS attendee_removed,
+         (
+           SELECT COUNT(*)::int
+           FROM karyakarini_meeting_attendees a
+           WHERE a.meeting_id = u.meeting_id
+             AND a.attendee_type = 'member'
+         ) AS attendee_member_count,
+         (
+           SELECT COUNT(*)::int
+           FROM karyakarini_meeting_invites i2
+           WHERE i2.meeting_id = u.meeting_id
+             AND i2.is_active = true
+             AND i2.invitation_status = 'pending'
+         ) AS pending_invite_count,
+         (
+           SELECT COUNT(*)::int
+           FROM karyakarini_meeting_invites i2
+           WHERE i2.meeting_id = u.meeting_id
+             AND i2.is_active = true
+             AND i2.invitation_status = 'accepted'
+         ) AS accepted_invite_count,
+         (
+           SELECT COUNT(*)::int
+           FROM karyakarini_meeting_invites i2
+           WHERE i2.meeting_id = u.meeting_id
+             AND i2.is_active = true
+             AND i2.invitation_status = 'rejected'
+         ) AS rejected_invite_count
        FROM updated u
        JOIN karyakarini_meetings m ON m.id = u.meeting_id
        LEFT JOIN karyakarini_nodes n ON n.id = m.node_id`,
@@ -5019,6 +5473,7 @@ class KaryakariniModel {
          FROM karyakarini_notifications
          WHERE user_id = $1
            AND is_read = false
+           AND NOT (lower(COALESCE(category, '')) = 'invitations' AND lower(COALESCE(type, '')) = 'meeting-invitation')
            AND ($2::boolean = false OR version_id = $3)`,
         [safeUserId, hasVersionFilter, Number(versionId) || 0]
       ),
@@ -5072,6 +5527,7 @@ class KaryakariniModel {
          n.created_at
        FROM karyakarini_notifications n
        WHERE n.user_id = $1
+         AND NOT (lower(COALESCE(n.category, '')) = 'invitations' AND lower(COALESCE(n.type, '')) = 'meeting-invitation')
          AND ($2::boolean = false OR n.version_id = $3)
          AND ($4::boolean = false OR n.is_read = false)
        ORDER BY n.created_at DESC
@@ -5110,12 +5566,20 @@ class KaryakariniModel {
       category: 'invitations',
       type: 'meeting-invitation',
       title: String(entry.meeting_title || 'Meeting invitation'),
-      message: `${String(entry.meeting_node_name || '-')} • ${String(entry.meeting_date || '-')}`,
+      message: `${String(entry.meeting_title || 'बैठक')} • ${String(entry.meeting_date || '-')}`,
       entity_type: 'meeting',
       entity_id: Number(entry.meeting_id || 0) || null,
       metadata: {
         invitationId: Number(entry.id),
         meetingId: Number(entry.meeting_id || 0),
+        meetingTitle: String(entry.meeting_title || ''),
+        meetingDescription: String(entry.meeting_description || ''),
+        meetingDate: entry.meeting_date || null,
+        meetingAreaName: String(entry.meeting_node_name || ''),
+        meetingAreaLevel: String(entry.meeting_node_level || ''),
+        meetingHierarchyPath: String(entry.hierarchy_path || ''),
+        invitedByName: String(entry.invited_by_name || ''),
+        attachments: Array.isArray(entry.attachments) ? entry.attachments : [],
       },
       status: String(entry.invitation_status || 'pending'),
       is_read: Boolean(entry.notification_read_at),
@@ -5192,6 +5656,10 @@ class KaryakariniModel {
       invitationCount = await this.markUserInvitationsRead({
         userId: safeUserId,
         invitationIds: safeInvitationIds,
+      });
+    } else if (shouldMarkAllNotifications) {
+      invitationCount = await this.markUserInvitationsRead({
+        userId: safeUserId,
       });
     }
 

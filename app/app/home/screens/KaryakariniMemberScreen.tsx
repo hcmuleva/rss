@@ -4,6 +4,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { ScreenHeader } from '../../core/components/ScreenHeader';
 import { PageHeaderCard } from '../../core/components/PageHeaderCard';
@@ -311,7 +312,7 @@ export default function KaryakariniMemberScreen() {
     setInvitations((getValue(invitationRes)?.data?.data?.invitations || []) as KaryakariniInvitation[]);
     setTasks(loadedTasks);
     setActivities((getValue(assignmentRes)?.data?.data?.activities || []) as KaryakariniCategoryActivity[]);
-    setNotificationUnreadCount(Number(getValue(unreadRes)?.data?.data?.total || 0));
+    setNotificationUnreadCount(Number((getValue(unreadRes)?.data?.data?.invitations ?? getValue(unreadRes)?.data?.data?.total) || 0));
   }, []);
 
   const loadData = useCallback(async () => {
@@ -344,6 +345,13 @@ export default function KaryakariniMemberScreen() {
   useEffect(() => {
     void loadData();
   }, [activeTab, selectedCategoryKey, loadData]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadData();
+      return undefined;
+    }, [loadData])
+  );
 
   const handleRefresh = useCallback(async () => {
     try {
@@ -1288,6 +1296,7 @@ export default function KaryakariniMemberScreen() {
         user={user}
         onLogout={handleLogout}
         notificationCount={notificationUnreadCount}
+        onPressNotifications={() => router.push('/karyakarini-notifications' as any)}
       />
 
       <PageHeaderCard

@@ -1081,19 +1081,49 @@ exports.createMeeting = async (req, res) => {
       attachments: Array.isArray(req.body.attachments) ? req.body.attachments : [],
       createdBy: req.user?.id || null,
     });
+    const meetingNode = await KaryakariniModel.getNodeById(nodeId, versionId);
+    const meetingAttachments = Array.isArray(req.body.attachments) ? req.body.attachments : [];
+    const inviteTitle = 'बैठक आमंत्रण';
+    const inviteMessage = `${String(req.body.title || '').trim()} • ${toDateString(req.body.meetingDate || req.body.date, '')}`;
 
     const newlyInvitedUserIds = Array.isArray(created?.newly_invited_user_ids) ? created.newly_invited_user_ids : [];
     await Promise.all(
-      newlyInvitedUserIds.map((invitedUserId) =>
-        ablyService.publishNotification(invitedUserId, {
+      newlyInvitedUserIds.map(async (invitedUserId) => {
+        await KaryakariniModel.createNotification({
+          userId: invitedUserId,
+          versionId,
+          category: 'invitations',
           type: 'meeting-invitation',
-          title: 'Karyakarini meeting invitation',
-          message: `${String(req.body.title || '').trim()} on ${toDateString(req.body.meetingDate || req.body.date, '')}`,
+          title: inviteTitle,
+          message: inviteMessage,
+          entityType: 'meeting',
+          entityId: Number(created?.id || 0),
+          metadata: {
+            meetingId: Number(created?.id || 0),
+            meetingTitle: String(req.body.title || '').trim(),
+            meetingDescription: String(req.body.description || '').trim(),
+            meetingDate: toDateString(req.body.meetingDate || req.body.date, ''),
+            meetingAreaName: String(meetingNode?.name || ''),
+            meetingAreaLevel: String(meetingNode?.level || ''),
+            attachments: meetingAttachments,
+            invitationStatus: 'pending',
+          },
+        });
+        await ablyService.publishNotification(invitedUserId, {
+          type: 'meeting-invitation',
+          title: inviteTitle,
+          message: inviteMessage,
           meetingId: Number(created?.id || 0),
           versionId,
           invitationStatus: 'pending',
-        })
-      )
+          meetingTitle: String(req.body.title || '').trim(),
+          meetingDescription: String(req.body.description || '').trim(),
+          meetingDate: toDateString(req.body.meetingDate || req.body.date, ''),
+          meetingAreaName: String(meetingNode?.name || ''),
+          meetingAreaLevel: String(meetingNode?.level || ''),
+          attachments: meetingAttachments,
+        });
+      })
     );
 
     return res.status(201).json({
@@ -1264,6 +1294,18 @@ exports.updateMeeting = async (req, res) => {
       });
     }
 
+    const requestedInvitedUserIds = req.body?.invitedUserIds !== undefined ? parseNumberArray(req.body.invitedUserIds) : existing.invitedUserIds;
+    const existingInviteSet = new Set(
+      (Array.isArray(existing.invitedUserIds) ? existing.invitedUserIds : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    );
+    const explicitlyAddedInviteIds = new Set(
+      (Array.isArray(requestedInvitedUserIds) ? requestedInvitedUserIds : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && id > 0 && !existingInviteSet.has(id))
+    );
+
     const updatedMeeting = await KaryakariniModel.updateMeeting({
       meetingId,
       versionId,
@@ -1272,32 +1314,17 @@ exports.updateMeeting = async (req, res) => {
       description: req.body?.description !== undefined ? req.body.description : existing.description,
       meetingDate: toDateString(req.body?.meetingDate || req.body?.date, existing.meeting_date || new Date().toISOString().slice(0, 10)),
       attendeeUserIds: req.body?.attendeeUserIds !== undefined ? parseNumberArray(req.body.attendeeUserIds) : existing.attendeeUserIds,
-      invitedUserIds: req.body?.invitedUserIds !== undefined ? parseNumberArray(req.body.invitedUserIds) : existing.invitedUserIds,
+      invitedUserIds: requestedInvitedUserIds,
       guestIds: req.body?.guestIds !== undefined ? parseNumberArray(req.body.guestIds) : existing.guestIds,
       newGuests: Array.isArray(req.body?.newGuests) ? req.body.newGuests : [],
       attachments: Array.isArray(req.body?.attachments) ? req.body.attachments : existing.attachments || [],
       updatedBy: req.user?.id || null,
     });
-
     const details = await KaryakariniModel.getMeetingDetails({
       meetingId,
       versionId,
       visibleNodeIds,
     });
-
-    const newlyInvitedUserIds = Array.isArray(updatedMeeting?.newly_invited_user_ids) ? updatedMeeting.newly_invited_user_ids : [];
-    await Promise.all(
-      newlyInvitedUserIds.map((invitedUserId) =>
-        ablyService.publishNotification(invitedUserId, {
-          type: 'meeting-invitation',
-          title: 'Karyakarini meeting invitation',
-          message: `${title} on ${toDateString(req.body?.meetingDate || req.body?.date, details?.meeting_date || '')}`,
-          meetingId: Number(meetingId),
-          versionId,
-          invitationStatus: 'pending',
-        })
-      )
-    );
 
     return res.status(200).json({
       success: true,
@@ -2450,17 +2477,53 @@ exports.respondToInvitation = async (req, res) => {
       });
     }
 
-    if (Number(updated.invited_by) > 0 && Number(updated.invited_by) !== Number(req.user?.id)) {
-      const responderName = [req.user?.first_name, req.user?.firstName, req.user?.name].find(Boolean) || `User #${req.user?.id}`;
-      await ablyService.publishNotification(Number(updated.invited_by), {
-        type: 'meeting-invitation-response',
-        title: 'Invitation response received',
-        message: `${responderName} marked ${updated.meeting_title || 'meeting'} as ${status}`,
-        meetingId: Number(updated.meeting_id || 0),
-        invitationId: Number(updated.id || 0),
-        responseStatus: status,
-      });
-    }
+    const responderName = [req.user?.first_name, req.user?.firstName, req.user?.name].find(Boolean) || `User #${req.user?.id}`;
+    const statusLabel = status === 'accepted' ? 'स्वीकार' : status === 'rejected' ? 'अस्वीकार' : 'प्रतिक्रिया';
+    const responseTitle = 'बैठक आमंत्रण प्रतिक्रिया';
+    const responseMessage = `${responderName} ने ${updated.meeting_title || 'बैठक'} ${statusLabel} की`;
+    const notifyUserIds = [...new Set([Number(updated.invited_by || 0), Number(updated.meeting_created_by || 0)])]
+      .filter((id) => Number.isFinite(id) && id > 0 && id !== Number(req.user?.id || 0));
+
+    await Promise.all(
+      notifyUserIds.map(async (receiverId) => {
+        await KaryakariniModel.createNotification({
+          userId: receiverId,
+          versionId: Number(updated.version_id || 0) || null,
+          category: 'invitations',
+          type: 'meeting-invitation-response',
+          title: responseTitle,
+          message: responseMessage,
+          entityType: 'meeting',
+          entityId: Number(updated.meeting_id || 0) || null,
+          metadata: {
+            invitationId: Number(updated.id || 0) || null,
+            responseStatus: status,
+            responderUserId: Number(req.user?.id || 0) || null,
+            attendeeAdded: Boolean(updated.attendee_added),
+            attendeeRemoved: Boolean(updated.attendee_removed),
+            attendeeMemberCount: Number(updated.attendee_member_count || 0),
+            pendingInviteCount: Number(updated.pending_invite_count || 0),
+            acceptedInviteCount: Number(updated.accepted_invite_count || 0),
+            rejectedInviteCount: Number(updated.rejected_invite_count || 0),
+          },
+        });
+        await ablyService.publishNotification(receiverId, {
+          type: 'meeting-invitation-response',
+          title: responseTitle,
+          message: responseMessage,
+          meetingId: Number(updated.meeting_id || 0),
+          invitationId: Number(updated.id || 0),
+          responseStatus: status,
+          responderUserId: Number(req.user?.id || 0),
+          attendeeAdded: Boolean(updated.attendee_added),
+          attendeeRemoved: Boolean(updated.attendee_removed),
+          attendeeMemberCount: Number(updated.attendee_member_count || 0),
+          pendingInviteCount: Number(updated.pending_invite_count || 0),
+          acceptedInviteCount: Number(updated.accepted_invite_count || 0),
+          rejectedInviteCount: Number(updated.rejected_invite_count || 0),
+        });
+      })
+    );
 
     return res.status(200).json({
       success: true,
@@ -2919,23 +2982,50 @@ exports.getCategoryTree = async (req, res) => {
   }
 };
 
-exports.getJangarna = async (req, res) => {
+exports.getJansankhiya = async (req, res) => {
   try {
     const versionId = await KaryakariniModel.resolveVersionId(req.query.versionId || req.query.version || 'current');
     if (!versionId) {
       return res.status(404).json({ success: false, message: 'Version not found' });
     }
     const userRole = normalizeRole(req.userRole || req.user?.role);
-    const data = await KaryakariniModel.getJangarna({
+    const data = await KaryakariniModel.getJansankhiya({
       userId: req.user?.id,
       userRole,
       versionId,
       level: req.query.level || null,
+      nodeId: req.query.nodeId || null,
     });
     return res.status(200).json({ success: true, data });
   } catch (error) {
-    console.error('Failed to load jangarna:', error);
-    return res.status(500).json({ success: false, message: 'Failed to load jangarna' });
+    console.error('Failed to load jansankhiya:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load jansankhiya' });
+  }
+};
+
+exports.upsertJansankhiya = async (req, res) => {
+  try {
+    const versionId = await KaryakariniModel.resolveVersionId(req.body?.versionId || req.body?.version || 'current');
+    if (!versionId) {
+      return res.status(404).json({ success: false, message: 'Version not found' });
+    }
+    const nodeId = parsePositiveNumber(req.body?.nodeId);
+    if (!nodeId) {
+      return res.status(400).json({ success: false, message: 'Valid nodeId is required' });
+    }
+    const userRole = normalizeRole(req.userRole || req.user?.role);
+    const data = await KaryakariniModel.upsertJansankhiyaEntry({
+      userId: req.user?.id,
+      userRole,
+      versionId,
+      nodeId,
+      familyCounts: req.body?.familyCounts || {},
+      memberCounts: req.body?.memberCounts || {},
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error('Failed to save jansankhiya:', error);
+    return res.status(400).json({ success: false, message: error?.message || 'Failed to save jansankhiya' });
   }
 };
 
