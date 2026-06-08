@@ -16,6 +16,14 @@ export type KaryakariniNode = {
   member_count?: number;
   members_count?: number;
   child_count?: number;
+  hindu_member_count?: number;
+  muslim_member_count?: number;
+  isai_member_count?: number;
+  other_member_count?: number;
+  hindu_family_count?: number;
+  muslim_family_count?: number;
+  isai_family_count?: number;
+  other_family_count?: number;
   can_assign_member?: boolean;
   can_manage_hierarchy?: boolean;
   has_children?: boolean;
@@ -79,6 +87,14 @@ export type KaryakariniAssignableNode = {
   parent_id?: number | null;
   version_id?: number;
   hierarchy_path?: string;
+  hindu_member_count?: number;
+  muslim_member_count?: number;
+  isai_member_count?: number;
+  other_member_count?: number;
+  hindu_family_count?: number;
+  muslim_family_count?: number;
+  isai_family_count?: number;
+  other_family_count?: number;
 };
 
 export type KaryakariniGuestMember = {

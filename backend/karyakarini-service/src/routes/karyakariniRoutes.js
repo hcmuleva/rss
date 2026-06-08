@@ -26,7 +26,10 @@ router.get('/pads', controller.getPadOptions);
 router.post('/member', requireAdmin, controller.createMember);
 router.put('/member/:memberId', requireAdmin, controller.updateMember);
 router.post('/member-with-user', requireAdmin, controller.createMemberWithUserMapping);
-router.get('/jangarna', requireAdmin, controller.getJangarna);
+router.get('/jansankhiya', requireAdmin, controller.getJansankhiya);
+router.post('/jansankhiya', requireAdmin, controller.upsertJansankhiya);
+// Backward-compatible alias
+router.get('/jangarna', requireAdmin, controller.getJansankhiya);
 router.get('/master/categories', controller.getCategoryTree);
 router.get('/users/:userId/other-info', requireAdmin, controller.getUserOtherInfo);
 router.put('/users/:userId/other-info', requireAdmin, controller.updateUserOtherInfo);

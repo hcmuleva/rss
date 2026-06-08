@@ -17,7 +17,39 @@ const titleCase = (text: string) =>
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
+const RELIGION_SYMBOLS = {
+  hindu: 'ૐ',
+  muslim: '☪︎',
+  isai: '†',
+  other: '𝒪',
+} as const;
+
 export function NodeCard({ node, selected = false, onPress, onMembersPress, onAddMemberPress, onAddNodePress }: Props) {
+  const normalizedLevel = String(node.level || '').trim().toLowerCase();
+  const isVillageLevel = normalizedLevel === 'gram' || normalizedLevel === 'mohalla';
+  const villageReligionChips = [
+    {
+      key: 'hindu',
+      symbol: RELIGION_SYMBOLS.hindu,
+      count: Number(node.hindu_family_count || 0),
+    },
+    {
+      key: 'muslim',
+      symbol: RELIGION_SYMBOLS.muslim,
+      count: Number(node.muslim_family_count || 0),
+    },
+    {
+      key: 'isai',
+      symbol: RELIGION_SYMBOLS.isai,
+      count: Number(node.isai_family_count || 0),
+    },
+    {
+      key: 'other',
+      symbol: RELIGION_SYMBOLS.other,
+      count: Number(node.other_family_count || 0),
+    },
+  ].filter((entry) => entry.count > 0);
+
   return (
     <TouchableOpacity style={[styles.card, selected && styles.cardSelected]} onPress={onPress}>
       <Text style={styles.name} numberOfLines={2}>
@@ -33,6 +65,17 @@ export function NodeCard({ node, selected = false, onPress, onMembersPress, onAd
           <Text style={styles.badgeText}>उप-स्तर: {Number(node.child_count || 0)}</Text>
         </View>
       </View>
+
+      {isVillageLevel && villageReligionChips.length > 0 ? (
+        <View style={styles.religionIconsRow}>
+          {villageReligionChips.map((entry) => (
+            <View key={entry.key} style={styles.religionIconChip}>
+              <Text style={styles.religionIconText}>{entry.symbol}</Text>
+              <Text style={styles.religionCountText}>{entry.count}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
 
       <View style={styles.actions}>
         <TouchableOpacity style={styles.actionBtn} onPress={onMembersPress}>
@@ -91,6 +134,32 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 11,
     fontWeight: '600',
+    color: theme.colors.text.secondary,
+  },
+  religionIconsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  religionIconChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: theme.colors.background,
+  },
+  religionIconText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  religionCountText: {
+    fontSize: 12,
+    fontWeight: '700',
     color: theme.colors.text.secondary,
   },
   actions: {

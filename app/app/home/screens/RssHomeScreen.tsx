@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { authClient, karyakariniClient } from '../../api/client';
 import { useProfile } from '../../core/context/ProfileContext';
 import { theme } from '../../theme';
@@ -26,6 +27,7 @@ export default function RssHomeScreen() {
   const [categoryCards, setCategoryCards] = useState<CategoryCard[]>([]);
   const [totalCategoryCount, setTotalCategoryCount] = useState(0);
   const [assignedTasks, setAssignedTasks] = useState<MyTask[]>([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
 
   const load = useCallback(async () => {
     if (!user) {
@@ -39,11 +41,12 @@ export default function RssHomeScreen() {
 
     try {
       setLoading(true);
-      const [announcementResult, teamResult, taskResult, invitationResult] = await Promise.allSettled([
+      const [announcementResult, teamResult, taskResult, invitationResult, unreadCountResult] = await Promise.allSettled([
         authClient.get('/announcements', { params: { page: 1, limit: 10 } }),
         karyakariniClient.get('/karyakarini/my/teams'),
         karyakariniClient.get('/karyakarini/my/tasks', { params: { limit: 100 } }),
         karyakariniClient.get('/karyakarini/my/invitations', { params: { limit: 100 } }),
+        karyakariniClient.get('/karyakarini/my/notifications/unread-count'),
       ]);
 
       const announcementStatus = announcementResult.status === 'rejected' ? announcementResult.reason?.response?.status : null;
@@ -57,12 +60,14 @@ export default function RssHomeScreen() {
       const teamRes = teamResult.status === 'fulfilled' ? teamResult.value : null;
       const taskRes = taskResult.status === 'fulfilled' ? taskResult.value : null;
       const invitationRes = invitationResult.status === 'fulfilled' ? invitationResult.value : null;
+      const unreadRes = unreadCountResult.status === 'fulfilled' ? unreadCountResult.value : null;
 
       setAnnouncements((announcementRes?.data?.data?.announcements || []) as Announcement[]);
 
       const teams = ((teamRes as any)?.data?.data?.teams || []) as any[];
       const tasks = ((taskRes as any)?.data?.data?.tasks || []) as any[];
       const invitations = ((invitationRes as any)?.data?.data?.invitations || []) as any[];
+      setNotificationUnreadCount(Number(((unreadRes as any)?.data?.data?.invitations ?? (unreadRes as any)?.data?.data?.total) || 0));
 
       setKaryakariniCount(Number(teams.length || 0));
       setAssignedTasks(tasks.slice(0, 5).map((task) => ({
@@ -136,6 +141,7 @@ export default function RssHomeScreen() {
       setCategoryCards([]);
       setTotalCategoryCount(0);
       setAssignedTasks([]);
+      setNotificationUnreadCount(0);
     } finally {
       setLoading(false);
     }
@@ -150,6 +156,15 @@ export default function RssHomeScreen() {
   useEffect(() => {
     if (!isLoading && !user) router.replace('/auth/login');
   }, [isLoading, user]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isLoading && user) {
+        void load();
+      }
+      return undefined;
+    }, [isLoading, load, user])
+  );
 
   return (
     <View style={styles.root}>
@@ -183,9 +198,18 @@ export default function RssHomeScreen() {
           <TouchableOpacity style={styles.shortcutCard} onPress={() => router.push('/karyakarini-notifications' as any)}>
             <View style={[styles.shortcutIconWrap, { backgroundColor: '#E8F5E9' }]}>
               <MaterialIcons name="notifications" size={24} color="#2E7D32" />
+              {notificationUnreadCount > 0 ? (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeText}>
+                    {notificationUnreadCount > 99 ? '99+' : notificationUnreadCount}
+                  </Text>
+                </View>
+              ) : null}
             </View>
             <Text style={styles.shortcutTitle}>Notifications</Text>
-            <Text style={styles.shortcutMeta}>Stay Updated</Text>
+            <Text style={styles.shortcutMeta}>
+              {notificationUnreadCount > 0 ? `${notificationUnreadCount} Unread` : 'Stay Updated'}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -315,6 +339,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
+    position: 'relative',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    right: -6,
+    top: -6,
+    backgroundColor: '#D32F2F',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  notificationBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
   },
   shortcutTitle: {
     fontSize: 14,

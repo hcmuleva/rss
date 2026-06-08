@@ -17,6 +17,22 @@ const protect = async (req, res, next) => {
     if (req.method === 'OPTIONS') {
       return next();
     }
+    // Keep auth entrypoints public even if this middleware is mounted broadly
+    const normalizedPath = String(req.originalUrl || req.path || '').split('?')[0];
+    const publicAuthPaths = new Set([
+      '/api/auth/login',
+      '/api/auth/register',
+      '/api/auth/refresh',
+      '/auth/login',
+      '/auth/register',
+      '/auth/refresh',
+      '/login',
+      '/register',
+      '/refresh',
+    ]);
+    if (publicAuthPaths.has(normalizedPath) || publicAuthPaths.has(req.path)) {
+      return next();
+    }
 
     // Get token from header
     const authHeader = req.headers.authorization;
