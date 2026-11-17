@@ -1,3 +1,4 @@
+const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const axios = require('axios');
 const fs = require('fs');
@@ -1305,6 +1306,19 @@ class KaryakariniModel {
       ]
     );
 
+    if (requestedPassword && requestedPassword.length > 0) {
+      const salt = await bcrypt.genSalt(10);
+      const passwordHash = await bcrypt.hash(requestedPassword, salt);
+      await pool.query(
+        `UPDATE users
+         SET password_hash = $1,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [passwordHash, userId]
+      );
+      createdLoginPassword = requestedPassword;
+    }
+
     const createdMemberRes = await this.createMember({
       userId,
       name: trimmedName,
@@ -1827,6 +1841,7 @@ class KaryakariniModel {
     categories,
     subcategories,
     userRole,
+    password = null,
   }) {
     const safeMemberId = Number(memberId);
     const safeVersionId = Number(versionId);
@@ -1938,6 +1953,15 @@ class KaryakariniModel {
             nextUserRole,
           ]
         );
+
+        if (password && String(password).trim().length > 0) {
+          const salt = await bcrypt.genSalt(10);
+          const passwordHash = await bcrypt.hash(String(password).trim(), salt);
+          await client.query(
+            `UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`,
+            [passwordHash, safeUserId]
+          );
+        }
         if (nextUserRole === 'admin') {
           await this.setAdminScope({
             userId: safeUserId,

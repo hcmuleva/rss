@@ -9,6 +9,7 @@ import DateTimePicker, { type DateTimePickerEvent } from '@react-native-communit
 import { ScreenHeader } from '../../core/components/ScreenHeader';
 import { PageHeaderCard } from '../../core/components/PageHeaderCard';
 import { StandardModal } from '../../core/components/StandardModal';
+import { SavedSuccessPopup } from '../../core/components/SavedSuccessPopup';
 import { useProfile } from '../../core/context/ProfileContext';
 import { karyakariniClient } from '../../api/client';
 import { theme } from '../../theme';
@@ -251,7 +252,17 @@ export default function KaryakariniMemberScreen() {
   const [searchPickerOptions, setSearchPickerOptions] = useState<{ label: string; value: string }[]>([]);
   const [searchPickerSearchText, setSearchPickerSearchText] = useState('');
   const [onSearchPickerSelect, setOnSearchPickerSelect] = useState<((val: string) => void) | null>(null);
-  const [selectedCategoryKey, setSelectedCategoryKey] = useState<string>('');
+  const [selectedCategoryKey, setSelectedCategoryKey] = useState<string>('all');
+  const [savedPopup, setSavedPopup] = useState<{
+    visible: boolean;
+    title?: string;
+    message: string;
+    subDetail?: string;
+  }>({ visible: false, message: '' });
+
+  const showSavedPopup = useCallback((message: string, subDetail?: string, title?: string) => {
+    setSavedPopup({ visible: true, message, subDetail, title });
+  }, []);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editingTask, setEditingTask] = useState<KaryakariniTask | null>(null);
   const [taskContext, setTaskContext] = useState<AssignmentCard | null>(null);
@@ -479,13 +490,13 @@ export default function KaryakariniMemberScreen() {
       setEditingTeam(null);
       setTeamContext(null);
       setTeamMembersForm([{ fullName: '', mobileNumber: '', profilePhotoUrl: '' }]);
-      Alert.alert('सफल', 'कार्यक्षेत्र सफलतापूर्वक सेव हो गई');
+      showSavedPopup('कार्यक्षेत्र सफलतापूर्वक सुरक्षित कर लिया गया है।');
     } catch (err: any) {
       Alert.alert('त्रुटि', err?.response?.data?.message || 'कार्यक्षेत्र सेव नहीं हो सकी');
     } finally {
       setSavingTeam(false);
     }
-  }, [editingTeam?.id, loadData, teamContext, teamMembersForm, versionId]);
+  }, [editingTeam?.id, loadData, teamContext, teamMembersForm, versionId, showSavedPopup]);
 
   const applyPickedDateTime = useCallback((target: 'taskDate' | 'dueDate' | 'fromDate' | 'toDate', date: Date) => {
     const nextValue = toDateTimeInput(date.toISOString());
@@ -703,13 +714,13 @@ export default function KaryakariniMemberScreen() {
         attachmentInput: '',
         attachments: [],
       });
-      Alert.alert('सफल', editingTask?.id ? 'कार्य सफलतापूर्वक अपडेट हुआ' : 'कार्य सफलतापूर्वक बनाया गया');
+      showSavedPopup(editingTask?.id ? 'कार्य विवरण सफलतापूर्वक अपडेट हुआ' : 'नया कार्य सफलतापूर्वक बनाया गया');
     } catch (err: any) {
       Alert.alert('त्रुटि', err?.response?.data?.message || `कार्य ${editingTask?.id ? 'अपडेट' : 'बनाने'} में विफल`);
     } finally {
       setSavingTask(false);
     }
-  }, [editingTask?.id, loadData, taskContext, taskForm, versionId]);
+  }, [editingTask?.id, loadData, taskContext, taskForm, versionId, showSavedPopup]);
 
   const handleUploadActivityAttachment = useCallback(async () => {
     try {
@@ -808,13 +819,13 @@ export default function KaryakariniMemberScreen() {
         attachments: [],
       });
       await loadData();
-      Alert.alert('सफल', editingActivity?.id ? 'कार्यक्रम सफलतापूर्वक अपडेट हुई' : 'कार्यक्रम सफलतापूर्वक जमा हुई');
+      showSavedPopup(editingActivity?.id ? 'कार्यक्रम विवरण सफलतापूर्वक अपडेट हुआ' : 'कार्यक्रम विवरण सफलतापूर्वक जमा हुआ');
     } catch (err: any) {
       Alert.alert('त्रुटि', err?.response?.data?.message || `कार्यक्रम ${editingActivity?.id ? 'अपडेट' : 'जमा'} करने में विफल`);
     } finally {
       setSavingActivity(false);
     }
-  }, [activityForm, activityContext, loadData, versionId, editingActivity?.id]);
+  }, [activityForm, activityContext, loadData, versionId, editingActivity?.id, showSavedPopup]);
 
   const handleOpenDeleteTaskConfirm = useCallback((taskId: number, title?: string | null) => {
     setDeleteTarget({
@@ -838,10 +849,10 @@ export default function KaryakariniMemberScreen() {
       setDeletingEntry(true);
       if (deleteTarget.type === 'task') {
         await karyakariniClient.delete(`/karyakarini/tasks/${deleteTarget.id}`);
-        Alert.alert('सफल', 'कार्य सफलता से हटा दिया गया है');
+        showSavedPopup('कार्य सफलता से हटा दिया गया है।', undefined, 'सफलतापूर्वक हटाया गया');
       } else {
         await karyakariniClient.delete(`/karyakarini/my/category-activities/${deleteTarget.id}`);
-        Alert.alert('सफल', 'कार्यक्रम सफलता से हटा दी गई है');
+        showSavedPopup('कार्यक्रम सफलता से हटा दी गई है।', undefined, 'सफलतापूर्वक हटाया गया');
       }
       setDeleteTarget(null);
       await loadData();
@@ -853,7 +864,7 @@ export default function KaryakariniMemberScreen() {
     } finally {
       setDeletingEntry(false);
     }
-  }, [deleteTarget, deletingEntry, loadData]);
+  }, [deleteTarget, deletingEntry, loadData, showSavedPopup]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -1078,14 +1089,10 @@ export default function KaryakariniMemberScreen() {
   }, []);
 
   useEffect(() => {
-    if (!selectedCategoryKey && subcategoryCards.length > 0) {
-      setSelectedCategoryKey(subcategoryCards[0].key);
-    } else if (selectedCategoryKey && selectedCategoryKey !== 'all' && !subcategoryCards.some((entry) => entry.key === selectedCategoryKey)) {
-      if (subcategoryCards.length > 0) {
-        setSelectedCategoryKey(subcategoryCards[0].key);
-      } else {
-        setSelectedCategoryKey('all');
-      }
+    if (!selectedCategoryKey) {
+      setSelectedCategoryKey('all');
+    } else if (selectedCategoryKey !== 'all' && !subcategoryCards.some((entry) => entry.key === selectedCategoryKey)) {
+      setSelectedCategoryKey('all');
     }
   }, [selectedCategoryKey, subcategoryCards]);
 
@@ -1140,7 +1147,16 @@ export default function KaryakariniMemberScreen() {
     );
     if (!selectedAssignment) return assignedTasks;
 
+    const currentUserId = Number((user as any)?.id || 0);
+
     return assignedTasks.filter((task) => {
+      const isDirectlyMine =
+        Number(task.assigned_user_id || 0) === currentUserId ||
+        Boolean(task.assignees?.some((a) => a.id === currentUserId)) ||
+        Number((task as any).created_by || 0) === currentUserId;
+
+      if (isDirectlyMine) return true;
+
       const taskCategories = parseLabelList(task.task_categories)
         .map((entry) => String(entry || '').trim().toLowerCase())
         .filter(Boolean);
@@ -1158,11 +1174,11 @@ export default function KaryakariniMemberScreen() {
       const selectedCategory = String(selectedAssignment.category || '').trim().toLowerCase();
       const selectedSubcategory = String(selectedAssignment.subcategory || '').trim().toLowerCase();
 
-      if (selectedSubcategory) return taskSubcategories.includes(selectedSubcategory);
-      if (selectedCategory && selectedCategory !== 'general') return taskCategories.includes(selectedCategory);
+      if (selectedSubcategory && taskSubcategories.length > 0) return taskSubcategories.includes(selectedSubcategory);
+      if (selectedCategory && selectedCategory !== 'general' && taskCategories.length > 0) return taskCategories.includes(selectedCategory);
       return true;
     });
-  }, [assignedTasks, assignmentCards, selectedCategoryKey]);
+  }, [assignedTasks, assignmentCards, selectedCategoryKey, user]);
 
   const tasksByCategory = useMemo(() => {
     const map = new Map<string, KaryakariniTask[]>();
@@ -1215,7 +1231,12 @@ export default function KaryakariniMemberScreen() {
       (c) => c.key === selectedCategoryKey && c.source !== 'invitation'
     );
     if (!selectedAssignment) return activities;
+    const currentUserId = Number((user as any)?.id || 0);
+
     return activities.filter((activity) => {
+      const isMine = Number(activity.submitted_by || 0) === currentUserId;
+      if (isMine) return true;
+
       const actPath = normalizePath(activity.hierarchy_path);
       const selPath = normalizePath(selectedAssignment.path);
       const actRawPath = String(activity.hierarchy_path || '').trim().toLowerCase();
@@ -1242,11 +1263,11 @@ export default function KaryakariniMemberScreen() {
       const selectedSub = String(selectedAssignment.subcategory || '').trim().toLowerCase();
       const selectedCat = String(selectedAssignment.category || '').trim().toLowerCase();
       if (!nodeMatch) return false;
-      if (selectedSub) return activitySubcategories.includes(selectedSub);
-      if (selectedCat && selectedCat !== 'general') return activityCategories.includes(selectedCat);
+      if (selectedSub && activitySubcategories.length > 0) return activitySubcategories.includes(selectedSub);
+      if (selectedCat && selectedCat !== 'general' && activityCategories.length > 0) return activityCategories.includes(selectedCat);
       return true;
     });
-  }, [activities, assignmentCards, selectedCategoryKey]);
+  }, [activities, assignmentCards, selectedCategoryKey, user]);
 
   const renderCreatedBy = (entry: any, fallback?: { name?: string; avatar?: string }) => {
     const nameCandidate = [entry?.created_by_name, entry?.submitted_by_name, fallback?.name]
@@ -1314,8 +1335,20 @@ export default function KaryakariniMemberScreen() {
 
         {subcategoryCards.length > 0 ? (
           <View style={styles.listWrap}>
-            <Text style={styles.sectionTitle}>सौंपी गई आयाम</Text>
+            <Text style={styles.sectionTitle}>सौंपी गई आयाम व टोली</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.assignmentRow}>
+              <TouchableOpacity
+                key="all"
+                style={[styles.assignmentCard, selectedCategoryKey === 'all' && styles.assignmentCardActive]}
+                onPress={() => setSelectedCategoryKey('all')}
+              >
+                <Text style={[styles.assignmentCardTitle, selectedCategoryKey === 'all' && styles.assignmentCardTitleActive]}>
+                  सभी
+                </Text>
+                <Text style={[styles.assignmentCardMeta, selectedCategoryKey === 'all' && { color: 'rgba(255,255,255,0.9)' }]}>
+                  समस्त कार्य व कार्यक्रम
+                </Text>
+              </TouchableOpacity>
               {subcategoryCards.map((entry) => {
                 const isSelected = selectedCategoryKey !== 'all' && selectedCategoryKey === entry.key;
                 return (
@@ -1718,7 +1751,7 @@ export default function KaryakariniMemberScreen() {
               <Text style={[styles.btnText, styles.btnTextDark]}>रद्द करें</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.btn, styles.btnPrimary, savingTeam && styles.btnDisabled]}
+              style={[styles.btn, savingTeam && styles.btnDisabled]}
               onPress={() => void handleSaveTeam()}
               disabled={savingTeam}
             >
@@ -2347,6 +2380,14 @@ export default function KaryakariniMemberScreen() {
           </View>
         </View>
       </Modal>
+
+      <SavedSuccessPopup
+        visible={savedPopup.visible}
+        title={savedPopup.title}
+        message={savedPopup.message}
+        subDetail={savedPopup.subDetail}
+        onClose={() => setSavedPopup((prev) => ({ ...prev, visible: false }))}
+      />
     </View>
   );
 }

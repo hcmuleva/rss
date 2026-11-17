@@ -1,0 +1,12 @@
+{
+  "name": "rss-workspace",
+  "version": "1.0.0",
+  "description": "Unified management for RSS services",
+  "scripts": {
+    "start": "powershell -ExecutionPolicy Bypass -File ./manage.ps1 start",
+    "stop": "powershell -ExecutionPolicy Bypass -File ./manage.ps1 stop",
+    "restart": "powershell -ExecutionPolicy Bypass -File ./manage.ps1 restart",
+    "status": "powershell -ExecutionPolicy Bypass -File ./manage.ps1 status",
+    "dev": "powershell -ExecutionPolicy Bypass -File ./manage.ps1 start -Window"
+  }
+}

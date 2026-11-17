@@ -1,0 +1,5 @@
+env: load .env
+env: export EXPO_PUBLIC_AUTH_API_URL EXPO_PUBLIC_KARYAKARINI_API_URL EXPO_PUBLIC_ABLY_API_KEY
+Starting project at G:\Emeelan\rss\rss\app
+React Compiler enabled
+Starting Metro Bundler

@@ -1,12 +1,13 @@
+require('dotenv').config();
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 
 const pool = new Pool({
-  host: 'localhost',
-  port: 5432,
-  database: 'seervi',
-  user: 'postgres',
-  password: 'password'
+  host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT || 5432),
+  database: process.env.DB_NAME || 'rss_new',
+  user: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASSWORD || 'postgres'
 });
 
 async function resetPasswords() {
@@ -18,6 +19,7 @@ async function resetPasswords() {
   // Update all users with this password
   const users = [
     'harish@emeelan.com',
+    'superadmin@rss.com',
     'rmm@a.com',
     'mrm@a.com',
     'aang@a.com',
@@ -39,12 +41,20 @@ async function resetPasswords() {
     }
   }
   
-  // Also ensure family_id is set
-  await pool.query("UPDATE users SET family_id = 3 WHERE email = 'harish@emeelan.com'");
-  await pool.query("UPDATE users SET family_id = 6 WHERE email IN ('rmm@a.com', 'mrm@a.com')");
-  await pool.query("UPDATE users SET family_id = 7 WHERE email IN ('aang@a.com', 'aang1@a.com', 'aang2@a.com', 'aang3@a.com')");
-  
-  console.log('✅ Updated family_id for all users');
+  // Update family_id if column exists
+  try {
+    const colCheck = await pool.query(
+      "SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='family_id'"
+    );
+    if (colCheck.rows.length > 0) {
+      await pool.query("UPDATE users SET family_id = 3 WHERE email = 'harish@emeelan.com'");
+      await pool.query("UPDATE users SET family_id = 6 WHERE email IN ('rmm@a.com', 'mrm@a.com')");
+      await pool.query("UPDATE users SET family_id = 7 WHERE email IN ('aang@a.com', 'aang1@a.com', 'aang2@a.com', 'aang3@a.com')");
+      console.log('✅ Updated family_id for all users');
+    }
+  } catch (err) {
+    console.log('⚠️ Skipping family_id update (not present in this schema)');
+  }
   
   await pool.end();
   console.log('\n✅ All passwords reset to: welcome');

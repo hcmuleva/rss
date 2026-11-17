@@ -870,6 +870,18 @@ export default function KaryakariniModuleScreen() {
     [activityFilterCategory, activityFilterNodeLevel, activityFilterSubcategory]
   );
 
+  useEffect(() => {
+    if (activeTab === 'tasks' && selectedVersionId) {
+      void loadTasks(selectedVersionId, 1);
+    }
+  }, [activeTab, selectedVersionId, loadTasks]);
+
+  useEffect(() => {
+    if (activeTab === 'activities' && selectedVersionId) {
+      void loadCategoryActivities(selectedVersionId, 1);
+    }
+  }, [activeTab, selectedVersionId, loadCategoryActivities]);
+
   const loadNodeMembersForForm = useCallback(async (nodeId: number, versionId: number, forType: 'meeting' | 'task') => {
     try {
       const response = await karyakariniClient.get('/karyakarini/nodes/members', {
@@ -1750,10 +1762,10 @@ export default function KaryakariniModuleScreen() {
 
       setShowAddMemberModal(false);
       const created = response?.data?.data || null;
-      if (created?.createdUser) {
-        const loginId = created.mobileNumber || created.email || memberForm.mobileNumber.trim();
-        const loginPassword = created.loginPassword || memberForm.password.trim() || 'welcome';
-        Alert.alert('Success', `Member added. New user login:\nID: ${loginId}\nPassword: ${loginPassword}`);
+      if (created?.createdUser || created?.loginPassword || memberForm.password.trim()) {
+        const loginId = created?.mobileNumber || created?.email || memberForm.mobileNumber.trim();
+        const loginPassword = created?.loginPassword || memberForm.password.trim() || 'welcome';
+        Alert.alert('Success', `Member added. User login:\nID: ${loginId}\nPassword: ${loginPassword}`);
       } else {
         Alert.alert('Success', memberModalTab === 'assign' ? 'Member assigned successfully' : 'Member added successfully');
       }
@@ -2422,13 +2434,23 @@ export default function KaryakariniModuleScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tabSwitchBtn, activeTab === 'tasks' && styles.tabSwitchBtnActive]}
-            onPress={() => setActiveTab('tasks')}
+            onPress={() => {
+              setActiveTab('tasks');
+              if (selectedVersionId) {
+                void loadTasks(selectedVersionId, 1);
+              }
+            }}
           >
             <Text style={[styles.tabSwitchText, activeTab === 'tasks' && styles.tabSwitchTextActive]}>Tasks</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tabSwitchBtn, activeTab === 'activities' && styles.tabSwitchBtnActive]}
-            onPress={() => setActiveTab('activities')}
+            onPress={() => {
+              setActiveTab('activities');
+              if (selectedVersionId) {
+                void loadCategoryActivities(selectedVersionId, 1);
+              }
+            }}
           >
             <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>Activities</Text>
           </TouchableOpacity>

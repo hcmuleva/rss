@@ -27,6 +27,7 @@ import { ProfileMenu } from '../../core/components/ProfileMenu';
 import { ScreenHeader } from '../../core/components/ScreenHeader';
 import { PageHeaderCard } from '../../core/components/PageHeaderCard';
 import { StandardModal } from '../../core/components/StandardModal';
+import { SavedSuccessPopup } from '../../core/components/SavedSuccessPopup';
 import { useProfile } from '../../core/context/ProfileContext';
 import { theme } from '../../theme';
 import { MemberDialog } from '../../services/karyakarini-module/components/MemberDialog';
@@ -667,6 +668,201 @@ const memberPeriod = (member: KaryakariniMember) =>
   [member.start_date || null, member.end_date || null].filter(Boolean).join(' to ') ||
   '';
 
+const formatDateOnly = (dateVal: any): string => {
+  if (!dateVal) return NOT_AVAILABLE;
+  const str = String(dateVal).trim();
+  if (!str || str === 'null' || str === 'undefined') return NOT_AVAILABLE;
+  if (str.includes(' to ')) {
+    const parts = str.split(' to ');
+    return parts.map((p) => formatDateOnly(p)).join(' to ');
+  }
+  if (str.includes('T')) {
+    return str.split('T')[0];
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    return str.slice(0, 10);
+  }
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return str;
+};
+
+interface ValidationBadgeProps {
+  type?: 'warning' | 'error' | 'success' | 'info';
+  message: string;
+  detail?: string;
+  style?: any;
+}
+
+const ValidationBadge: React.FC<ValidationBadgeProps> = ({
+  type = 'warning',
+  message,
+  detail,
+  style,
+}) => {
+  const iconName: any =
+    type === 'error'
+      ? 'error'
+      : type === 'success'
+      ? 'check-circle'
+      : type === 'info'
+      ? 'info'
+      : 'warning';
+
+  const badgeTheme = {
+    warning: {
+      bg: '#FFFBEB',
+      border: '#FCD34D',
+      text: '#92400E',
+      icon: '#D97706',
+    },
+    error: {
+      bg: '#FEF2F2',
+      border: '#FECACA',
+      text: '#991B1B',
+      icon: '#DC2626',
+    },
+    success: {
+      bg: '#F0FDF4',
+      border: '#BBF7D0',
+      text: '#166534',
+      icon: '#16A34A',
+    },
+    info: {
+      bg: '#EFF6FF',
+      border: '#BFDBFE',
+      text: '#1E40AF',
+      icon: '#2563EB',
+    },
+  }[type];
+
+  return (
+    <View
+      style={[
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          backgroundColor: badgeTheme.bg,
+          borderColor: badgeTheme.border,
+          borderWidth: 1,
+          borderRadius: 6,
+          paddingVertical: 4,
+          paddingHorizontal: 8,
+          marginVertical: 4,
+          gap: 6,
+          alignSelf: 'flex-start',
+          maxWidth: '100%',
+        },
+        style,
+      ]}
+    >
+      <MaterialIcons name={iconName} size={14} color={badgeTheme.icon} />
+      <Text
+        style={{
+          color: badgeTheme.text,
+          fontSize: 12,
+          fontWeight: '600',
+          lineHeight: 16,
+          flexShrink: 1,
+        }}
+      >
+        {message}
+      </Text>
+      {detail ? (
+        <Text
+          style={{
+            color: badgeTheme.text,
+            fontSize: 11,
+            opacity: 0.85,
+            lineHeight: 15,
+          }}
+        >
+          {detail}
+        </Text>
+      ) : null}
+    </View>
+  );
+};
+
+interface FormNoticeBannerProps {
+  errors: string[];
+  warnings?: string[];
+  style?: any;
+}
+
+const FormNoticeBanner: React.FC<FormNoticeBannerProps> = ({ errors, warnings = [], style }) => {
+  if (errors.length === 0 && warnings.length === 0) return null;
+  const isError = errors.length > 0;
+  return (
+    <View
+      style={[
+        {
+          backgroundColor: isError ? '#FEF2F2' : '#FFFBEB',
+          borderColor: isError ? '#FCA5A5' : '#FCD34D',
+          borderWidth: 1,
+          borderRadius: 8,
+          paddingVertical: 8,
+          paddingHorizontal: 12,
+          marginBottom: 12,
+          maxWidth: '100%',
+        },
+        style,
+      ]}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <MaterialIcons
+          name={isError ? 'error-outline' : 'warning-amber'}
+          size={16}
+          color={isError ? '#DC2626' : '#D97706'}
+        />
+        <Text
+          style={{
+            fontSize: 12,
+            fontWeight: '700',
+            color: isError ? '#991B1B' : '#92400E',
+          }}
+        >
+          {isError ? 'आवश्यक जानकारियाँ दर्ज करें:' : 'सुझाव / चेतावनी:'}
+        </Text>
+      </View>
+      {errors.map((err, i) => (
+        <Text
+          key={`err-${i}`}
+          style={{
+            fontSize: 11,
+            color: '#B91C1C',
+            lineHeight: 16,
+            marginLeft: 22,
+            fontWeight: '500',
+          }}
+        >
+          • {err}
+        </Text>
+      ))}
+      {warnings.map((warn, i) => (
+        <Text
+          key={`warn-${i}`}
+          style={{
+            fontSize: 11,
+            color: '#B45309',
+            lineHeight: 16,
+            marginLeft: 22,
+            fontWeight: '500',
+          }}
+        >
+          • {warn}
+        </Text>
+      ))}
+    </View>
+  );
+};
+
 export default function KaryakariniModuleScreen() {
   const { user, logout } = useProfile();
   const canAddMembers = isAdminRole((user as any)?.role);
@@ -734,6 +930,8 @@ export default function KaryakariniModuleScreen() {
     pincode: '',
     avatar: '',
   });
+  const [showEditPassword, setShowEditPassword] = useState(false);
+  const [showCreatePassword, setShowCreatePassword] = useState(false);
 
   const [searchPickerVisible, setSearchPickerVisible] = useState(false);
   const [searchPickerTitle, setSearchPickerTitle] = useState('');
@@ -925,6 +1123,17 @@ export default function KaryakariniModuleScreen() {
   });
   const [uploadingActivityAttachment, setUploadingActivityAttachment] = useState(false);
 
+  const [savedPopup, setSavedPopup] = useState<{
+    visible: boolean;
+    title?: string;
+    message: string;
+    subDetail?: string;
+  }>({ visible: false, message: '' });
+
+  const showSavedPopup = useCallback((message: string, subDetail?: string, title?: string) => {
+    setSavedPopup({ visible: true, message, subDetail, title });
+  }, []);
+
   const [scopeRows, setScopeRows] = useState<{ node_id: number; node_level: string; node_name: string }[]>([]);
   const [selectedRoleLevel, setSelectedRoleLevel] = useState('');
   const [selectedRoleNodeId, setSelectedRoleNodeId] = useState('');
@@ -1048,6 +1257,14 @@ export default function KaryakariniModuleScreen() {
 
     return Array.from(map.values());
   }, [taskHierarchyFilterL1, taskRows]);
+
+  const filteredMeetingRows = useMemo(() => {
+    if (!taskHierarchyFilterL1) return meetingRows;
+    return meetingRows.filter((row) => {
+      const path = String(row.hierarchy_path || row.node_name || '');
+      return path.includes(taskHierarchyFilterL1);
+    });
+  }, [taskHierarchyFilterL1, meetingRows]);
   const addFormSelectedSubcategories = useMemo(
     () => parseLabelList(memberModalTab === 'assign' ? assignForm.subcategory : memberForm.subcategory),
     [assignForm.subcategory, memberForm.subcategory, memberModalTab]
@@ -1481,9 +1698,16 @@ export default function KaryakariniModuleScreen() {
     []
   );
 
-  // Automatically trigger search on Activities filter changes
+  // Automatically trigger fetch when switching to meetings tab
   useEffect(() => {
-    if (selectedVersionId) {
+    if (activeTab === 'meetings' && selectedVersionId) {
+      void loadMeetings(selectedVersionId, 1);
+    }
+  }, [activeTab, selectedVersionId, loadMeetings]);
+
+  // Automatically trigger search on Activities filter changes or when switching to activities tab
+  useEffect(() => {
+    if (selectedVersionId && (activeTab === 'activities' || !activityRows.length)) {
       void loadCategoryActivities(
         selectedVersionId,
         1,
@@ -1492,11 +1716,11 @@ export default function KaryakariniModuleScreen() {
         activityFilterSubcategory
       );
     }
-  }, [selectedVersionId, activityBrowseNodeId, activityFilterCategory, activityFilterSubcategory, loadCategoryActivities]);
+  }, [activeTab, selectedVersionId, activityBrowseNodeId, activityFilterCategory, activityFilterSubcategory, loadCategoryActivities, activityRows.length]);
 
-  // Automatically trigger search on Tasks filter changes
+  // Automatically trigger search on Tasks filter changes or when switching to tasks tab
   useEffect(() => {
-    if (selectedVersionId) {
+    if (selectedVersionId && (activeTab === 'tasks' || !taskRows.length)) {
       void loadTasks(
         selectedVersionId,
         1,
@@ -1506,7 +1730,7 @@ export default function KaryakariniModuleScreen() {
         taskFilterNodeLevel
       );
     }
-  }, [selectedVersionId, taskBrowseNodeId, taskFilterCategory, taskFilterSubcategory, taskFilterNodeLevel, loadTasks]);
+  }, [activeTab, selectedVersionId, taskBrowseNodeId, taskFilterCategory, taskFilterSubcategory, taskFilterNodeLevel, loadTasks, taskRows.length]);
 
   const loadNodeMembersForForm = useCallback(async (nodeId: number, versionId: number, forType: 'meeting' | 'task') => {
     try {
@@ -2186,6 +2410,12 @@ export default function KaryakariniModuleScreen() {
         } else if (membersNode) {
           await loadMembers(membersNode, membersPagination.page || 1);
         }
+      } else if (activeTab === 'meetings' && selectedVersionId) {
+        await loadMeetings(selectedVersionId, 1);
+      } else if (activeTab === 'tasks' && selectedVersionId) {
+        await loadTasks(selectedVersionId, 1, taskBrowseNodeId, taskFilterCategory, taskFilterSubcategory, taskFilterNodeLevel);
+      } else if (activeTab === 'activities' && selectedVersionId) {
+        await loadCategoryActivities(selectedVersionId, 1, activityBrowseNodeId, activityFilterCategory, activityFilterSubcategory);
       }
       if (membersVisible && membersNode) {
         await loadMembers(membersNode, membersPagination.page || 1);
@@ -2199,6 +2429,9 @@ export default function KaryakariniModuleScreen() {
     currentUserRole,
     loadMembers,
     loadMembersForScopeNodes,
+    loadMeetings,
+    loadTasks,
+    loadCategoryActivities,
     loadVersionsAndTree,
     memberBrowseNodeId,
     memberLevels,
@@ -2208,6 +2441,13 @@ export default function KaryakariniModuleScreen() {
     activeTab,
     selectedPathNodes,
     selectedVersionId,
+    taskBrowseNodeId,
+    taskFilterCategory,
+    taskFilterSubcategory,
+    taskFilterNodeLevel,
+    activityBrowseNodeId,
+    activityFilterCategory,
+    activityFilterSubcategory,
   ]);
 
   const handleSelectVersion = useCallback(
@@ -2347,17 +2587,42 @@ export default function KaryakariniModuleScreen() {
         }
       })();
     }
+    setShowEditPassword(false);
     setShowEditMemberModal(true);
   }, []);
 
   const handleSubmitMemberEdit = useCallback(async () => {
     if (!editingMember || !selectedVersionId) return;
-    if (!editMemberForm.pad.trim()) {
-      Alert.alert('आवश्यक', 'दायित्व आवश्यक है');
-      return;
+
+    const errors: string[] = [];
+    const cleanMobile = editMemberForm.mobileNumber.replace(/\D/g, '');
+    if (!cleanMobile) {
+      errors.push('मोबाइल नंबर आवश्यक है');
+    } else if (cleanMobile.length !== 10) {
+      errors.push(`10 अंकों का मान्य मोबाइल नंबर आवश्यक है (वर्तमान: ${cleanMobile.length} अंक)`);
     }
+
+    if (!editMemberForm.name.trim()) {
+      errors.push('नाम आवश्यक है');
+    } else if (editMemberForm.name.trim().length < 2) {
+      errors.push('नाम कम से कम 2 अक्षरों का होना चाहिए');
+    }
+
+    const trimmedPassword = editMemberForm.password.trim();
+    if (trimmedPassword && trimmedPassword.length < 4) {
+      errors.push(`पासवर्ड कम से कम 4 अक्षरों का होना चाहिए (वर्तमान: ${trimmedPassword.length} अक्षर)`);
+    }
+
+    if (!editMemberForm.pad.trim()) {
+      errors.push('दायित्व (पद) का चयन आवश्यक है');
+    }
+
     if (!editMemberForm.category.trim() || !editMemberForm.subcategory.trim()) {
-      Alert.alert('आवश्यक', 'आयाम और टोली आवश्यक हैं');
+      errors.push('आयाम और टोली का चयन आवश्यक है');
+    }
+
+    if (errors.length > 0) {
+      Alert.alert('कृपया फॉर्म सही करें', errors.map((e) => `• ${e}`).join('\n'));
       return;
     }
 
@@ -2398,17 +2663,25 @@ export default function KaryakariniModuleScreen() {
       if (membersNode) {
         await loadMembers(membersNode, membersPagination.page || 1);
       }
-      Alert.alert('सफल', 'कार्यकर्ता सफलतापूर्वक अपडेट हो गया');
+      const updatedPass = editMemberForm.password.trim();
+      showSavedPopup(
+        updatedPass
+          ? 'कार्यकर्ता और पासवर्ड सफलतापूर्वक अपडेट हो गया।'
+          : 'कार्यकर्ता विवरण सफलतापूर्वक अपडेट हो गया।',
+        updatedPass ? `नया पासवर्ड: ${updatedPass}` : undefined,
+        'सफलतापूर्वक सहेजा गया!'
+      );
     } catch (err: any) {
       Alert.alert('त्रुटि', err?.response?.data?.message || 'कार्यकर्ता अपडेट करने में विफल');
     } finally {
       setSavingMemberEdit(false);
     }
-  }, [editMemberForm, editingMember, loadMembers, membersNode, membersPagination.page, selectedVersionId, otherInfoForm.genderType, otherInfoForm.religion]);
+  }, [editMemberForm, editingMember, loadMembers, membersNode, membersPagination.page, selectedVersionId, otherInfoForm.genderType, otherInfoForm.religion, showSavedPopup]);
 
   const handleOpenAddMember = useCallback((node: KaryakariniNode) => {
     setAddTargetNode(node);
     setMemberModalTab('create');
+    setShowCreatePassword(false);
     setSelectedUser(null);
     setUserSearchQuery('');
     setSearchResults([]);
@@ -2647,13 +2920,13 @@ export default function KaryakariniModuleScreen() {
       });
       setShowJansankhiyaModal(false);
       await loadJansankhiya(selectedVersionId);
-      Alert.alert('सफल', 'जनसंख्या डेटा सेव हो गया');
+      showSavedPopup('जनसंख्या डेटा सफलतापूर्वक सुरक्षित कर लिया गया है।');
     } catch (error: any) {
       Alert.alert('त्रुटि', error?.response?.data?.message || 'जनसंख्या डेटा सेव नहीं हो पाया');
     } finally {
       setSavingJansankhiya(false);
     }
-  }, [jansankhiyaForm, loadJansankhiya, selectedVersionId]);
+  }, [jansankhiyaForm, loadJansankhiya, selectedVersionId, showSavedPopup]);
 
   const renderOtherInfoSection = () => (
     <View style={styles.otherInfoBlock}>
@@ -2873,12 +3146,17 @@ export default function KaryakariniModuleScreen() {
 
   const handleSubmitNode = useCallback(async () => {
     if (!addTargetNode || !selectedVersionId) return;
+    const errors: string[] = [];
     if (!nodeForm.name.trim()) {
-      Alert.alert('आवश्यक', 'नोड नाम आवश्यक है');
-      return;
+      errors.push('नोड नाम आवश्यक है');
+    } else if (nodeForm.name.trim().length < 2) {
+      errors.push(`नोड नाम कम से कम 2 अक्षरों का होना चाहिए (वर्तमान: ${nodeForm.name.trim().length} अक्षर)`);
     }
     if (!allowedNodeLevelOptions.length) {
-      Alert.alert('अमान्य', 'चुने गए संबंध के लिए कोई मान्य कार्यक्षेत्र उपलब्ध नहीं है');
+      errors.push('चुने गए संबंध के लिए कोई मान्य कार्यक्षेत्र उपलब्ध नहीं है');
+    }
+    if (errors.length > 0) {
+      Alert.alert('कृपया फॉर्म सही करें', errors.map((e) => `• ${e}`).join('\n'));
       return;
     }
 
@@ -2901,13 +3179,13 @@ export default function KaryakariniModuleScreen() {
 
       setShowAddNodeModal(false);
       await loadTree(selectedVersionId, [], assignableNodes);
-      Alert.alert('सफल', 'नोड सफलतापूर्वक जोड़ दिया गया');
+      showSavedPopup('नया नोड सफलतापूर्वक जोड़ दिया गया है।');
     } catch (err: any) {
       Alert.alert('त्रुटि', err?.response?.data?.message || 'नोड जोड़ने में विफल');
     } finally {
       setAddingNode(false);
     }
-  }, [addTargetNode, allowedNodeLevelOptions.length, assignableNodes, loadTree, nodeForm.level, nodeForm.name, nodeForm.relation, selectedVersionId]);
+  }, [addTargetNode, allowedNodeLevelOptions.length, assignableNodes, loadTree, nodeForm.level, nodeForm.name, nodeForm.relation, selectedVersionId, showSavedPopup]);
 
   const handleSubmitMember = useCallback(async () => {
     if (!addTargetNode || !selectedVersionId) return;
@@ -2916,16 +3194,18 @@ export default function KaryakariniModuleScreen() {
       setAddingMember(true);
       let response: any;
       if (memberModalTab === 'assign') {
+        const errors: string[] = [];
         if (!selectedUser?.id) {
-          Alert.alert('आवश्यक', 'मौजूदा उपयोगकर्ता खोजें और चुनें');
-          return;
+          errors.push('मौजूदा उपयोगकर्ता खोजें और चुनें');
         }
         if (!assignForm.pad.trim()) {
-          Alert.alert('आवश्यक', 'दायित्व आवश्यक है');
-          return;
+          errors.push('दायित्व (पद) का चयन आवश्यक है');
         }
         if (!assignForm.category.trim() || !assignForm.subcategory.trim()) {
-          Alert.alert('आवश्यक', 'आयाम और टोली आवश्यक हैं');
+          errors.push('आयाम और टोली का चयन आवश्यक है');
+        }
+        if (errors.length > 0 || !selectedUser) {
+          Alert.alert('कृपया फॉर्म सही करें', errors.map((e) => `• ${e}`).join('\n'));
           return;
         }
         const assignCategories = parseLabelList(assignForm.category);
@@ -2944,16 +3224,35 @@ export default function KaryakariniModuleScreen() {
           otherInfo: { genderType: otherInfoForm.genderType, religion: otherInfoForm.religion },
         });
       } else {
-        if (!memberForm.mobileNumber.trim() || !memberForm.name.trim()) {
-          Alert.alert('आवश्यक', 'मोबाइल और नाम आवश्यक हैं');
-          return;
+        const errors: string[] = [];
+        const cleanMobile = memberForm.mobileNumber.replace(/\D/g, '');
+        if (!cleanMobile) {
+          errors.push('मोबाइल नंबर आवश्यक है');
+        } else if (cleanMobile.length !== 10) {
+          errors.push(`10 अंकों का मान्य मोबाइल नंबर आवश्यक है (वर्तमान: ${cleanMobile.length} अंक)`);
         }
+
+        if (!memberForm.name.trim()) {
+          errors.push('नाम आवश्यक है');
+        } else if (memberForm.name.trim().length < 2) {
+          errors.push(`नाम कम से कम 2 अक्षरों का होना चाहिए (वर्तमान: ${memberForm.name.trim().length} अक्षर)`);
+        }
+
+        const trimmedPassword = memberForm.password.trim();
+        if (trimmedPassword && trimmedPassword.length < 4) {
+          errors.push(`पासवर्ड कम से कम 4 अक्षरों का होना चाहिए (वर्तमान: ${trimmedPassword.length} अक्षर)`);
+        }
+
         if (!memberForm.pad.trim()) {
-          Alert.alert('आवश्यक', 'दायित्व आवश्यक है');
-          return;
+          errors.push('दायित्व (पद) का चयन आवश्यक है');
         }
+
         if (!memberForm.category.trim() || !memberForm.subcategory.trim()) {
-          Alert.alert('आवश्यक', 'आयाम और टोली आवश्यक हैं');
+          errors.push('आयाम और टोली का चयन आवश्यक है');
+        }
+
+        if (errors.length > 0 || !selectedUser) {
+          Alert.alert('कृपया फॉर्म सही करें', errors.map((e) => `• ${e}`).join('\n'));
           return;
         }
         const createCategories = parseLabelList(memberForm.category);
@@ -2983,12 +3282,18 @@ export default function KaryakariniModuleScreen() {
 
       setShowAddMemberModal(false);
       const created = response?.data?.data || null;
-      if (created?.createdUser) {
-        const loginId = created.mobileNumber || created.email || memberForm.mobileNumber.trim();
-        const loginPassword = created.loginPassword || memberForm.password.trim() || 'welcome';
-      Alert.alert('सफल', `कार्यकर्ता जोड़ दिया गया। नए उपयोगकर्ता का लॉगिन:\nआईडी: ${loginId}\nपासवर्ड: ${loginPassword}`);
+      if (created?.createdUser || created?.loginPassword || memberForm.password.trim()) {
+        const loginId = created?.mobileNumber || created?.email || memberForm.mobileNumber.trim();
+        const loginPassword = created?.loginPassword || memberForm.password.trim() || 'welcome';
+        showSavedPopup(
+          'कार्यकर्ता सफलतापूर्वक जोड़ दिया गया।',
+          `लॉगिन आईडी: ${loginId}\nपासवर्ड: ${loginPassword}`,
+          'कार्यकर्ता सहेजा गया!'
+        );
       } else {
-        Alert.alert('सफल', memberModalTab === 'assign' ? 'कार्यकर्ता सफलतापूर्वक आवंटित हुआ' : 'कार्यकर्ता सफलतापूर्वक जोड़ दिया गया');
+        showSavedPopup(
+          memberModalTab === 'assign' ? 'कार्यकर्ता सफलतापूर्वक आवंटित हुआ' : 'कार्यकर्ता सफलतापूर्वक जोड़ दिया गया'
+        );
       }
 
       const selectedIds = selectedPathNodes.map((node) => node.id);
@@ -3615,8 +3920,19 @@ export default function KaryakariniModuleScreen() {
     const safeNodeId = Number(activityForm.nodeId || 0);
     const safeTitle = String(activityForm.title || '').trim();
     const safeSubcategory = String(activityForm.subcategory || '').trim();
-    if (safeNodeId <= 0 || !safeTitle || !safeSubcategory) {
-      Alert.alert('सत्यापन', 'कृपया हाइरार्की में नोड चुनें और शीर्षक व टोली भरें।');
+
+    const errors: string[] = [];
+    if (safeNodeId <= 0) {
+      errors.push('नोड हाइरार्की में स्थान चुनें');
+    }
+    if (!safeTitle) {
+      errors.push('कार्यक्रम शीर्षक आवश्यक है');
+    }
+    if (!safeSubcategory) {
+      errors.push('कार्यक्रम टोली आवश्यक है');
+    }
+    if (errors.length > 0) {
+      Alert.alert('कृपया फॉर्म सही करें', errors.map((e) => `• ${e}`).join('\n'));
       return;
     }
 
@@ -3635,15 +3951,15 @@ export default function KaryakariniModuleScreen() {
         childrenCount: activityForm.includePopulation ? Number(activityForm.childrenCount) || 0 : 0,
       });
 
-      Alert.alert('सफल', 'कार्यक्रम सफलतापूर्वक जमा हो गई।');
       setShowActivityModal(false);
       await loadCategoryActivities(1);
+      showSavedPopup('कार्यक्रम सफलतापूर्वक जमा हो गया।');
     } catch (err: any) {
       Alert.alert('त्रुटि', err?.response?.data?.message || 'कार्यक्रम जमा करने में विफल।');
     } finally {
       setSubmittingActivity(false);
     }
-  }, [activityForm, loadCategoryActivities, selectedVersionId]);
+  }, [activityForm, loadCategoryActivities, selectedVersionId, showSavedPopup]);
 
   const handleSearchTaskMembers = useCallback(async (queryOverride?: string) => {
     const q = (queryOverride !== undefined ? queryOverride : taskMemberSearchQuery).trim();
@@ -3815,8 +4131,20 @@ export default function KaryakariniModuleScreen() {
   const handleSubmitMeeting = useCallback(async () => {
     if (!selectedVersionId) return;
     const nodeId = Number(meetingForm.nodeId || 0);
-    if (!nodeId || !meetingForm.title.trim()) {
-      Alert.alert('आवश्यक', 'बैठक शीर्षक और नोड आवश्यक हैं');
+    const errors: string[] = [];
+    if (!nodeId) {
+      errors.push('कार्यक्षेत्र (स्थान नोड) का चयन आवश्यक है');
+    }
+    if (!meetingForm.title.trim()) {
+      errors.push('बैठक शीर्षक आवश्यक है');
+    } else if (meetingForm.title.trim().length < 3) {
+      errors.push(`बैठक शीर्षक कम से कम 3 अक्षरों का होना चाहिए (वर्तमान: ${meetingForm.title.trim().length} अक्षर)`);
+    }
+    if (!meetingForm.meetingDate.trim()) {
+      errors.push('बैठक की तिथि आवश्यक है (उदा. 2026-05-20)');
+    }
+    if (errors.length > 0) {
+      Alert.alert('कृपया फॉर्म सही करें', errors.map((e) => `• ${e}`).join('\n'));
       return;
     }
 
@@ -3845,57 +4173,43 @@ export default function KaryakariniModuleScreen() {
       setMeetingParticipantPreview([]);
       setMeetingInvitePreview([]);
       await loadMeetings(selectedVersionId, 1);
-      Alert.alert('सफल', editingMeetingId ? 'बैठक सफलतापूर्वक अपडेट हुई' : 'बैठक सफलतापूर्वक बनाई गई');
+      showSavedPopup(editingMeetingId ? 'बैठक सफलतापूर्वक अपडेट हुई' : 'बैठक सफलतापूर्वक बनाई गई');
     } catch (err: any) {
       Alert.alert('त्रुटि', err?.response?.data?.message || `बैठक ${editingMeetingId ? 'अपडेट' : 'बनाने'} में विफल`);
     } finally {
       setCreatingMeeting(false);
     }
-  }, [editingMeetingId, loadMeetings, meetingForm, selectedVersionId]);
+  }, [editingMeetingId, loadMeetings, meetingForm, selectedVersionId, showSavedPopup]);
 
   const handleSubmitTask = useCallback(async () => {
     if (!selectedVersionId) return;
     const nodeId = Number(taskForm.nodeId || 0);
-    const isAdminAssignMode = !editingTaskId && ['admin', 'superadmin', 'templeadmin'].includes(currentUserRole);
 
-    if (!nodeId || (!isAdminAssignMode && !taskForm.title.trim())) {
-      Alert.alert('आवश्यक', isAdminAssignMode ? 'नोड आवश्यक है' : 'कार्य शीर्षक और नोड आवश्यक हैं');
-      return;
+    const errors: string[] = [];
+    if (!nodeId) {
+      errors.push('कार्य हेतु नोड का चयन आवश्यक है');
+    }
+    if (!taskForm.title.trim()) {
+      errors.push('कार्य शीर्षक आवश्यक है');
+    } else if (taskForm.title.trim().length < 3) {
+      errors.push(`कार्य शीर्षक कम से कम 3 अक्षरों का होना चाहिए (वर्तमान: ${taskForm.title.trim().length} अक्षर)`);
     }
     if (currentUserRole !== 'superadmin' && scopeRootNodeIds.has(nodeId)) {
-      Alert.alert('प्रतिबंधित', 'आप अपने आवंटित कार्यक्षेत्र से नीचे के चाइल्ड नोड के लिए ही कार्य बना सकते हैं');
-      return;
+      errors.push('आप आवंटित कार्यक्षेत्र पर कार्य नहीं बना सकते। नीचे का चाइल्ड नोड चुनें।');
     }
     const taskCategories = parseLabelList(taskForm.category);
     const taskSubcategories = parseLabelList(taskForm.subcategory);
     if (!taskSubcategories.length) {
-      Alert.alert('आवश्यक', 'कार्य टोली चयन आवश्यक है');
-      return;
+      errors.push('कार्य टोली का चयन आवश्यक है');
     }
-    if (isAdminAssignMode && taskForm.assignedUserIds.length === 0) {
-      Alert.alert('आवश्यक', 'आवंटन के लिए कम से कम एक उपयोगकर्ता चुनें');
+
+    if (errors.length > 0) {
+      Alert.alert('कृपया फॉर्म सही करें', errors.map((e) => `• ${e}`).join('\n'));
       return;
     }
 
     try {
       setCreatingTask(true);
-      if (isAdminAssignMode) {
-        await karyakariniClient.post('/karyakarini/task-assignments', {
-          versionId: selectedVersionId,
-          nodeId,
-          category: taskCategories[0] || null,
-          subcategory: taskSubcategories[0] || null,
-          categories: taskCategories,
-          subcategories: taskSubcategories,
-          assignedUserId: taskForm.assignedUserIds[0] || null,
-          assignedUserIds: taskForm.assignedUserIds,
-        });
-        setShowTaskModal(false);
-        await loadTasks(selectedVersionId, 1);
-        Alert.alert('सफल', 'कार्य उपयोगकर्ता सफलतापूर्वक आवंटित हुए');
-        return;
-      }
-
       const payload = {
         versionId: selectedVersionId,
         nodeId,
@@ -3903,7 +4217,7 @@ export default function KaryakariniModuleScreen() {
         description: taskForm.description.trim() || null,
         taskDate: taskForm.taskDate,
         dueDate: taskForm.dueDate.trim() || null,
-        status: taskForm.status,
+        status: taskForm.status || 'open',
         category: taskCategories[0] || null,
         subcategory: taskSubcategories[0] || null,
         categories: taskCategories,
@@ -3920,13 +4234,13 @@ export default function KaryakariniModuleScreen() {
       }
       setShowTaskModal(false);
       await loadTasks(selectedVersionId, 1);
-      Alert.alert('सफल', editingTaskId ? 'कार्य सफलतापूर्वक अपडेट हुआ' : 'कार्य सफलतापूर्वक बनाया गया');
+      showSavedPopup(editingTaskId ? 'कार्य सफलतापूर्वक अपडेट हुआ' : 'कार्य सफलतापूर्वक बनाया गया');
     } catch (err: any) {
       Alert.alert('त्रुटि', err?.response?.data?.message || `कार्य ${editingTaskId ? 'अपडेट' : 'बनाने'} में विफल`);
     } finally {
       setCreatingTask(false);
     }
-  }, [currentUserRole, editingTaskId, loadTasks, scopeRootNodeIds, selectedVersionId, taskForm]);
+  }, [currentUserRole, editingTaskId, loadTasks, scopeRootNodeIds, selectedVersionId, taskForm, showSavedPopup]);
 
   const handleAssignRole = useCallback(async () => {
     if (!selectedVersionId) return;
@@ -3945,14 +4259,14 @@ export default function KaryakariniModuleScreen() {
         versionId: selectedVersionId,
         isActive: true,
       });
-      Alert.alert('सफल', 'एडमिन भूमिका सफलतापूर्वक आवंटित हुई। एडमिन टैब देखने के लिए उपयोगकर्ता पुनः लॉगिन करे।');
+      showSavedPopup('एडमिन भूमिका सफलतापूर्वक आवंटित हुई। एडमिन टैब देखने के लिए उपयोगकर्ता पुनः लॉगिन करे।');
       await loadScopes(selectedVersionId);
     } catch (err: any) {
       Alert.alert('त्रुटि', err?.response?.data?.message || 'एडमिन भूमिका आवंटित करने में विफल');
     } finally {
       setAssigningRole(false);
     }
-  }, [loadScopes, selectedRoleNodeId, selectedRoleUserId, selectedVersionId]);
+  }, [loadScopes, selectedRoleNodeId, selectedRoleUserId, selectedVersionId, showSavedPopup]);
 
   const handleOpenAttachmentUrl = useCallback(async (url?: string | null) => {
     const safeUrl = String(url || '').trim();
@@ -4020,7 +4334,7 @@ export default function KaryakariniModuleScreen() {
     }
   }, [logout]);
 
-  const isTaskAssignMode = !editingTaskId && ['admin', 'superadmin', 'templeadmin'].includes(currentUserRole);
+  const isTaskAssignMode = false;
 
   if (loading) {
     return (
@@ -4085,19 +4399,47 @@ export default function KaryakariniModuleScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.tabSwitchBtn, activeTab === 'meetings' && styles.tabSwitchBtnActive]}
-              onPress={() => setActiveTab('meetings')}
+              onPress={() => {
+                setActiveTab('meetings');
+                if (selectedVersionId) {
+                  void loadMeetings(selectedVersionId, 1);
+                }
+              }}
             >
               <Text style={[styles.tabSwitchText, activeTab === 'meetings' && styles.tabSwitchTextActive]}>बैठकें</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.tabSwitchBtn, activeTab === 'tasks' && styles.tabSwitchBtnActive]}
-              onPress={() => setActiveTab('tasks')}
+              onPress={() => {
+                setActiveTab('tasks');
+                if (selectedVersionId) {
+                  void loadTasks(
+                    selectedVersionId,
+                    1,
+                    taskBrowseNodeId,
+                    taskFilterCategory,
+                    taskFilterSubcategory,
+                    taskFilterNodeLevel
+                  );
+                }
+              }}
             >
               <Text style={[styles.tabSwitchText, activeTab === 'tasks' && styles.tabSwitchTextActive]}>कार्य</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.tabSwitchBtn, activeTab === 'activities' && styles.tabSwitchBtnActive]}
-              onPress={() => setActiveTab('activities')}
+              onPress={() => {
+                setActiveTab('activities');
+                if (selectedVersionId) {
+                  void loadCategoryActivities(
+                    selectedVersionId,
+                    1,
+                    activityBrowseNodeId,
+                    activityFilterCategory,
+                    activityFilterSubcategory
+                  );
+                }
+              }}
             >
               <Text style={[styles.tabSwitchText, activeTab === 'activities' && styles.tabSwitchTextActive]}>कार्यक्रम</Text>
             </TouchableOpacity>
@@ -4162,8 +4504,13 @@ export default function KaryakariniModuleScreen() {
                 </View>
               </>
             ) : null}
-            <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableWrap}>
-              <View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator
+              style={styles.tableWrap}
+              contentContainerStyle={styles.tableScrollContent}
+            >
+              <View style={styles.tableInnerView}>
                 <View style={styles.tableHeader}>
                   <Text style={[styles.tableHeaderCell, styles.colDate]}>दिनांक</Text>
                   <Text style={[styles.tableHeaderCell, styles.colTitle]}>शीर्षक</Text>
@@ -4176,14 +4523,14 @@ export default function KaryakariniModuleScreen() {
                   <View style={styles.tableEmpty}>
                     <Text style={styles.helper}>बैठकें लोड हो रही हैं...</Text>
                   </View>
-                ) : meetingRows.length === 0 ? (
+                ) : filteredMeetingRows.length === 0 ? (
                   <View style={styles.tableEmpty}>
                     <Text style={styles.helper}>कोई बैठक नहीं मिली</Text>
                   </View>
                 ) : (
-                  meetingRows.map((row, index) => (
+                  filteredMeetingRows.map((row, index) => (
                     <View key={`meeting-${row.id}`} style={[styles.tableRow, index % 2 === 1 && styles.tableRowEven]}>
-                      <Text style={[styles.tableCell, styles.colDate]}>{displayValue(row.meeting_date)}</Text>
+                      <Text style={[styles.tableCell, styles.colDate]}>{formatDateOnly(row.meeting_date)}</Text>
                       <Text style={[styles.tableCell, styles.colTitle]} numberOfLines={2}>{row.title}</Text>
                       <Text style={[styles.tableCell, styles.colNode]} numberOfLines={2}>{displayValue(row.hierarchy_path || row.node_name)}</Text>
                       <View style={[styles.tableCell, styles.colCount, { alignItems: 'center' }]}>
@@ -4215,6 +4562,22 @@ export default function KaryakariniModuleScreen() {
             <Text style={styles.tableMeta}>
               पृष्ठ {meetingPagination.page} / {Math.max(1, meetingPagination.totalPages || 1)} • कुल {meetingPagination.total}
             </Text>
+            <View style={[styles.optionRow, { justifyContent: 'flex-end', marginTop: 10 }]}>
+              <TouchableOpacity
+                style={[styles.rowActionBtn, meetingsLoading || meetingPagination.page <= 1 ? styles.saveBtnDisabled : null]}
+                disabled={meetingsLoading || meetingPagination.page <= 1}
+                onPress={() => selectedVersionId && void loadMeetings(selectedVersionId, Math.max(1, (meetingPagination.page || 1) - 1))}
+              >
+                <Text style={styles.rowActionText}>पिछला</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.rowActionBtn, meetingsLoading || meetingPagination.page >= Math.max(1, meetingPagination.totalPages || 1) ? styles.saveBtnDisabled : null]}
+                disabled={meetingsLoading || meetingPagination.page >= Math.max(1, meetingPagination.totalPages || 1)}
+                onPress={() => selectedVersionId && void loadMeetings(selectedVersionId, (meetingPagination.page || 1) + 1)}
+              >
+                <Text style={styles.rowActionText}>अगला</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         ) : null}
 
@@ -4357,8 +4720,13 @@ export default function KaryakariniModuleScreen() {
                 </View>
               </>
             ) : null}
-            <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableWrap}>
-              <View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator
+              style={styles.tableWrap}
+              contentContainerStyle={styles.tableScrollContent}
+            >
+              <View style={styles.tableInnerView}>
                 <View style={styles.tableHeader}>
                   <Text style={[styles.tableHeaderCell, styles.colDate]}>दिनांक</Text>
                   <Text style={[styles.tableHeaderCell, styles.colTitle]}>शीर्षक</Text>
@@ -4381,7 +4749,7 @@ export default function KaryakariniModuleScreen() {
                 ) : (
                   filteredTaskRows.map((row, index) => (
                     <View key={`task-${row.id}`} style={[styles.tableRow, index % 2 === 1 && styles.tableRowEven]}>
-                      <Text style={[styles.tableCell, styles.colDate]}>{displayValue(row.task_date)}</Text>
+                      <Text style={[styles.tableCell, styles.colDate]}>{formatDateOnly(row.task_date)}</Text>
                       <View style={[styles.tableCell, styles.colTitle]}>
                         <Text style={styles.tableCellTextCompact} numberOfLines={2}>{row.title}</Text>
                         {summarizeTaskHierarchy(row) ? (
@@ -4612,8 +4980,13 @@ export default function KaryakariniModuleScreen() {
                     <View key={`pad-group-${group.key}-${padGroup.pad}`} style={{ marginTop: 8, gap: 8 }}>
                       <Text style={[styles.sectionLabel, { color: theme.colors.primary }]}>{padGroup.pad}</Text>
                       <View style={styles.memberTableContainer}>
-                        <ScrollView horizontal showsHorizontalScrollIndicator style={styles.memberTableDataWrap}>
-                          <View>
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator
+                          style={styles.memberTableDataWrap}
+                          contentContainerStyle={styles.tableScrollContent}
+                        >
+                          <View style={styles.tableInnerView}>
                             <View style={styles.memberTableHeaderRow}>
                               <Text style={[styles.memberTableHeaderCell, styles.memberColPhoto]}>फोटो</Text>
                               <Text style={[styles.memberTableHeaderCell, styles.memberColName]}>नाम</Text>
@@ -4691,7 +5064,7 @@ export default function KaryakariniModuleScreen() {
                                   <Text style={[styles.memberTableCell, styles.memberColMobile]} numberOfLines={2}>{displayValue(member.mobile_number)}</Text>
                                   <Text style={[styles.memberTableCell, styles.memberColGotra]} numberOfLines={2}>{displayValue(member.gotra)}</Text>
                                   <Text style={[styles.memberTableCell, styles.memberColVillage]} numberOfLines={2}>{displayValue(member.village)}</Text>
-                                  <Text style={[styles.memberTableCell, styles.memberColPeriod]} numberOfLines={2}>{displayValue(memberPeriod(member))}</Text>
+                                  <Text style={[styles.memberTableCell, styles.memberColPeriod]} numberOfLines={2}>{displayValue(formatDateOnly(memberPeriod(member)))}</Text>
                                   <Text style={[styles.memberTableCell, styles.memberColPath]} numberOfLines={2}>{displayValue(member.hierarchy_path)}</Text>
                                 </View>
                               );
@@ -4855,8 +5228,13 @@ export default function KaryakariniModuleScreen() {
               ) : null}
             </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableWrap}>
-              <View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator
+              style={styles.tableWrap}
+              contentContainerStyle={styles.tableScrollContent}
+            >
+              <View style={styles.tableInnerView}>
                 <View style={styles.tableHeader}>
                   <Text style={[styles.tableHeaderCell, styles.colDate]}>दिनांक</Text>
                   <Text style={[styles.tableHeaderCell, styles.colTitle]}>शीर्षक</Text>
@@ -4877,7 +5255,7 @@ export default function KaryakariniModuleScreen() {
                 ) : (
                   activityRows.map((row, index) => (
                     <View key={`activity-${row.id}`} style={[styles.tableRow, index % 2 === 1 && styles.tableRowEven]}>
-                      <Text style={[styles.tableCell, styles.colDate]}>{displayValue(String(row.created_at || '').slice(0, 10))}</Text>
+                      <Text style={[styles.tableCell, styles.colDate]}>{formatDateOnly(row.created_at || row.from_date)}</Text>
                       <View style={[styles.tableCell, styles.colTitle]}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 2 }}>
                           <Text style={[styles.tableCellTextCompact, { flexShrink: 0 }]}>शीर्षक:</Text>
@@ -5343,6 +5721,20 @@ export default function KaryakariniModuleScreen() {
         }
       >
         <View style={styles.formBody}>
+          {(() => {
+            const errs: string[] = [];
+            const cleanM = editMemberForm.mobileNumber.replace(/\D/g, '');
+            if (!cleanM) errs.push('मोबाइल नंबर आवश्यक है (10 अंक)');
+            else if (cleanM.length !== 10) errs.push(`10 अंकों का मान्य मोबाइल नंबर आवश्यक है (वर्तमान: ${cleanM.length} अंक)`);
+            if (!editMemberForm.name.trim()) errs.push('नाम आवश्यक है');
+            else if (editMemberForm.name.trim().length < 2) errs.push('नाम कम से कम 2 अक्षरों का होना चाहिए');
+            const passT = editMemberForm.password.trim();
+            if (passT && passT.length < 4) errs.push(`पासवर्ड कम से कम 4 अक्षरों का होना चाहिए (वर्तमान: ${passT.length} अक्षर)`);
+            if (!editMemberForm.pad.trim()) errs.push('दायित्व (पद) का चयन आवश्यक है');
+            if (!editMemberForm.category.trim() || !editMemberForm.subcategory.trim()) errs.push('आयाम और टोली का चयन आवश्यक है');
+            return <FormNoticeBanner errors={errs} />;
+          })()}
+
           <View style={styles.twoColRow}>
             <View style={styles.twoColField}>
               <Text style={styles.fieldLabel}>मोबाइल नंबर *</Text>
@@ -5353,6 +5745,12 @@ export default function KaryakariniModuleScreen() {
                 keyboardType="phone-pad"
                 placeholder="मोबाइल नंबर दर्ज करें"
               />
+              {(() => {
+                const digits = editMemberForm.mobileNumber.replace(/\D/g, '');
+                if (!digits) return <ValidationBadge type="warning" message="10 अंकों का मोबाइल नंबर दर्ज करें *" />;
+                if (digits.length !== 10) return <ValidationBadge type="error" message={`10 अंकों का मोबाइल नंबर आवश्यक है (वर्तमान: ${digits.length} अंक)`} />;
+                return <ValidationBadge type="success" message="✓ 10 अंकों का मान्य मोबाइल नंबर" />;
+              })()}
             </View>
             <View style={styles.twoColField}>
               <Text style={styles.fieldLabel}>नाम *</Text>
@@ -5362,20 +5760,45 @@ export default function KaryakariniModuleScreen() {
                 onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, name: value }))}
                 placeholder="नाम दर्ज करें"
               />
+              {(() => {
+                const len = editMemberForm.name.trim().length;
+                if (!len) return <ValidationBadge type="warning" message="नाम आवश्यक है (न्यूनतम 2 अक्षर) *" />;
+                if (len < 2) return <ValidationBadge type="error" message={`नाम बहुत छोटा है (वर्तमान: ${len} अक्षर)`} />;
+                return <ValidationBadge type="success" message="✓ मान्य नाम" />;
+              })()}
             </View>
           </View>
 
           <View style={styles.twoColRow}>
             <View style={styles.twoColField}>
               <Text style={styles.fieldLabel}>पासवर्ड (वैकल्पिक)</Text>
-              <TextInput
-                style={styles.input}
-                value={editMemberForm.password}
-                onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, password: value }))}
-                placeholder="पासवर्ड दर्ज करें"
-                autoCapitalize="none"
-                secureTextEntry
-              />
+              <View style={styles.passwordInputWrap}>
+                <TextInput
+                  style={styles.passwordInputField}
+                  value={editMemberForm.password}
+                  onChangeText={(value) => setEditMemberForm((prev) => ({ ...prev, password: value }))}
+                  placeholder="पासवर्ड दर्ज करें"
+                  autoCapitalize="none"
+                  secureTextEntry={!showEditPassword}
+                />
+                <TouchableOpacity
+                  style={styles.passwordEyeBtn}
+                  onPress={() => setShowEditPassword((prev) => !prev)}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <MaterialIcons
+                    name={showEditPassword ? 'visibility' : 'visibility-off'}
+                    size={20}
+                    color="#64748b"
+                  />
+                </TouchableOpacity>
+              </View>
+              {(() => {
+                const len = editMemberForm.password.trim().length;
+                if (!len) return <ValidationBadge type="info" message="पासवर्ड न बदलने के लिए खाली छोड़ें" />;
+                if (len < 4) return <ValidationBadge type="error" message={`पासवर्ड कम से कम 4 अक्षरों का होना चाहिए (वर्तमान: ${len} अक्षर)`} />;
+                return <ValidationBadge type="success" message={`✓ मान्य नया पासवर्ड (${len} अक्षर)`} />;
+              })()}
             </View>
             <View style={styles.twoColField}>
               <Text style={styles.fieldLabel}>पिता/पति का नाम</Text>
@@ -5418,7 +5841,7 @@ export default function KaryakariniModuleScreen() {
 
           <View style={styles.twoColRow}>
             <View style={styles.twoColField}>
-              <Text style={styles.fieldLabel}>दायित्व</Text>
+              <Text style={styles.fieldLabel}>दायित्व *</Text>
               <TouchableOpacity
                 style={styles.input}
                 onPress={() => {
@@ -5433,6 +5856,11 @@ export default function KaryakariniModuleScreen() {
                   {editMemberForm.pad || (loadingPads ? 'लोड हो रहा है...' : 'दायित्व चुनें')}
                 </Text>
               </TouchableOpacity>
+              {!editMemberForm.pad.trim() ? (
+                <ValidationBadge type="warning" message="दायित्व का चयन आवश्यक है *" />
+              ) : (
+                <ValidationBadge type="success" message={`✓ दायित्व: ${editMemberForm.pad}`} />
+              )}
             </View>
             <View style={styles.twoColField}>
               <Text style={styles.fieldLabel}>आयाम / टोली *</Text>
@@ -5441,6 +5869,11 @@ export default function KaryakariniModuleScreen() {
                   {editSelectedSubcategories.length ? `${editSelectedSubcategories.length} चयनित` : 'आयाम / टोली चुनें'}
                 </Text>
               </TouchableOpacity>
+              {!editSelectedSubcategories.length ? (
+                <ValidationBadge type="warning" message="आयाम और टोली का चयन आवश्यक है *" />
+              ) : (
+                <ValidationBadge type="success" message={`✓ ${editSelectedSubcategories.length} टोलियाँ चयनित`} />
+              )}
             </View>
           </View>
           <TouchableOpacity onPress={() => setEditMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
@@ -5563,6 +5996,20 @@ export default function KaryakariniModuleScreen() {
       >
         {memberModalTab === 'create' ? (
           <View style={styles.formBody}>
+            {(() => {
+              const errs: string[] = [];
+              const cleanM = memberForm.mobileNumber.replace(/\D/g, '');
+              if (!cleanM) errs.push('मोबाइल नंबर आवश्यक है (10 अंक)');
+              else if (cleanM.length !== 10) errs.push(`10 अंकों का मान्य मोबाइल नंबर आवश्यक है (वर्तमान: ${cleanM.length} अंक)`);
+              if (!memberForm.name.trim()) errs.push('नाम आवश्यक है');
+              else if (memberForm.name.trim().length < 2) errs.push('नाम कम से कम 2 अक्षरों का होना चाहिए');
+              const passT = memberForm.password.trim();
+              if (passT && passT.length < 4) errs.push(`पासवर्ड कम से कम 4 अक्षरों का होना चाहिए (वर्तमान: ${passT.length} अक्षर)`);
+              if (!memberForm.pad.trim()) errs.push('दायित्व (पद) का चयन आवश्यक है');
+              if (!memberForm.category.trim() || !memberForm.subcategory.trim()) errs.push('आयाम और टोली का चयन आवश्यक है');
+              return <FormNoticeBanner errors={errs} />;
+            })()}
+
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
                 <Text style={styles.fieldLabel}>मोबाइल नंबर *</Text>
@@ -5573,6 +6020,12 @@ export default function KaryakariniModuleScreen() {
                   keyboardType="phone-pad"
                   placeholder="मोबाइल नंबर दर्ज करें"
                 />
+                {(() => {
+                  const digits = memberForm.mobileNumber.replace(/\D/g, '');
+                  if (!digits) return <ValidationBadge type="warning" message="10 अंकों का मोबाइल नंबर आवश्यक है *" />;
+                  if (digits.length !== 10) return <ValidationBadge type="error" message={`10 अंकों का मोबाइल नंबर होना चाहिए (वर्तमान: ${digits.length} अंक)`} />;
+                  return <ValidationBadge type="success" message="✓ 10 अंकों का मान्य मोबाइल नंबर" />;
+                })()}
               </View>
               <View style={styles.twoColField}>
                 <Text style={styles.fieldLabel}>नाम *</Text>
@@ -5582,20 +6035,45 @@ export default function KaryakariniModuleScreen() {
                   onChangeText={(value) => setMemberForm((prev) => ({ ...prev, name: value }))}
                   placeholder="नाम दर्ज करें"
                 />
+                {(() => {
+                  const len = memberForm.name.trim().length;
+                  if (!len) return <ValidationBadge type="warning" message="नाम आवश्यक है (न्यूनतम 2 अक्षर) *" />;
+                  if (len < 2) return <ValidationBadge type="error" message={`नाम बहुत छोटा है (वर्तमान: ${len} अक्षर)`} />;
+                  return <ValidationBadge type="success" message="✓ मान्य नाम" />;
+                })()}
               </View>
             </View>
 
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
                 <Text style={styles.fieldLabel}>पासवर्ड (वैकल्पिक)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={memberForm.password}
-                  onChangeText={(value) => setMemberForm((prev) => ({ ...prev, password: value }))}
-                  placeholder="पासवर्ड दर्ज करें"
-                  autoCapitalize="none"
-                  secureTextEntry
-                />
+                <View style={styles.passwordInputWrap}>
+                  <TextInput
+                    style={styles.passwordInputField}
+                    value={memberForm.password}
+                    onChangeText={(value) => setMemberForm((prev) => ({ ...prev, password: value }))}
+                    placeholder="पासवर्ड दर्ज करें"
+                    autoCapitalize="none"
+                    secureTextEntry={!showCreatePassword}
+                  />
+                  <TouchableOpacity
+                    style={styles.passwordEyeBtn}
+                    onPress={() => setShowCreatePassword((prev) => !prev)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <MaterialIcons
+                      name={showCreatePassword ? 'visibility' : 'visibility-off'}
+                      size={20}
+                      color="#64748b"
+                    />
+                  </TouchableOpacity>
+                </View>
+                {(() => {
+                  const len = memberForm.password.trim().length;
+                  if (!len) return <ValidationBadge type="info" message="वैकल्पिक (खाली रखने पर डिफ़ॉल्ट 'welcome' रहेगा)" />;
+                  if (len < 4) return <ValidationBadge type="error" message={`पासवर्ड कम से कम 4 अक्षरों का होना चाहिए (वर्तमान: ${len} अक्षर)`} />;
+                  return <ValidationBadge type="success" message={`✓ मान्य पासवर्ड (${len} अक्षर)`} />;
+                })()}
               </View>
               <View style={styles.twoColField}>
                 <Text style={styles.fieldLabel}>पिता/पति का नाम</Text>
@@ -5638,7 +6116,7 @@ export default function KaryakariniModuleScreen() {
 
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>दायित्व</Text>
+                <Text style={styles.fieldLabel}>दायित्व *</Text>
                 <TouchableOpacity
                   style={styles.input}
                   onPress={() => {
@@ -5653,6 +6131,11 @@ export default function KaryakariniModuleScreen() {
                     {memberForm.pad || (loadingPads ? 'लोड हो रहा है...' : 'दायित्व चुनें')}
                   </Text>
                 </TouchableOpacity>
+                {!memberForm.pad.trim() ? (
+                  <ValidationBadge type="warning" message="दायित्व का चयन आवश्यक है *" />
+                ) : (
+                  <ValidationBadge type="success" message={`✓ दायित्व: ${memberForm.pad}`} />
+                )}
               </View>
               <View style={styles.twoColField}>
                 <Text style={styles.fieldLabel}>आयाम / टोली *</Text>
@@ -5661,6 +6144,11 @@ export default function KaryakariniModuleScreen() {
                     {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} चयनित` : 'आयाम / टोली चुनें'}
                   </Text>
                 </TouchableOpacity>
+                {!addFormSelectedSubcategories.length ? (
+                  <ValidationBadge type="warning" message="आयाम और टोली का चयन आवश्यक है *" />
+                ) : (
+                  <ValidationBadge type="success" message={`✓ ${addFormSelectedSubcategories.length} टोलियाँ चयनित`} />
+                )}
               </View>
             </View>
             <TouchableOpacity onPress={() => setMemberForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
@@ -5741,6 +6229,14 @@ export default function KaryakariniModuleScreen() {
           </View>
         ) : (
           <View style={styles.formBody}>
+            {(() => {
+              const errs: string[] = [];
+              if (!selectedUser?.id) errs.push('मौजूदा उपयोगकर्ता खोजें और चुनें');
+              if (!assignForm.pad.trim()) errs.push('दायित्व (पद) का चयन आवश्यक है');
+              if (!assignForm.category.trim() || !assignForm.subcategory.trim()) errs.push('आयाम और टोली का चयन आवश्यक है');
+              return <FormNoticeBanner errors={errs} />;
+            })()}
+
             <Text style={styles.fieldLabel}>मोबाइल/ईमेल से मौजूदा उपयोगकर्ता खोजें</Text>
             <View style={styles.searchRow}>
               <TextInput
@@ -5758,6 +6254,9 @@ export default function KaryakariniModuleScreen() {
                 <Text style={styles.searchBtnText}>{searchingUsers ? '...' : 'खोजें'}</Text>
               </TouchableOpacity>
             </View>
+            {!selectedUser ? (
+              <ValidationBadge type="warning" message="कार्यकर्ता/उपयोगकर्ता का चयन आवश्यक है *" />
+            ) : null}
 
             {selectedUser ? (
               <View style={styles.selectedUserBox}>
@@ -5842,7 +6341,7 @@ export default function KaryakariniModuleScreen() {
 
             <View style={styles.twoColRow}>
               <View style={styles.twoColField}>
-                <Text style={styles.fieldLabel}>दायित्व</Text>
+                <Text style={styles.fieldLabel}>दायित्व *</Text>
                 <TouchableOpacity
                   style={styles.input}
                   onPress={() => {
@@ -5857,6 +6356,11 @@ export default function KaryakariniModuleScreen() {
                     {assignForm.pad || (loadingPads ? 'लोड हो रहा है...' : 'दायित्व चुनें')}
                   </Text>
                 </TouchableOpacity>
+                {!assignForm.pad.trim() ? (
+                  <ValidationBadge type="warning" message="दायित्व का चयन आवश्यक है *" />
+                ) : (
+                  <ValidationBadge type="success" message={`✓ दायित्व: ${assignForm.pad}`} />
+                )}
               </View>
               <View style={styles.twoColField}>
                 <Text style={styles.fieldLabel}>आयाम / टोली *</Text>
@@ -5865,6 +6369,11 @@ export default function KaryakariniModuleScreen() {
                     {addFormSelectedSubcategories.length ? `${addFormSelectedSubcategories.length} चयनित` : 'आयाम / टोली चुनें'}
                   </Text>
                 </TouchableOpacity>
+                {!addFormSelectedSubcategories.length ? (
+                  <ValidationBadge type="warning" message="आयाम और टोली का चयन आवश्यक है *" />
+                ) : (
+                  <ValidationBadge type="success" message={`✓ ${addFormSelectedSubcategories.length} टोलियाँ चयनित`} />
+                )}
               </View>
             </View>
             <TouchableOpacity onPress={() => setAssignForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
@@ -5909,12 +6418,30 @@ export default function KaryakariniModuleScreen() {
           </>
         }
       >
+        {(() => {
+          const errs: string[] = [];
+          if (!nodeForm.name.trim()) errs.push('नोड नाम आवश्यक है');
+          else if (nodeForm.name.trim().length < 2) errs.push('नोड नाम कम से कम 2 अक्षरों का होना चाहिए');
+          if (!allowedNodeLevelOptions.length) errs.push('चुने गए संबंध के लिए कोई मान्य कार्यक्षेत्र उपलब्ध नहीं है');
+          return <FormNoticeBanner errors={errs} />;
+        })()}
+
         <TextInput
           style={styles.input}
           value={nodeForm.name}
           onChangeText={(value) => setNodeForm((prev) => ({ ...prev, name: value }))}
           placeholder="नोड नाम *"
         />
+        {(() => {
+          const len = nodeForm.name.trim().length;
+          if (!len) return <ValidationBadge type="warning" message="नोड नाम आवश्यक है (न्यूनतम 2 अक्षर) *" />;
+          if (len < 2) return <ValidationBadge type="error" message={`नोड नाम बहुत छोटा है (वर्तमान: ${len} अक्षर, न्यूनतम 2)`} />;
+          return <ValidationBadge type="success" message={`✓ मान्य नोड नाम (${len} अक्षर)`} />;
+        })()}
+
+        {!allowedNodeLevelOptions.length ? (
+          <ValidationBadge type="error" message="चुने गए संबंध के लिए कोई मान्य कार्यक्षेत्र उपलब्ध नहीं है" />
+        ) : null}
 
         <Text style={styles.sectionLabel}>इसे इस रूप में बनाएं</Text>
         <View style={styles.optionRow}>
@@ -5975,6 +6502,12 @@ export default function KaryakariniModuleScreen() {
           </>
         }
       >
+        {!jansankhiyaForm.nodeId ? (
+          <ValidationBadge type="warning" message="आवंटित ग्राम/मोहल्ला का चयन करें *" />
+        ) : (
+          <ValidationBadge type="success" message="✓ ग्राम/मोहल्ला चयनित है" />
+        )}
+
         <Text style={styles.fieldLabel}>आवंटित ग्राम/मोहल्ला *</Text>
         <View style={styles.optionRow}>
           {jansankhiyaEditableVillages.map((entry) => {
@@ -6070,6 +6603,15 @@ export default function KaryakariniModuleScreen() {
           </>
         }
       >
+        {(() => {
+          const errs: string[] = [];
+          if (!Number(meetingForm.nodeId)) errs.push('कार्यक्षेत्र (स्थान नोड) का चयन आवश्यक है');
+          if (!meetingForm.title.trim()) errs.push('बैठक शीर्षक आवश्यक है');
+          else if (meetingForm.title.trim().length < 3) errs.push(`बैठक शीर्षक कम से कम 3 अक्षरों का होना चाहिए (वर्तमान: ${meetingForm.title.trim().length} अक्षर)`);
+          if (!meetingForm.meetingDate.trim()) errs.push('बैठक की तिथि आवश्यक है (वर्ष-माह-दिन)');
+          return <FormNoticeBanner errors={errs} />;
+        })()}
+
         <Text style={styles.fieldLabel}>बैठक का शीर्षक / नाम *</Text>
         <TextInput
           style={styles.input}
@@ -6077,6 +6619,12 @@ export default function KaryakariniModuleScreen() {
           onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, title: value }))}
           placeholder="बैठक का शीर्षक दर्ज करें *"
         />
+        {(() => {
+          const len = meetingForm.title.trim().length;
+          if (!len) return <ValidationBadge type="warning" message="बैठक का शीर्षक आवश्यक है (न्यूनतम 3 अक्षर) *" />;
+          if (len < 3) return <ValidationBadge type="error" message={`शीर्षक बहुत छोटा है (वर्तमान: ${len} अक्षर, न्यूनतम 3)`} />;
+          return <ValidationBadge type="success" message={`✓ मान्य शीर्षक (${len} अक्षर)`} />;
+        })()}
 
         <Text style={styles.fieldLabel}>विवरण (एजेंडा)</Text>
         <TextInput
@@ -6094,6 +6642,12 @@ export default function KaryakariniModuleScreen() {
           onChangeText={(value) => setMeetingForm((prev) => ({ ...prev, meetingDate: value }))}
           placeholder="उदाहरण: 2026-05-20 *"
         />
+        {(() => {
+          const d = meetingForm.meetingDate.trim();
+          if (!d) return <ValidationBadge type="warning" message="बैठक की तिथि आवश्यक है (उदा. 2026-05-20) *" />;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return <ValidationBadge type="warning" message="दिनांक प्रारूप: वर्ष-माह-दिन (उदा. 2026-05-20)" />;
+          return <ValidationBadge type="success" message="✓ मान्य तिथि प्रारूप" />;
+        })()}
 
         <Text style={styles.fieldLabel}>कार्यक्षेत्र (स्थान कार्यक्षेत्र चुनें) *</Text>
         <SingleCascaderPicker
@@ -6104,6 +6658,11 @@ export default function KaryakariniModuleScreen() {
           selectedValue={meetingForm.nodeId}
           allNodes={assignableNodes}
         />
+        {!Number(meetingForm.nodeId) ? (
+          <ValidationBadge type="warning" message="कार्यक्षेत्र (स्थान नोड) का चयन आवश्यक है *" />
+        ) : (
+          <ValidationBadge type="success" message="✓ कार्यक्षेत्र नोड चयनित है" />
+        )}
 
         <View style={styles.sectionHeader}>
           <Text style={styles.fieldLabel}>आमंत्रित कार्यकर्ता ({meetingInviteSelectedItems.length})</Text>
@@ -6433,8 +6992,17 @@ export default function KaryakariniModuleScreen() {
         }
       >
         <View style={styles.formBody}>
+          {(() => {
+            const errs: string[] = [];
+            const safeNodeId = Number(activityForm.nodeId || 0);
+            if (safeNodeId <= 0) errs.push('नोड हाइरार्की में स्थान चुनें');
+            if (!activitySelectedSubcategories.length) errs.push('कार्यक्रम टोली का चयन आवश्यक है');
+            if (!activityForm.title.trim()) errs.push('कार्यक्रम शीर्षक का चयन या नाम दर्ज करें');
+            return <FormNoticeBanner errors={errs} />;
+          })()}
+
           <Text style={styles.sectionLabel}>नोड हाइरार्की (स्थान कार्यक्षेत्र चुनें) *</Text>
-          <View style={{ marginBottom: 16 }}>
+          <View style={{ marginBottom: 8 }}>
             <TreeView
               levels={activityLevels}
               breadcrumb={activitySelectedPathLabel}
@@ -6442,6 +7010,11 @@ export default function KaryakariniModuleScreen() {
               showCards={false}
             />
           </View>
+          {!Number(activityForm.nodeId) ? (
+            <ValidationBadge type="warning" message="नोड हाइरार्की में स्थान चुनें *" />
+          ) : (
+            <ValidationBadge type="success" message="✓ स्थान नोड चयनित" />
+          )}
 
           <Text style={styles.fieldLabel}>कार्यक्रम आयाम *</Text>
           <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('activity')}>
@@ -6451,6 +7024,11 @@ export default function KaryakariniModuleScreen() {
                 : 'कार्यक्रम टोलियाँ चुनें *'}
             </Text>
           </TouchableOpacity>
+          {!activitySelectedSubcategories.length ? (
+            <ValidationBadge type="warning" message="कार्यक्रम टोलियाँ चुनें *" />
+          ) : (
+            <ValidationBadge type="success" message={`✓ ${activitySelectedSubcategories.length} टोलियाँ चयनित`} />
+          )}
           <TouchableOpacity onPress={() => setActivityForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
             <Text style={styles.clearLink}>आयाम साफ करें</Text>
           </TouchableOpacity>
@@ -6492,6 +7070,11 @@ export default function KaryakariniModuleScreen() {
               placeholder="कार्यक्रम शीर्षक लिखें *"
             />
           ) : null}
+          {!activityForm.title.trim() ? (
+            <ValidationBadge type="warning" message="कार्यक्रम शीर्षक चुनें या लिखें *" />
+          ) : (
+            <ValidationBadge type="success" message={`✓ कार्यक्रम: ${activityForm.title}`} />
+          )}
 
           <Text style={styles.fieldLabel}>विवरण</Text>
           <TextInput
@@ -6583,7 +7166,7 @@ export default function KaryakariniModuleScreen() {
       <StandardModal
         visible={showTaskModal}
         onClose={() => setShowTaskModal(false)}
-        title={editingTaskId ? 'कार्य संपादित करें' : isTaskAssignMode ? 'कार्य असाइन करें' : 'कार्य बनाएं'}
+        title={editingTaskId ? 'कार्य संपादित करें' : 'कार्य बनाएं'}
         subtitle={taskSelectedPathLabel}
         footer={
           <>
@@ -6595,73 +7178,88 @@ export default function KaryakariniModuleScreen() {
               disabled={creatingTask}
               onPress={() => void handleSubmitTask()}
             >
-              <Text style={styles.btnText}>{creatingTask ? 'सहेजा जा रहा है...' : editingTaskId ? 'कार्य अपडेट करें' : isTaskAssignMode ? 'कार्य असाइन करें' : 'कार्य बनाएं'}</Text>
+              <Text style={styles.btnText}>{creatingTask ? 'सहेजा जा रहा है...' : editingTaskId ? 'कार्य अपडेट करें' : 'कार्य बनाएं'}</Text>
             </TouchableOpacity>
           </>
         }
       >
         <View style={styles.formBody}>
-          {!isTaskAssignMode ? (
-            <>
-              <View style={styles.twoColRow}>
-                <View style={styles.twoColField}>
-                  <Text style={styles.fieldLabel}>कार्य शीर्षक *</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={taskForm.title}
-                    onChangeText={(value) => setTaskForm((prev) => ({ ...prev, title: value }))}
-                    placeholder="कार्य शीर्षक दर्ज करें"
-                  />
-                </View>
-                <View style={styles.twoColField}>
-                  <Text style={styles.fieldLabel}>स्थिति *</Text>
-                  <View style={[styles.optionRow, { marginTop: 4 }]}>
-                    {['open', 'in_progress', 'completed'].map((status) => (
-                      <TouchableOpacity
-                        key={status}
-                        style={[styles.optionChip, taskForm.status === status && styles.optionChipActive]}
-                        onPress={() => setTaskForm((prev) => ({ ...prev, status }))}
-                      >
-                        <Text style={[styles.optionChipText, taskForm.status === status && styles.optionChipTextActive]}>
-                          {status === 'open' ? 'खुला' : status === 'in_progress' ? 'प्रगति में' : 'पूर्ण'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-              </View>
+          {(() => {
+            const errs: string[] = [];
+            const safeNodeId = Number(taskForm.nodeId || 0);
+            if (!safeNodeId) errs.push('कार्य हेतु नोड का चयन आवश्यक है');
+            if (currentUserRole !== 'superadmin' && scopeRootNodeIds.has(safeNodeId)) {
+              errs.push('आप आवंटित कार्यक्षेत्र पर कार्य नहीं बना सकते। नीचे का चाइल्ड नोड चुनें।');
+            }
+            if (!taskForm.title.trim()) errs.push('कार्य शीर्षक आवश्यक है');
+            else if (taskForm.title.trim().length < 3) errs.push(`कार्य शीर्षक कम से कम 3 अक्षरों का होना चाहिए (वर्तमान: ${taskForm.title.trim().length} अक्षर)`);
+            if (!taskSelectedSubcategories.length) errs.push('कार्य टोली का चयन आवश्यक है');
+            return <FormNoticeBanner errors={errs} />;
+          })()}
 
-              <Text style={styles.fieldLabel}>विवरण</Text>
+          <View style={styles.twoColRow}>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>कार्य शीर्षक *</Text>
               <TextInput
-                style={[styles.input, styles.textArea]}
-                multiline
-                value={taskForm.description}
-                onChangeText={(value) => setTaskForm((prev) => ({ ...prev, description: value }))}
-                placeholder="कार्य विवरण दर्ज करें"
+                style={styles.input}
+                value={taskForm.title}
+                onChangeText={(value) => setTaskForm((prev) => ({ ...prev, title: value }))}
+                placeholder="कार्य शीर्षक दर्ज करें"
               />
-
-              <View style={styles.twoColRow}>
-                <View style={styles.twoColField}>
-                  <Text style={styles.fieldLabel}>कार्य दिनांक (वर्ष-माह-दिन)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={taskForm.taskDate}
-                    onChangeText={(value) => setTaskForm((prev) => ({ ...prev, taskDate: value }))}
-                    placeholder="वर्ष-माह-दिन"
-                  />
-                </View>
-                <View style={styles.twoColField}>
-                  <Text style={styles.fieldLabel}>अंतिम दिनांक (वैकल्पिक)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={taskForm.dueDate}
-                    onChangeText={(value) => setTaskForm((prev) => ({ ...prev, dueDate: value }))}
-                    placeholder="वर्ष-माह-दिन"
-                  />
-                </View>
+              {(() => {
+                const len = taskForm.title.trim().length;
+                if (!len) return <ValidationBadge type="warning" message="कार्य शीर्षक आवश्यक है (न्यूनतम 3 अक्षर) *" />;
+                if (len < 3) return <ValidationBadge type="error" message={`कार्य शीर्षक बहुत छोटा है (वर्तमान: ${len} अक्षर, न्यूनतम 3)`} />;
+                return <ValidationBadge type="success" message={`✓ मान्य कार्य शीर्षक (${len} अक्षर)`} />;
+              })()}
+            </View>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>स्थिति *</Text>
+              <View style={[styles.optionRow, { marginTop: 4 }]}>
+                {['open', 'in_progress', 'completed'].map((status) => (
+                  <TouchableOpacity
+                    key={status}
+                    style={[styles.optionChip, taskForm.status === status && styles.optionChipActive]}
+                    onPress={() => setTaskForm((prev) => ({ ...prev, status }))}
+                  >
+                    <Text style={[styles.optionChipText, taskForm.status === status && styles.optionChipTextActive]}>
+                      {status === 'open' ? 'खुला' : status === 'in_progress' ? 'प्रगति में' : 'पूर्ण'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
-            </>
-          ) : null}
+            </View>
+          </View>
+
+          <Text style={styles.fieldLabel}>विवरण</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            multiline
+            value={taskForm.description}
+            onChangeText={(value) => setTaskForm((prev) => ({ ...prev, description: value }))}
+            placeholder="कार्य विवरण दर्ज करें"
+          />
+
+          <View style={styles.twoColRow}>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>कार्य दिनांक (वर्ष-माह-दिन)</Text>
+              <TextInput
+                style={styles.input}
+                value={taskForm.taskDate}
+                onChangeText={(value) => setTaskForm((prev) => ({ ...prev, taskDate: value }))}
+                placeholder="वर्ष-माह-दिन"
+              />
+            </View>
+            <View style={styles.twoColField}>
+              <Text style={styles.fieldLabel}>अंतिम दिनांक (वैकल्पिक)</Text>
+              <TextInput
+                style={styles.input}
+                value={taskForm.dueDate}
+                onChangeText={(value) => setTaskForm((prev) => ({ ...prev, dueDate: value }))}
+                placeholder="वर्ष-माह-दिन"
+              />
+            </View>
+          </View>
 
           <Text style={styles.fieldLabel}>कार्य आयाम *</Text>
           <TouchableOpacity style={styles.input} onPress={() => void handleOpenPadbharTransfer('task')}>
@@ -6671,6 +7269,11 @@ export default function KaryakariniModuleScreen() {
                 : 'कार्य टोलियाँ चुनें *'}
             </Text>
           </TouchableOpacity>
+          {!taskSelectedSubcategories.length ? (
+            <ValidationBadge type="warning" message="कार्य टोली का चयन आवश्यक है *" />
+          ) : (
+            <ValidationBadge type="success" message={`✓ ${taskSelectedSubcategories.length} टोलियाँ चयनित`} />
+          )}
           <TouchableOpacity onPress={() => setTaskForm((prev) => ({ ...prev, category: '', subcategory: '' }))}>
             <Text style={styles.clearLink}>आयाम साफ करें</Text>
           </TouchableOpacity>
@@ -6682,7 +7285,7 @@ export default function KaryakariniModuleScreen() {
           ) : null}
 
           <Text style={styles.sectionLabel}>नोड हाइरार्की</Text>
-          <View style={{ marginBottom: 16 }}>
+          <View style={{ marginBottom: 8 }}>
             <TreeView
               levels={taskLevels}
               breadcrumb={taskSelectedPathLabel}
@@ -6690,12 +7293,19 @@ export default function KaryakariniModuleScreen() {
               showCards={false}
             />
           </View>
-          {selectedTaskNodeIsScopeRoot ? (
-            <Text style={styles.errorInline}>चेतावनी: आप आवंटित कार्यक्षेत्र पर कार्य नहीं बना सकते। नीचे का चाइल्ड नोड चुनें।</Text>
-          ) : null}
+          {!Number(taskForm.nodeId) ? (
+            <ValidationBadge type="warning" message="कार्य हेतु नोड का चयन आवश्यक है *" />
+          ) : selectedTaskNodeIsScopeRoot ? (
+            <ValidationBadge type="error" message="चेतावनी: आप आवंटित कार्यक्षेत्र पर कार्य नहीं बना सकते। नीचे का चाइल्ड नोड चुनें।" />
+          ) : (
+            <ValidationBadge type="success" message="✓ मान्य नोड चयनित" />
+          )}
 
           <Text style={styles.sectionLabel}>कार्यकर्ता आवंटित करें</Text>
           <Text style={styles.fieldLabel}>आवंटित उपयोगकर्ता ({taskForm.assignedUserIds.length})</Text>
+          {isTaskAssignMode && taskForm.assignedUserIds.length === 0 ? (
+            <ValidationBadge type="warning" message="आवंटन के लिए कम से कम एक कार्यकर्ता/उपयोगकर्ता चुनें *" />
+          ) : null}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4, marginBottom: 12 }}>
             {taskForm.assignedUserIds.map((userId) => {
               const userObj = taskMemberSearchResults.find((u) => u.id === userId);
@@ -6858,51 +7468,47 @@ export default function KaryakariniModuleScreen() {
               )}
             </ScrollView>
           </View>
-        </View>
 
-        {!isTaskAssignMode ? (
-          <>
-            <Text style={styles.sectionLabel}>संलग्नक</Text>
-            <View style={styles.searchRow}>
-              <TextInput
-                style={[styles.input, styles.searchInput]}
-                value={taskForm.attachmentInput}
-                onChangeText={(value) => setTaskForm((prev) => ({ ...prev, attachmentInput: value }))}
-                placeholder="दस्तावेज़ लिंक"
-                autoCapitalize="none"
-              />
-              <TouchableOpacity style={styles.searchBtn} onPress={addTaskAttachmentByUrl}>
-                <Text style={styles.searchBtnText}>लिंक जोड़ें</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={[styles.secondaryAction, taskUploadingAttachment && styles.saveBtnDisabled]}
-              disabled={taskUploadingAttachment}
-              onPress={() => void handleUploadTaskAttachment()}
-            >
-              <Text style={styles.secondaryActionText}>{taskUploadingAttachment ? 'अपलोड हो रहा है...' : 'फोटो/वीडियो अपलोड करें'}</Text>
+          <Text style={styles.sectionLabel}>संलग्नक</Text>
+          <View style={styles.searchRow}>
+            <TextInput
+              style={[styles.input, styles.searchInput]}
+              value={taskForm.attachmentInput}
+              onChangeText={(value) => setTaskForm((prev) => ({ ...prev, attachmentInput: value }))}
+              placeholder="दस्तावेज़ लिंक"
+              autoCapitalize="none"
+            />
+            <TouchableOpacity style={styles.searchBtn} onPress={addTaskAttachmentByUrl}>
+              <Text style={styles.searchBtnText}>लिंक जोड़ें</Text>
             </TouchableOpacity>
-            <View style={styles.attachmentList}>
-              {taskForm.attachments.map((item, idx) => (
-                <View key={`task-attachment-${idx}`} style={styles.attachmentItem}>
-                  <Text style={styles.attachmentText} numberOfLines={1}>
-                    {item.name || item.url}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() =>
-                      setTaskForm((prev) => ({
-                        ...prev,
-                        attachments: prev.attachments.filter((_, i) => i !== idx),
-                      }))
-                    }
-                  >
-                    <Text style={styles.removeText}>हटाएं</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          </>
-        ) : null}
+          </View>
+          <TouchableOpacity
+            style={[styles.secondaryAction, taskUploadingAttachment && styles.saveBtnDisabled]}
+            disabled={taskUploadingAttachment}
+            onPress={() => void handleUploadTaskAttachment()}
+          >
+            <Text style={styles.secondaryActionText}>{taskUploadingAttachment ? 'अपलोड हो रहा है...' : 'फोटो/वीडियो अपलोड करें'}</Text>
+          </TouchableOpacity>
+          <View style={styles.attachmentList}>
+            {taskForm.attachments.map((item, idx) => (
+              <View key={`task-attachment-${idx}`} style={styles.attachmentItem}>
+                <Text style={styles.attachmentText} numberOfLines={1}>
+                  {item.name || item.url}
+                </Text>
+                <TouchableOpacity
+                  onPress={() =>
+                    setTaskForm((prev) => ({
+                      ...prev,
+                      attachments: prev.attachments.filter((_, i) => i !== idx),
+                    }))
+                  }
+                >
+                  <Text style={styles.removeText}>हटाएं</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        </View>
       </StandardModal>
       <StandardModal
         visible={Boolean(selectedActivityDetails)}
@@ -7218,6 +7824,14 @@ export default function KaryakariniModuleScreen() {
           </View>
         </ScrollView>
       </StandardModal>
+
+      <SavedSuccessPopup
+        visible={savedPopup.visible}
+        title={savedPopup.title}
+        message={savedPopup.message}
+        subDetail={savedPopup.subDetail}
+        onClose={() => setSavedPopup((prev) => ({ ...prev, visible: false }))}
+      />
 
     </View>
   );
@@ -7651,12 +8265,22 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#fff',
+    width: '100%',
+  },
+  tableScrollContent: {
+    minWidth: '100%',
+    flexGrow: 1,
+  },
+  tableInnerView: {
+    minWidth: '100%',
+    flexGrow: 1,
   },
   tableHeader: {
     flexDirection: 'row',
     backgroundColor: '#F8FAFC',
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
+    minWidth: '100%',
   },
   tableHeaderCell: {
     paddingHorizontal: 12,
@@ -7674,6 +8298,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: '#F1F5F9',
+    minWidth: '100%',
   },
   tableRowEven: {
     backgroundColor: '#FBFCFD',
@@ -7691,6 +8316,7 @@ const styles = StyleSheet.create({
     paddingVertical: 32,
     alignItems: 'center',
     backgroundColor: '#fff',
+    minWidth: '100%',
   },
   tableMeta: {
     fontSize: 12,
@@ -7700,37 +8326,48 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   colDate: {
-    width: 100,
+    minWidth: 120,
+    flex: 1.2,
   },
   colTitle: {
-    width: 200,
+    minWidth: 200,
+    flex: 3,
   },
   colNode: {
-    width: 200,
+    minWidth: 200,
+    flex: 2.8,
   },
   colCount: {
-    width: 90,
+    minWidth: 85,
+    flex: 0.9,
     textAlign: 'center',
   },
   colAction: {
-    width: 90,
+    minWidth: 100,
+    flex: 1,
     borderRightWidth: 0,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   colBy: {
-    width: 180,
+    minWidth: 160,
+    flex: 2,
   },
   colAssignee: {
-    width: 160,
+    minWidth: 160,
+    flex: 2,
   },
   colStatus: {
-    width: 100,
+    minWidth: 110,
+    flex: 1.2,
   },
   colCat: {
-    width: 140,
+    minWidth: 140,
+    flex: 1.5,
   },
   colSubcat: {
-    width: 160,
+    minWidth: 150,
+    flex: 1.6,
   },
   memberTableContainer: {
     flexDirection: 'row',
@@ -7739,6 +8376,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: '#fff',
     overflow: 'hidden',
+    width: '100%',
   },
   memberTableDataWrap: {
     flex: 1,
@@ -7748,6 +8386,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
+    minWidth: '100%',
   },
   memberTableHeaderCell: {
     paddingHorizontal: 10,
@@ -7765,6 +8404,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F1F5F9',
     alignItems: 'center',
+    minWidth: '100%',
   },
   memberTableRowEven: {
     backgroundColor: '#FBFCFD',
@@ -7779,34 +8419,44 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   memberColPhoto: {
-    width: 76,
+    minWidth: 64,
+    flex: 0.6,
   },
   memberColName: {
-    width: 150,
+    minWidth: 150,
+    flex: 1.8,
   },
   memberColLevel: {
-    width: 120,
+    minWidth: 110,
+    flex: 1.2,
   },
   memberColCategory: {
-    width: 170,
+    minWidth: 140,
+    flex: 1.5,
   },
   memberColSubcategory: {
-    width: 190,
+    minWidth: 150,
+    flex: 1.6,
   },
   memberColMobile: {
-    width: 130,
+    minWidth: 120,
+    flex: 1.3,
   },
   memberColGotra: {
-    width: 120,
+    minWidth: 100,
+    flex: 1.1,
   },
   memberColVillage: {
-    width: 130,
+    minWidth: 110,
+    flex: 1.2,
   },
   memberColPeriod: {
-    width: 130,
+    minWidth: 130,
+    flex: 1.4,
   },
   memberColPath: {
-    width: 230,
+    minWidth: 200,
+    flex: 2.2,
   },
   memberPhotoCell: {
     alignItems: 'center',
@@ -8005,6 +8655,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: theme.colors.text.primary,
   },
+  passwordInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 10,
+    backgroundColor: theme.colors.background,
+    paddingHorizontal: 12,
+  },
+  passwordInputField: {
+    flex: 1,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: theme.colors.text.primary,
+  },
+  passwordEyeBtn: {
+    paddingLeft: 8,
+    paddingVertical: 4,
+  },
   textArea: {
     minHeight: 72,
     textAlignVertical: 'top',
@@ -8053,12 +8722,12 @@ const styles = StyleSheet.create({
   twoColRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 14,
   },
   twoColField: {
     flexGrow: 1,
-    flexBasis: '48%',
-    minWidth: 140,
+    flexBasis: '47%',
+    minWidth: 220,
     gap: 6,
   },
   inputCompact: {

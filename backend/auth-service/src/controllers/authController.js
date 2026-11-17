@@ -94,10 +94,10 @@ const register = async (req, res) => {
     }
 
     // Validate password length
-    if (password.length < 6) {
+    if (password.length < 4) {
       return res.status(400).json({
         success: false,
-        message: 'Password must be at least 6 characters',
+        message: 'Password must be at least 4 characters',
       });
     }
 

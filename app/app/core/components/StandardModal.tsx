@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Platform, useWindowDimensions } from 'react-native';
 import { theme } from '../../theme';
 
 interface StandardModalProps {
@@ -10,16 +10,22 @@ interface StandardModalProps {
   children: React.ReactNode;
   footer?: React.ReactNode;
   topContent?: React.ReactNode;
+  maxWidth?: number;
 }
 
-export function StandardModal({ visible, onClose, title, subtitle, children, footer, topContent }: StandardModalProps) {
+export function StandardModal({ visible, onClose, title, subtitle, children, footer, topContent, maxWidth }: StandardModalProps) {
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 768;
+  const isLargeDesktop = width >= 1024;
+  const computedMaxWidth = maxWidth || (isLargeDesktop ? 880 : isDesktop ? 760 : 640);
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <View style={styles.card}>
-          <View style={styles.header}>
+        <View style={[styles.card, { maxWidth: computedMaxWidth }]}>
+          <View style={[styles.header, isDesktop && styles.headerDesktop]}>
             <View style={styles.titleContainer}>
-              <Text style={styles.title}>{title}</Text>
+              <Text style={[styles.title, isDesktop && styles.titleDesktop]}>{title}</Text>
               {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
@@ -27,17 +33,17 @@ export function StandardModal({ visible, onClose, title, subtitle, children, foo
             </TouchableOpacity>
           </View>
 
-          {topContent && <View style={styles.topContent}>{topContent}</View>}
+          {topContent && <View style={[styles.topContent, isDesktop && styles.topContentDesktop]}>{topContent}</View>}
 
           <ScrollView
             style={styles.content}
-            contentContainerStyle={styles.contentContainer}
+            contentContainerStyle={[styles.contentContainer, isDesktop && styles.contentContainerDesktop]}
             showsVerticalScrollIndicator={false}
           >
             {children}
           </ScrollView>
 
-          {footer && <View style={styles.footer}>{footer}</View>}
+          {footer && <View style={[styles.footer, isDesktop && styles.footerDesktop]}>{footer}</View>}
         </View>
       </View>
     </Modal>
@@ -50,11 +56,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: 16,
   },
   card: {
     width: '100%',
-    maxHeight: '90%',
+    maxWidth: 680,
+    maxHeight: '92%',
     backgroundColor: '#FFF9F7',
     borderRadius: 24,
     overflow: 'hidden',
@@ -80,6 +87,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#ECDDD3',
   },
+  headerDesktop: {
+    paddingHorizontal: 28,
+    paddingTop: 24,
+    paddingBottom: 16,
+  },
   titleContainer: {
     flex: 1,
   },
@@ -88,6 +100,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: theme.colors.text.primary,
   },
+  titleDesktop: {
+    fontSize: 22,
+  },
   subtitle: {
     fontSize: 13,
     color: theme.colors.text.secondary,
@@ -95,9 +110,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   closeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: theme.colors.surfaceContainerHigh,
     alignItems: 'center',
     justifyContent: 'center',
@@ -114,16 +129,25 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#ECDDD3',
     backgroundColor: '#FFF9F7',
-    gap: 0,
+  },
+  topContentDesktop: {
+    paddingHorizontal: 28,
+    paddingVertical: 14,
   },
   content: {
     flexShrink: 1,
   },
   contentContainer: {
-    paddingHorizontal: 10,
-    paddingTop: 10,
-    paddingBottom: 8,
-    gap: 6,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  contentContainerDesktop: {
+    paddingHorizontal: 28,
+    paddingTop: 20,
+    paddingBottom: 18,
+    gap: 14,
   },
   footer: {
     padding: 16,
@@ -132,5 +156,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     flexDirection: 'row',
     gap: 12,
+  },
+  footerDesktop: {
+    paddingHorizontal: 28,
+    paddingVertical: 20,
+    gap: 16,
   },
 });

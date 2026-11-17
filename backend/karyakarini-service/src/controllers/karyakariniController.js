@@ -675,6 +675,7 @@ exports.updateMember = async (req, res) => {
       categories: resolvedCategories,
       subcategories: resolvedSubcategories,
       userRole: req.body?.userRole !== undefined ? normalizeMemberUserRole(req.body.userRole) : undefined,
+      password: req.body?.password ? String(req.body.password).trim() : null,
     });
 
     if (!updated) {
@@ -690,6 +691,7 @@ exports.updateMember = async (req, res) => {
       data: {
         versionId,
         member: updated,
+        passwordUpdated: Boolean(req.body?.password && String(req.body.password).trim().length > 0),
       },
     });
   } catch (error) {
